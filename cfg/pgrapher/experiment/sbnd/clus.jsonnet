@@ -197,13 +197,64 @@ local pctransforms(dv) = {
     uses: [dv, sce_field],
 };
 
-local bs_live_face(apa, face) = {
+// doc sbnd_xin/pr/149: strategy_name 'charge_stepped' selects the port of the
+// prototype's RETILE sampler, WCPPID::calc_sampling_points(...,
+// disable_mix_dead_cell=false) (prototype ImprovePR3DCluster.cxx:59,
+// CalcPoints.cxx:75-160): every wire of the min/max views when
+// N_max*N_min <= max_wire_product_threshold (C++ 2500), stepped wires otherwise,
+// non-stepped wires kept only when no nonzero charge is below charge_threshold_*
+// (C++ 4000).  Same emission as pdhd/clus.jsonnet bs_live_face (doc pdvd/102).
+// Passed only by pr()'s retile samplers (improve2); the clustering job's
+// PointTreeBuilding sampler below never passes it.  The charge_stepped variant
+// carries its OWN name: the LArSoft one-step chain
+// (wcls-img-clus-matching-xin.jsonnet) compiles per_apa() and pr() into one
+// config, and ConfigManager::add silently lets the last 'BlobSampler:live-*'
+// win, which would move stage-A imaging.  wire_product / charge_threshold null
+// => the C++ defaults.  Default 'stepped' => today's name and ['stepped'] =>
+// byte-identical compiled config.
+local bs_live_face(apa, face, strategy_name='stepped', wire_product=null, charge_threshold=null) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face: strategy_name must be 'stepped' or 'charge_stepped'",
     type: 'BlobSampler',
-    name: 'live-%s-%d' % [apa, face],
+    name: if strategy_name == 'charge_stepped' then 'live-cs-%s-%d' % [apa, face]
+          else 'live-%s-%d' % [apa, face],
     data: {
         drift_speed: drift_speed,
         time_offset: time_offset,
-        strategy: ['stepped'],
+        strategy: if strategy_name == 'charge_stepped' then
+            [{name: 'charge_stepped',
+              disable_mix_dead_cell: false,
+              [if wire_product != null then 'max_wire_product_threshold']: wire_product,
+              [if charge_threshold != null then 'charge_threshold_max']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_min']: charge_threshold,
+              [if charge_threshold != null then 'charge_threshold_other']: charge_threshold}]
+        else ['stepped'],
+        extra: ['.*wire_index', '.*charge_val', '.*charge_unc', 'wpid'],
+    },
+};
+// doc sbnd_xin/pr/149 round 2: the sampler of the PR job's RESAMPLE stage
+// (ClusteringResampleLive, pr() cm_by_name.resample_live), which replaces every
+// live blob's "3d" cloud before any other PR stage, as the prototype's PR
+// executables do (wire-cell-prod-nue.cxx:1289-1294: calc_sampling_points +
+// Create_point_cloud on every live cluster).  'charge_stepped' => the prototype's
+// rule with disable_mix_dead_cell TRUE (pid/inc/WCPPID/CalcPoints.h:9-10; the C++
+// default, emitted for the record) -- NOT the retile's false.  'stepped' => the
+// clustering job's own sampler settings, for the identity gate (a stepped resample
+// must reproduce the saved cloud).  Its own name 'live-rs-<cs|st>-*', distinct from
+// both bs_live_face names, because the LArSoft one-step chain resolves same-named
+// components last-wins (see bs_live_face).  Built only when pr() is given
+// resample_live_strategy.
+local bs_live_face_resample(apa, face, strategy_name) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face_resample: strategy_name must be 'stepped' or 'charge_stepped'",
+    type: 'BlobSampler',
+    name: 'live-rs-%s-%s-%d' % [if strategy_name == 'charge_stepped' then 'cs' else 'st', apa, face],
+    data: {
+        drift_speed: drift_speed,
+        time_offset: time_offset,
+        strategy: if strategy_name == 'charge_stepped' then
+            [{name: 'charge_stepped', disable_mix_dead_cell: true}]
+        else ['stepped'],
         extra: ['.*wire_index', '.*charge_val', '.*charge_unc', 'wpid'],
     },
 };
@@ -294,7 +345,7 @@ local bs_dead_face(apa, face) = {
 // 423 cm main that is really a 412 cm through-going cosmic touching a 343 cm
 // second track at 0.35 cm.  false omits the key => compiled config
 // byte-identical to before the knob existed (runner: -sep-recarve).
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='') = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='', dg_length_cut=0) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -365,7 +416,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
         // flavor (busy-cluster lazy walk of the skeleton shortest-path build).
         // Default false => the graph_name key is omitted and the compiled
         // config is byte-identical to the pre-knob config.
-        cm.deghost(graph_name=(if dg_fast then 'ctpc_fast' else null)),
+        // dg_length_cut (doc sbnd_xin/113; default 0 = the legacy value ClusteringDeghost always received, so the
+        // compiled config is byte-identical): clusters longer than this are never deletion candidates.
+        cm.deghost(length_cut=dg_length_cut, graph_name=(if dg_fast then 'ctpc_fast' else null)),
         cm.examine_x_boundary(),
         // po_fast: doc 78 round 3 (C++ default 0 = off; false => key omitted
         // => byte-identical compiled config).
@@ -874,14 +927,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
-    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false)::
+    per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
         clus_per_face(anode, face=0, dump=dump, evt_subdir=evt_subdir, per_face_bee=per_face_bee,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
                       sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
-                      nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast),
+                      nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
@@ -935,7 +988,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // per-bundle summary.  It is what lets an arm run with mabc-pr.zip
               // and the pctree suppressed and still produce a full nusel table.
               // C++ default false.  Key omitted when off => byte-identical config.
-              save_in_scope=false,
+              save_in_scope=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // flash_by_gid (doc 99): resolve T_cluster's flash columns through
               // Cluster::get_matched_flash() (the globally-unique
               // matched_flash_gid against the merge-safe "opflash" PC) instead of
@@ -958,6 +1011,85 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // zip at all" (an empty name used to raise IOError, so it was never
               // a legal value).  DEFAULT TRUE = today's behaviour, byte-identical.
               pr_bee=true,
+              // retile_sampler_strategy (doc sbnd_xin/pr/149): the strategy of the
+              // RETILE samplers only (improve2 -> steiner / steiner_refresh, i.e. the
+              // Steiner cloud every PR stage reads); the clustering job's 3d PC keeps
+              // 'stepped'.  'charge_stepped' => the prototype's retile rule
+              // (bs_live_face above; PDHD/PDVD production since docs pdvd/108 / 103).
+              // FLIPPED FOR SBND by doc sbnd_xin/118 on the owner's go 2026-09-20:
+              // null => 'charge_stepped' at the improve2 call site below (was
+              // 'stepped').  It is one third of the PDHD/PDVD trajectory package and
+              // was NOT separable on its own -- doc 116 sec 16.3 measures the vertex
+              // gain as super-additive (cs alone +0.8 pt at 1 cm, p 0.52; with the
+              // Steiner pricing +2.5; with the fit keys +4.3, p 0.00027), so the three
+              // are flipped together and no subset of them was ever graded.  It is
+              // also the whole CPU cost: it triples both Steiner graph builds
+              // (doc 116 sec 14, x2.9 and x3.4).  Escape hatch:
+              // -S retile_sampler_strategy='stepped' restores the pre-flip sampler.
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000 and are read only under
+              // 'charge_stepped'.  null => keys omitted (untuned on SBND; doc pr/150
+              // level R2 tried 6000 and it did not pass).
+              retile_sampler_strategy=null,
+              retile_sampler_wire_product=null,
+              retile_sampler_charge_threshold=null,
+              // resample_live_strategy (doc sbnd_xin/pr/149 round 2): the strategy of
+              // the 'resample_live' stage (ClusteringResampleLive), which re-samples
+              // every live blob's "3d" cloud -- the cloud switch_scope, the taggers,
+              // basic_pid and TrackFitting's main association read -- before any other
+              // stage, as the prototype's PR executables do.  The stage runs only when
+              // named in pipeline_names (wct-pr-perevt.jsonnet prepends it when its TLA
+              // is set); null here => cm_by_name.resample_live is never evaluated =>
+              // compiled config byte-identical.  'charge_stepped' / 'stepped' (the
+              // latter = the identity gate).
+              resample_live_strategy=null,
+              // steiner_terminal_min_separation (doc sbnd_xin/pr/149 amendment 1; cm,
+              // default 0): Grapher::Config::terminal_min_separation (doc pdvd/37
+              // round 2) on BOTH CreateSteinerGraph instances (steiner,
+              // steiner_refresh), as PDHD/PDVD pr.jsonnet pass it.  A kept terminal
+              // suppresses every lower-charge terminal strictly within this 3-D
+              // distance.  0 => key omitted => byte-identical.
+              steiner_terminal_min_separation=0,
+              // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs, threaded into
+              // BOTH CreateSteinerGraph instances (steiner, steiner_refresh) exactly
+              // as pdhd/pr.jsonnet and protodunevd/pr.jsonnet pass them.
+              //   steiner_blank_plane_mode   (doc pdvd/114) blank-plane admission
+              //     policy for the terminal candidates: 'wcp' (C++ default,
+              //     SteinerGrapher.h:136) | 'prefer3' | 'nearby' | 'prefer3+nearby';
+              //     steiner_blank_plane_radius is the nearby radius (a LENGTH, C++ 0).
+              //   steiner_base_weight_blank_alpha / steiner_base_weight_scope
+              //     (doc pdvd/115) price the Steiner BASE graph by zero-charge planes
+              //     before the Voronoi step: alpha per blank plane (C++ 0,
+              //     SteinerGrapher.h:150), scope 'tree' (C++ default, :156) |
+              //     'tree+path'.
+              // PDHD/PDVD production = 'prefer3' / 0.5 / 'tree+path' (doc pdvd/116).
+              // FLIPPED FOR SBND by doc sbnd_xin/118 on the owner's go 2026-09-20:
+              // null => 'prefer3' / 0.5 / 'tree+path' at BOTH call sites below (was
+              // the C++ defaults 'wcp' / 0 / 'tree' = keys omitted).  Graded on the
+              // round-3 SBND MC with truth (docs 115/116/117): no primary metric
+              // moves, and the true vertex gets closer -- nuecc within 1 cm
+              // 599 -> 669 of 1626 (+4.31 pt, p 0.00027), within 2 cm +2.8 pt
+              // (p 0.023), median nearest-candidate distance 0.960 -> 0.840 cm
+              // (p 0.00026), and the SELECTED signal's own vertex 0.850 -> 0.780 cm
+              // on nuecc>4 (p 0.00026) and 0.830 -> 0.760 cm on cv numu (p 0.017);
+              // trajectory closure R2D_W 2.13 -> 1.44 % nuecc, 0.81 -> 0.54 % cv.
+              // This flip OVERRIDES the recommendations of doc 116 sec 15.4 and the
+              // frozen HOLD of doc 117 sec 11: those rules had the vertex metric
+              // pre-registered as SECONDARY.  The owner overrode that explicitly --
+              // see doc 118 sec 1, and the pdhd_track_fitting.json _comment_d108
+              // precedent, before assuming the frozen table was satisfied.
+              // Flipped as a package with retile_sampler_strategy='charge_stepped'
+              // and the two fit keys in sbnd_track_fitting.json; the gain is
+              // super-additive, so no partial adoption is graded.  MUST stay paired
+              // with dl_vtx_dual_chain=true (doc 117 sec 10.2: the trajectory with
+              // fit_exclusion=false is the worst cell of that grid).
+              // Escape hatch: -S steiner_blank_plane_mode='wcp'
+              // -S steiner_base_weight_blank_alpha=0 -S steiner_base_weight_scope='tree'
+              // emits the C++ defaults.  The radius stays null = C++ 0, key omitted.
+              steiner_blank_plane_mode=null,
+              steiner_blank_plane_radius=null,
+              steiner_base_weight_blank_alpha=null,
+              steiner_base_weight_scope=null,
               // trackfitting_config_file: the SBND TrackFitting parameter JSON.
               // DEFAULT = the canonical in-tree file, resolved through
               // WIRECELL_PATH by TaggerCheckSTM/TaggerCheckNeutrino
@@ -1026,51 +1158,51 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc pr/34 §10 particle-flow (Bee mc tree) port-fidelity knobs.
               // C++ defaults false; keys omitted when off => byte-identical
               // pre-knob config.  Display-only stage: mc.json is the artifact.
-              pf_track_main_cluster_only=false,
-              pf_track_bridged_clusters=false,  // doc pr/40 round 9 B2; C++ default false. Key omitted when off => byte-identical.
-              pf_shower_vertex_barrier=false,
-              pf_shower_parent_precedence=false,
-              pf_pi0_node_per_id=false,
-              pf_pdg_name_prototype_fallback=false,
+              pf_track_main_cluster_only=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              pf_track_bridged_clusters=true,  // doc pr/40 round 9 B2; C++ default false. SBND PRODUCTION -- doc sbnd_xin/120 sec 4.
+              pf_shower_vertex_barrier=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              pf_shower_parent_precedence=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              pf_pi0_node_per_id=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              pf_pdg_name_prototype_fallback=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/38 Round 4: graph-faithful parentage for barrier-orphaned
               // PF track segments.  C++ default false; key omitted when off =>
               // byte-identical pre-knob config.  Display-only (mc.json).
-              pf_orphan_track_parentage=false,
+              pf_orphan_track_parentage=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/65 round 3: audit-only orphan net -- log unclaimed
               // segments, fabricate no PF-root node.  C++ default false; key
               // omitted when off => byte-identical.  Display-only (mc.json).
-              pf_orphan_audit_only=false,
+              pf_orphan_audit_only=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/84 round 2 (F1/F2): vertex-touching pseudo-parent
               // suppression + remote-gap anchor.  C++ defaults false/3cm/8cm;
               // keys omitted when off/null => byte-identical pre-knob config.
               // Display-only (mc.json).  Scalar params are in cm.
-              pf_direct_when_touching=false,
+              pf_direct_when_touching=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               pf_touch_max=null,
               // doc 77 round 1 (2026-08-24): pf_touch_cross_main/_max
               // removed -- zero movers, F1.0 probe failure (pr/84:607/622).
-              pf_pseudo_gap_from_main=false,
+              pf_pseudo_gap_from_main=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/84 round 3 (G1): guarantee unique jsTree node ids in
               // mc.json.  C++ default false; key omitted when off =>
               // byte-identical pre-fix config.
-              pf_unique_node_ids=false,
+              pf_unique_node_ids=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // pf_drop_stray_satellites (doc pr/92): skip showers the kine
               // side's kine_drop_stray_satellites gate dropped from Enu, so
               // the PF tree and Enu describe the same particle set.  Inert
               // unless that kine knob is also on.  C++ default false; key
               // omitted when off => byte-identical pre-pr/92 config.
-              pf_drop_stray_satellites=false,
+              pf_drop_stray_satellites=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // pf_orphan_confident_track (doc pr/93 round 4): emit a root PF
               // node for an unclaimed main-cluster segment with a confident
               // non-electron template PID, length > pf_orphan_track_min_cm
               // (null => C++ 50cm), and straight-long (SBND 18255-315167's
               // freed 150.7cm proton).  C++ default false; keys omitted when
               // off => byte-identical.
-              pf_orphan_confident_track=false,
+              pf_orphan_confident_track=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               pf_orphan_track_min_cm=null,
               // pf_orphan_guard_freed (doc pr/123 round 2): root PF node
               // for a pass4-track-guard-freed segment (kPass4GuardFreed);
               // C++ default false. Key omitted when off => byte-identical.
-              pf_orphan_guard_freed=false,
+              pf_orphan_guard_freed=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // pf_orphan_near_cross_cluster (doc pr/128): PF node for an
               // unclaimed CROSS-CLUSTER track segment whose fit points come
               // within pf_orphan_near_gap_cm (null => C++ 5cm) of the emitted
@@ -1078,7 +1210,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // (null => C++ 30cm).  Every orphan pool is same_cluster gated,
               // so this class reaches no output (SBND 18255-137238's muon).
               // C++ default false; keys omitted when off => byte-identical.
-              pf_orphan_near_cross_cluster=false,
+              pf_orphan_near_cross_cluster=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               pf_orphan_near_gap_cm=null,
               pf_orphan_near_min_len_cm=null,
               // Continuation terms (doc pr/128 §3.1): the touch must be
@@ -1094,14 +1226,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // prune re-seeds stamped conn-4 (SBND 18255-105074, 377 MeV).
               // Far conn-4 (490 of 514 showers, >=50cm) stays skipped.
               // C++ default false; keys omitted when off => byte-identical.
-              pf_conn4_near_candidate=false,
+              pf_conn4_near_candidate=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               pf_conn4_near_gap_cm=null,
               // pf_track_owns_loose_vertex (doc pr/93 round 4): a vertex the
               // track BFS reached via a real segment is not claimable by a
               // root shower whose only tie to it is the loose fill_sets view
               // (SBND 18264-69314's 67 MeV daughter stolen from its muon).
               // C++ default false; key omitted when off => byte-identical.
-              pf_track_owns_loose_vertex=false,
+              pf_track_owns_loose_vertex=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // restore_demoted_mains (doc pr/20 Part I P2; C++ default false,
               // key omitted when null => byte-identical pre-knob config): tag a
               // split-off part that was ITSELF a matched bundle main before the
@@ -1110,19 +1242,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // warns and flags nothing.  Only the OUTER (flash) un-merge takes
               // it -- unmerge_assoc undoes the isolated grouping, a different
               // question.
-              restore_demoted_mains=null,
+              restore_demoted_mains=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // require_provenance (doc pr/23 sec 4.2; C++ default false, key
               // omitted when null => byte-identical pre-knob config): with
               // restore_demoted_mains on, ABORT on a pctree with no wasmain
               // array (a legacy pre-pr/20 tree) instead of warn-and-skip.
               // Legacy-tree runs opt out with false explicitly.
-              require_provenance=null,
+              require_provenance=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false,
               // key omitted when false => byte-identical pre-knob config): let
               // TaggerCheckTGM / STM / FC evaluate a cluster carrying
               // flag_demoted_main.  Inert unless restore_demoted_mains above put
               // the flag there.
-              evaluate_demoted_mains=false,
+              evaluate_demoted_mains=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // tgm_exempt_demoted_main (doc pr/25, SBND evt 320029; C++ default
               // false, key omitted when false => byte-identical pre-knob
               // config): with tgm_main_pair on, TaggerCheckTGM's
@@ -1133,7 +1265,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // usual CASE-A/CASE-B boundary geometry actually runs on them.
               // DESIGNED, NOT the SBND default -- changes cosmic verdicts,
               // owner sign-off pending (escalation rule 1).
-              tgm_exempt_demoted_main=false,
+              tgm_exempt_demoted_main=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20
               // Part I P4; C++ defaults false / 0, keys omitted when off =>
               // byte-identical): act on the verdict P3 produced -- drop a TGM/
@@ -1203,6 +1335,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_kink_asym_enable: doc pdvd/56 T1b -- a third, additive
+              // OR-clause in find_first_kink's charge gate, admitting an
+              // ASYMMETRIC kink (Bragg into a cold Michel) that the existing
+              // "both arms hot" clauses never accept.  C++ defaults
+              // false/1.2/0.5; keys omitted when off => byte-identical.
+              // DEFAULT FALSE: out of scope this round (doc pdvd/56 T1b is
+              // scored on PDVD's hand-scan record only; no SBND validation
+              // has run).
+              stm_kink_asym_enable=false,
+              stm_kink_asym_entry_mip=1.2,
+              stm_kink_asym_far_mip=0.5,
               // stm_descent_guard: doc-94 round-1 veto on a stop reached
               // travelling UPWARD or near-horizontally.  A cosmic stopping
               // muon arrived from the sky, so it entered a boundary face
@@ -1455,8 +1598,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               //     (4 ticks per slice) and the whole branch is dead.
               // NOT flipped on by default: that is an unconditional production
               // output change (CLAUDE.md sec.5 rule 1) and is the owner's call.
-              steiner_terminal_wire_tol=0,
-              steiner_terminal_adjacent_slice=false,
+              steiner_terminal_wire_tol=1,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              steiner_terminal_adjacent_slice=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1466,7 +1609,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               //     took the true branch of calc_charge_wcp.
               // Unlike the two above this can move a weight in EITHER
               // direction, so it can add or drop tree edges.
-              steiner_edge_charge_forward_dead_mix=false,
+              steiner_edge_charge_forward_dead_mix=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // Isochronous first-segment endpoint finding (doc pr/24 round 2,
               // SBND evt 271851): principal-axis endpoints for filled 2-D
               // sheet clusters instead of the wire-footprint boundary metric.
@@ -1489,7 +1632,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // re-join divergence -- INTERNAL units (unlike cathode_kink_xcut
               // one block up, which is cm); nulls => C++ defaults, i.e. the
               // re-join pass disabled (prototype-faithful).
-              protect_graph_name=null,
+              protect_graph_name="relaxed_strict_img_2d_rescue_long_wtrack",  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // C++ default true (doc pr/23 ordering): convicted in-window
               // mains (TGM/STM/lm) do not open their bundle.  null => key
               // omitted => C++ default.
@@ -1497,7 +1640,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc pr/94 round 3: let a convicted main open its bundle so the
               // bundle's unconvicted members are graph-examined.  C++ default
               // false; key omitted when null.
-              protect_open_convicted_bundles=null,
+              protect_open_convicted_bundles=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               protect_cathode_x=0,
               protect_cathode_rejoin_xcut=5 * wc.cm,
               protect_cathode_rejoin_dyz=4 * wc.cm,
@@ -1509,10 +1652,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // real track travel, not misalignment).  nulls => C++ default
               // 0 = fallback disabled => byte-identical to the block above.
               // INTERNAL units except protect_cathode_rejoin_angle (degrees).
-              protect_cathode_rejoin_perp=null,
-              protect_cathode_rejoin_angle=null,
-              protect_cathode_rejoin_dir_radius=null,
-              protect_cathode_rejoin_dir_npts=null,
+              protect_cathode_rejoin_perp=30,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              protect_cathode_rejoin_angle=20,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              protect_cathode_rejoin_dir_radius=150,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              protect_cathode_rejoin_dir_npts=20,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // cosmic_y_* (cm): cosmic_tagger()'s four "reaches the top of the
               // detector" tests, re-anchored from uBooNE's top face (y = +117 cm)
               // to SBND's (y = +200 cm, sbnd_y_top above).  The uBooNE literals
@@ -1571,21 +1714,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // sbnd_pr_fv_margins), mirroring stm_consistent_fv above.
               // false => keys omitted => the historical FiducialUtils
               // fallback, byte-identical pre-knob config.
-              neutrino_consistent_fv=false,
+              neutrino_consistent_fv=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // sbnd_xin/docs/74 G1/G2: give cosmic_tagger()'s containment
               // tests (its inside_fv lambda + the flag-1 vertex test) the
               // SAME sbnd_pr_fv + sbnd_pr_fv_margins as TGM/STM/FC, instead
               // of the FiducialUtils zero-margin sensitive union (which has
               // no wall inset and excludes the CPA slab |x| < 0.45 cm).
               // C++ default false; key omitted when off => byte-identical.
-              cosmic_consistent_fv=false,
+              cosmic_consistent_fv=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // sbnd_xin/docs/75: give the nue/single-photon taggers'
               // containment tests (angular_cut, shower_to_wall,
               // bad_reconstruction_2/_2_sp) the SAME sbnd_pr_fv +
               // sbnd_pr_fv_margins as cosmic_consistent_fv above -- same
               // zero-margin FiducialUtils inconsistency, same fix pattern.
               // C++ default false; key omitted when off => byte-identical.
-              nue_sp_consistent_fv=false,
+              nue_sp_consistent_fv=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // F3 (= P2): single-photon SCE correction gate.  Vacuous on
               // SBND today (clus_geom_helper is ''); kept OFF by owner
               // decision 2026-08-04 so a future SBND SCE helper enables it
@@ -1599,19 +1742,19 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // F7 (= P4): neutrino_type verdict bitmask + its T_tagger
               // branch (threaded to BOTH tagger_check_neutrino and
               // tagger_output).  C++ default false.
-              neutrino_type_bitmask=false,
+              neutrino_type_bitmask=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/94 Phase 1: per-bundle identity + per-activity
               // cosmic-flag T_tagger branches (tagger_output only, plumbing
               // only -- nothing populates them yet).  C++ default false.
-              nu_per_bundle=false,
-              nu_per_bundle_min_length=null,  // doc pr/94 Phase 5b; cm; null => C++ default 0 (no floor)
+              nu_per_bundle=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+              nu_per_bundle_min_length=15,  // doc pr/94 Phase 5b; cm; null => C++ default 0. SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc 80: MCS muon momentum.  ONE argument derives both the
               // TaggerCheckNeutrino computation key (mcs_enable, via the knob
               // bag) and the UbooneTaggerOutputVisitor T_kine branch key
               // (mcs_output), so the two gates can never disagree.  C++
               // default false on both; keys omitted when off =>
               // byte-identical pre-MCS config AND schema.
-              mcs_enable=false,
+              mcs_enable=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // doc pr/94 round 3: the selected candidate gets the main-cluster
               // PR treatment for its own pass even when it is a demoted main.
               // C++ default false; key omitted when off.  NOT gated on
@@ -1878,7 +2021,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // the Bee shower_track layer + PrDisplayDump (18255-56463: 411 cm
               // muon painted red).  C++ default false; key suppressed when off
               // => byte-identical.
-              pseudo_shower_track_paint=false,
+              pseudo_shower_track_paint=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
               // muon_dqdx_curve [c0, c1, pivot_cm, power]: the muon
               // median-dQ/dx-vs-length envelope used by nine tagger cuts, as a
               // multiple of mip_dqdx_median.  DEFAULT = the SBND fit
@@ -1917,12 +2060,278 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // and ~0.9 GB less per PR job (sbnd_xin/docs/76 round 2).
               // C++ default false.  Key omitted when off => byte-identical
               // pre-knob config.
-              fast_xgb_forest=false,
+              fast_xgb_forest=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
        // doc 77 round 2: the pattern-recognition knob bag, built once by the
        // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
        // TaggerCheckNeutrino as-is.  An absent key is that knob's C++ default,
        // exactly as the per-knob `+ (if x then {x: ...})` clauses it replaces.
-       tcn_knobs={}):: {
+       // doc sbnd_xin/120 sec 4: the bag's DEFAULT is now the SBND production
+       // operating point, so a caller that names no knobs -- the LArSoft 1-step
+       // chain, sbnd/wcls-img-clus-matching-xin.jsonnet -- gets production by
+       // construction instead of from a hand-regenerated mirror that could omit a
+       // knob (sec 2: it omitted 25).  A caller that passes its own bag REPLACES
+       // this one wholesale (jsonnet argument semantics, not a merge), which is
+       // what keeps wct-pr-perevt.jsonnet's compiled config byte-identical: it
+       // builds the bag from its own TLAs and hands it over complete.
+       // Gate: doc 120 sec 5 -- prod_prjob.json unchanged against
+       // ref/prod-2026-09-21c AND two_chain_gate.py PASS.
+       tcn_knobs={
+           assoc_clear_on_merge: true,
+           assoc_full_recluster: true,
+           assoc_reassign_orphans: true,
+           break_seg_orient: true,
+           broken_muon_cluster_id_count: true,
+           cathode_kink_xcut: 5,
+           cathode_wide_kink_angle: 25,
+           conn3_stitch_max: 1,
+           cont_muon_dir3_30cm: true,
+           cosmic_companion_min_length: 15,
+           cosmic_y_small_piece: 133,
+           cosmic_y_top_loose: 163,
+           cosmic_y_top_main: 183,
+           cosmic_y_top_strict: 185,
+           daughter_count_proto_examine_showers: true,
+           daughter_count_proto_main_vertex: true,
+           daughter_shower_angle_reclass_straight_guard: true,
+           dir_track_median_local: true,
+           dl_vtx_dual_chain: true,
+           dual_chain_mode: "snap",
+           dual_chain_transfer: true,
+           dual_chain_transfer_max: 2,
+           es3_stub_guard: true,
+           esva_ignore_empty_2d: true,
+           examine_direction_dirsign_shower_in_guard: true,
+           excl_t0_frame: true,
+           fit_blob_coverage: 0,
+           fit_exclusion: true,
+           iso_endpoint: true,
+           iso_snap_min_dir_mag: 4,
+           kine_charge_dedup: true,
+           kine_charge_rebuild: true,
+           kine_charge_track_ctx: true,
+           kine_count_conn4_near: true,
+           kine_count_guard_freed: true,
+           kine_count_near_cross_cluster: true,
+           kine_count_orphan_tracks: true,
+           kine_dqdx_skip_zero_dx: true,
+           kine_drop_stray_satellites: true,
+           kine_guard_freed_impact: 20,
+           kine_guard_freed_miss_deg: 30,
+           kine_hadronic_dqdx: true,
+           kine_long_muon_mode: 2,
+           kine_mainvtx_used_guard: true,
+           kine_mass_rules: true,
+           kine_near_pointing_impact: 200,
+           kine_near_pointing_miss_deg: 30,
+           kine_proton_recom_factor: 0.51,
+           kine_recom_factor: 0.87,
+           kine_shower_fudge_factor: 0.86,
+           kine_shower_pdg_live: true,
+           kine_shower_recom_factor: 0.58,
+           kink_break_protect: true,
+           kink_walk_dqdx_stop: true,
+           long_muon_angle_relax_long: true,
+           long_muon_cathode_bridge: true,
+           long_muon_cathode_bridge_lever: 15,
+           long_muon_cathode_bridge_short_gap: 8,
+           long_muon_cathode_bridge_tail_min_len: 20,
+           long_muon_cathode_bridge_track_partner: true,
+           long_muon_cathode_bridge_track_types: true,
+           long_muon_members_geometry: true,
+           long_muon_range_empty_chain_fallback: true,
+           long_muon_stub_bridge: true,
+           long_muon_stub_bridge_len: 7.5,
+           main_vertex_candidate_flag: true,
+           main_vertex_graph_audit: true,
+           main_vertex_require_descriptor: true,
+           mcs_bridged_members: true,
+           mcs_cathode_x: 0,
+           mcs_cathode_xcut: 5,
+           mcs_muon_source: "long_muon_else_pf",
+           mcs_point_source: "muon_segments",
+           mcs_range_comparator_chain: true,
+           michel_stem_michel_check: true,
+           michel_stem_muon_rescue: true,
+           muon_dqdx_curve: [0.8826, 1.0587, 18, 0.4745],
+           muon_multi_proton_pion: true,
+           mvfit_robust: true,
+           mvga_ac_chord_max: 30,
+           mvga_ac_no_cascade: true,
+           mvga_approach_collapse: 15,
+           mvga_dup_frac: 0.8,
+           mvga_dup_starved_asym: 0.55,
+           mvga_dup_starved_mip: 0.8,
+           mvga_dup_starved_span: 0.5,
+           mvga_interposed: true,
+           mvga_interposed_angle: 130,
+           mvga_interposed_deg1: true,
+           mvga_interposed_fallback: true,
+           mvga_interposed_fallback_min_angle: 45,
+           mvga_interposed_len: 10,
+           mvga_op1_dup_frac: 0.7,
+           mvga_op1_post: true,
+           mvga_op1_radius: -1,
+           mvga_passthru: 4,
+           mvga_proj_angle: 25,
+           mvga_proj_dqdx_ratio: 0.55,
+           mvga_proj_dup_frac: 0.7,
+           mvga_reseat_angle: 0,
+           mvga_sat_dup_frac: 0.7,
+           mvga_satellite: 3,
+           mvga_splice_straighten: 5,
+           mvga_straighten_radius: 1,
+           mvga_stub: 2.5,
+           mvga_stub_pts: 3,
+           // doc sbnd_xin/109 rev 4, owner-directed 2026-09-18 (b93673ef).  PHYSICS:
+           // merges the two neutrino bundles one physical flash makes when their
+           // charge touches.  C++ default false (TaggerCheckNeutrino.h:813).  The
+           // mirror never carried it, so the LArSoft chain ran it OFF while the
+           // local chain ran it ON -- doc 120 sec 2.
+           nu_bundle_flash_group: true,
+           nu_fallback_demoted_mains: true,
+           nu_selected_as_main: true,
+           nu_selected_as_main_snapshot_all: true,
+           nu_skip_cosmic: true,
+           nu_skip_cosmic_bundle: true,
+           oov_prototype_parity: true,
+           other_seg_empty_2d_guard: true,
+           other_seg_keep_isolated: true,
+           other_seg_keep_isolated_len_admit: 30,
+           pi0_admit_muon_showers: true,
+           pi0_admit_type3: true,
+           pi0_attached_partner_min_mev: 29,
+           pi0_bp_vertex_miss_cm: 8,
+           pi0_id_shared_allocator: true,
+           pi0_nc_floor_mev: 5,
+           pi0_nc_frag_merge: true,
+           pi0_nc_pf_assoc_deg: 20,
+           pi0_nc_sig_angle_deg: 15,
+           pi0_prefer_main_vertex: true,
+           pi0_readmit_retyped: true,
+           pid_flag_reconcile: true,
+           reclass_never_computed_ke_floor: true,
+           reclass_preserve_4mom: true,
+           sccc_bridge_body: true,
+           sccc_kink_max: 18,
+           sccc_max_gap: 10,
+           sgp_max_sep: 3,
+           sgp_weak_qref: 6000,
+           sgp_weak_scale: 5,
+           shower_absorb_track_guard: true,
+           shower_absorb_unreachable_main: true,
+           shower_accept_pid_guard: true,
+           shower_bragg_protect_start_segment: true,
+           shower_cone_absorb_guard: true,
+           shower_conn3_unreachable: true,
+           shower_connect_from_vertices_straight_guard: true,
+           shower_connect_main_vertex_straight_guard: true,
+           shower_connect_start_seg_straight_guard: true,
+           shower_dedup_start_seg: true,
+           shower_detach_track_stem: true,
+           shower_em_collinear_deg: 10,
+           shower_em_collinear_dis_cm: 120,
+           shower_endpoint_exclude_start_vertex: true,
+           shower_endpoint_skip_orphan_vtx: true,
+           shower_ex1_dedup_rehome: true,
+           shower_flag_pdg_electron: true,
+           shower_ghost_member_drop: true,
+           shower_hadronic_growth_max: 0.7,
+           shower_hadronic_stem_ratio: 2.8,
+           shower_hadronic_tag: true,
+           shower_in_cascade_guard: true,
+           shower_less_id_tiebreak: true,
+           shower_long_muon_keep_type: true,
+           shower_merge_relax: true,
+           shower_merge_relax_continuity: true,
+           shower_nv_bridge_track: true,
+           shower_pass3_backfill_guard_len: 15,
+           shower_pass3_cone_guard_len: 15,
+           shower_pass4_best_owner: true,
+           shower_pass4_prefilter_v1_escape: true,
+           shower_pass4_prefilter_v1_max_v2: 90,
+           shower_pass4_prox_guard_len: 50,
+           shower_pass4_prune_detached: true,
+           shower_pass4_prune_gap2: 25,
+           shower_pass4_track_guard_len: 50,
+           shower_pdg_exact_muon_test: true,
+           shower_pdg_from_shower_type: true,
+           shower_pdg_from_start_segment: true,
+           shower_proton_daughter_pion: true,
+           shower_proton_daughter_pion_dissolve: true,
+           shower_reclass_case_b_dqdx_guard: true,
+           shower_reclass_dqdx_guard: true,
+           shower_samevtx_track_absorb: true,
+           shower_satellite_absorb: true,
+           shower_split: true,
+           shower_split_em_start: true,
+           shower_stem_backfill: true,
+           shower_topo_demote_len: 50,
+           shower_topo_dqdx_guard: true,
+           shower_topo_reexam_straight_guard: true,
+           shower_topo_reset: true,
+           shower_traj_michel_stem: true,
+           shower_traj_recheck_parity: true,
+           shower_traj_straight_guard: true,
+           shower_vote_track_pid_counts: true,
+           shower_walk_visited_parity: true,
+           single_muon_long_muon_claim: true,
+           single_muon_proton_chain_veto: true,
+           skip_cosmic_companions: true,
+           sp_dedx_use_recomb_model: true,
+           sp_mean_dedx_cut: 2.23,
+           sp_photon_flag: true,
+           steiner_gap_penalty: 2,
+           stem_backfill_back_dvtx: 45,
+           stem_backfill_back_guard: true,
+           stem_endpoint_wcpt_parity: true,
+           straight_cont_cross_cluster: true,
+           swap_orphan_dup_audit: true,
+           tagger_ordered_segment_sets: true,
+           teb_bragg_veto_turn: 30,
+           teb_turn_min_arm_frac: 0.4,
+           track_comp_empty_abstain: true,
+           track_pid_persist_4mom: true,
+           track_pid_persist_dqdx: true,
+           track_pid_persist_dqdx_electron_guard: true,
+           two_end_break: true,
+           v3_extension_guard: true,
+           vertex_dir_use_fit_point: true,
+           vertex_junction_snap: true,
+           vertex_kink_snap: true,
+           vertex_z_prior_scale: 100,
+           vjs_override_kink_snap: true,
+       },
+       // ---- sbnd_xin/docs/109: self-describing tracking-pr.root -------- //
+       // root_nu_record: record what the neutrino selection did.  ONE switch
+       // for the computing key (TaggerCheckNeutrino nu_provenance, which
+       // fills the fields and publishes the census) and both writers' booking
+       // keys (tagger_output and tracking_visitor nu_provenance), so the
+       // computation and the schema can never disagree.  Adds T_bundle,
+       // T_flash, Trun census branches and the T_tagger/T_kine provenance
+       // branches; appends the companions to act_* (act_role 2/3).
+       // flash_pair_dt_us: null => C++ default 0.05 us.
+       // root_cluster_flags: T_cluster tgm/stm/fc/lm read the flags SBND's
+       // taggers set, beam_flash is derived, matched_flash_gid/flash_tpc added.
+       // root_provenance: Trun wct_version + the BDT weight files, DL weights
+       // and TrackFitting file this job configured, merged with
+       // provenance_extra (the runner's operating-point hash, git revisions).
+       // All C++ default false/empty; keys omitted when off => byte-identical
+       // pre-knob config AND tracking-pr.root.
+       root_nu_record=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+       flash_pair_dt_us=null,
+       root_cluster_flags=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+       root_provenance=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+       // sbnd_xin/docs/109 rev 3: root_point_ids -- make T_rec_charge joinable
+       // to the candidate that owns its points.  cluster_id is taken from the
+       // candidate's own TaggerInfo (what T_tagger/T_kine carry) instead of a
+       // Flags::main_cluster scan that returns -1 on a demoted-main candidate
+       // and the pre-swap cluster on a vertex-moved row; adds nu_index and
+       // point_cluster_id; and books T_rec_charge / T_proj_data even when they
+       // are empty so the file's tree set stops varying with the event.
+       // C++ default false; key omitted when off => byte-identical pre-knob
+       // config AND tracking-pr.root.
+       root_point_ids=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+       provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
@@ -2010,16 +2419,39 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // applies to the downstream-z inset only.
         local sbnd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_y_margin * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -3 * wc.cm],
         // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
-        // PC (PointTreeBuilding), one per (APA, face 0).
+        // PC (PointTreeBuilding), one per (APA, face 0) -- unless
+        // retile_sampler_strategy selects 'charge_stepped' (doc sbnd_xin/pr/149),
+        // which moves ONLY these retile samplers.
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
-            samplers=[clus.sampler(bs_live_face(a.name, 0), apa=a.data.ident, face=0) for a in anodes]),
+            samplers=[clus.sampler(bs_live_face(a.name, 0,
+                                                strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc sbnd_xin/pr/149; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20)
+                                                wire_product=retile_sampler_wire_product,
+                                                charge_threshold=retile_sampler_charge_threshold),
+                                   apa=a.data.ident, face=0) for a in anodes]),
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
         // deterministically from cluster_t0.  fiducialutils MUST precede any
         // tagger (they silently no-op without it).
         local cm_by_name = {
+            // doc sbnd_xin/pr/149 round 2.  MUST be first when named: switch_scope
+            // rebuilds x_t0cor and the in-volume split from the "3d" points.  One
+            // sampler per (APA, face 0), as improve2 below.  Not in pipeline_names
+            // => absent from the compiled config.
+            resample_live: {
+                local samplers = [bs_live_face_resample(a.name, 0, resample_live_strategy) for a in anodes],
+                type: 'ClusteringResampleLive',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    anodes: [wc.tn(a) for a in anodes],
+                    detector_volumes: wc.tn(dv),
+                    samplers: [{name: wc.tn(samplers[i]), apa: anodes[i].data.ident, face: 0}
+                               for i in std.range(0, std.length(anodes) - 1)],
+                },
+                uses: anodes + [dv] + samplers,
+            },
             switch_scope: cm_old.switch_scope(),
             // Restore the prototype main+associated data product before anything
             // fits or walks a "main cluster".  The Q/L stage's flash-time merge
@@ -2104,7 +2536,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 beam_window_high=beam_window[1],
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
-                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix),
+                                edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
+                                // doc sbnd_xin/pr/150 study knobs; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20).
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope),
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
             // (split retained + fragments).  A replace=true second pass would
@@ -2126,6 +2564,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                 terminal_wire_tol=steiner_terminal_wire_tol,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                                terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
+                                // doc sbnd_xin/pr/150: the same seed knobs as the first pass,
+                                // and the same doc sbnd_xin/118 flip (owner 2026-09-20).
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,
                                 replace=false),
             fiducialutils: cm.fiducialutils(),
             tagger_check_stm: cm.tagger_check_stm(
@@ -2167,6 +2612,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 // omitted when off => byte-identical): doc-63 round-5 vetoes.
                 deficit_guard=stm_deficit_guard,
                 vertex_kink_guard=stm_vertex_kink_guard,
+                // kink_asym_enable (C++ default false; keys omitted when off
+                // => byte-identical): doc pdvd/56 T1b asymmetric kink clause.
+                kink_asym_enable=stm_kink_asym_enable,
+                kink_asym_entry_mip=(if stm_kink_asym_enable then stm_kink_asym_entry_mip else null),
+                kink_asym_far_mip=(if stm_kink_asym_enable then stm_kink_asym_far_mip else null),
                 // descent_guard (C++ default false; keys omitted when off =>
                 // byte-identical): doc-94 round-1 travel-direction veto.
                 descent_guard=stm_descent_guard,
@@ -2391,6 +2841,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
                   [if mcs_enable then 'mcs_enable']: true,  // doc 80; sub-knobs arrive via tcn_knobs
+                  [if root_nu_record then 'nu_provenance']: true,  // sbnd_xin/docs/109
+                  [if root_nu_record && flash_pair_dt_us != null then 'flash_pair_dt_us']: flash_pair_dt_us,
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
@@ -2403,12 +2855,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             // is docs/pr/2 gap G1).  Must run after tagger_check_neutrino, nue
             // after numu.  Only compiled in when named in pipeline_names.
             local bdt_weights_dir = 'uboone/weights',
+            // Named once so the scorers and the doc-109 provenance strings
+            // below read the same value (compiled strings unchanged).
+            local numu_xgboost_xml = bdt_weights_dir + '/numu_scalars_scores_0923.xml',
+            local nue_xgboost_xml = bdt_weights_dir + '/XGB_nue_seed2_0923.xml',
             numu_bdt_scorer: cm.numu_bdt_scorer(
                 numu1_weights_xml=     bdt_weights_dir + '/numu_tagger1.weights.xml',
                 numu2_weights_xml=     bdt_weights_dir + '/numu_tagger2.weights.xml',
                 numu3_weights_xml=     bdt_weights_dir + '/numu_tagger3.weights.xml',
                 cosmict10_weights_xml= bdt_weights_dir + '/cos_tagger_10.weights.xml',
-                numu_xgboost_xml=      bdt_weights_dir + '/numu_scalars_scores_0923.xml',
+                numu_xgboost_xml=      numu_xgboost_xml,
                 fast_xgb_forest=fast_xgb_forest),
             nue_bdt_scorer: cm.nue_bdt_scorer(
                 mipid_weights_xml=       bdt_weights_dir + '/mipid_BDT.weights.xml',
@@ -2441,7 +2897,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 tro_2_weights_xml=       bdt_weights_dir + '/tro_2_BDT.weights.xml',
                 tro_4_weights_xml=       bdt_weights_dir + '/tro_4_BDT.weights.xml',
                 tro_5_weights_xml=       bdt_weights_dir + '/tro_5_BDT.weights.xml',
-                nue_xgboost_xml=         bdt_weights_dir + '/XGB_nue_seed2_0923.xml',
+                nue_xgboost_xml=         nue_xgboost_xml,
                 fast_xgb_forest=fast_xgb_forest),
             // PR-stage Magnify-tracking ROOT dump (docs/pr/3): fork of the uBooNE
             // writer reading the unnamed TrackFitting slot + PRGraph filled by
@@ -2472,6 +2928,18 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     [if save_in_scope then 'save_in_scope']: true,
                     // doc 99.  Key omitted when off => byte-identical config.
                     [if flash_by_gid then 'flash_by_gid']: true,
+                    // sbnd_xin/docs/109.  Keys omitted when off => byte-identical config.
+                    [if root_nu_record then 'nu_provenance']: true,
+                    [if root_cluster_flags then 'fix_cluster_flags']: true,
+                    // sbnd_xin/docs/109 rev 3.  Key omitted when off => byte-identical config.
+                    [if root_point_ids then 'rec_charge_provenance']: true,
+                    [if root_provenance then 'provenance']: {
+                        bdt_weights_dir: bdt_weights_dir,
+                        numu_xgboost_xml: numu_xgboost_xml,
+                        nue_xgboost_xml: nue_xgboost_xml,
+                        dl_weights: dl_weights,
+                        trackfitting_config: trackfitting_config_file,
+                    } + provenance_extra,
                 },
             },
             // T_tagger/T_kine writer (UbooneTaggerOutputVisitor, reused as-is: it
@@ -2489,7 +2957,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             tagger_output: cm.tagger_output(output_filename=tracking_pr_root,
                                             neutrino_type_bitmask=neutrino_type_bitmask,
                                             nu_per_bundle=nu_per_bundle,
-                                            mcs_output=mcs_enable),
+                                            mcs_output=mcs_enable,
+                                            nu_provenance=root_nu_record),
             // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
             // event carrying the PR-graph segments as polylines, the associated
             // track/shower points, the Steiner skeleton with its terminal flag, the
@@ -2526,6 +2995,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     // layer knob.  Key omitted when off => byte-identical.
                     [if pseudo_shower_track_paint
                      then 'pseudo_shower_track_paint']: true,
+                    // sbnd_xin/docs/110 (owner: ON for SBND group mode).  C++
+                    // default false.  A group run (event_from_ident) stamps meta
+                    // run/subrun/event from the RSE the PR MABC publishes, not the
+                    // job's leader-event constants.  Key omitted when
+                    // event_from_ident is off => the per-event job is byte-identical.
+                    [if event_from_ident then 'rse_from_ensemble']: true,
                 },
             },
         },
@@ -2571,6 +3046,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 [if rse_from_ident then 'rse_from_ident']: true,
                 [if event_from_ident then 'event_from_ident']: true,
                 [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
+                // sbnd_xin/docs/110 (owner: ON for SBND group mode).  C++ default
+                // false.  Group run only: restart the shower-id counter at each event
+                // so the calib dump's shower ids match a one-event process.  Key
+                // omitted when event_from_ident is off => per-event job byte-identical.
+                [if event_from_ident then 'reset_shower_ids_per_event']: true,
                 // rse_from_metadata MUST be here: this is the PR-stage MABC, the node that
                 // stamps tracking-pr.root's Trun in the 1-step LArSoft chain.  With only
                 // rse_from_ident the ident carries the EVENT but run/subrun stay 0, so Trun

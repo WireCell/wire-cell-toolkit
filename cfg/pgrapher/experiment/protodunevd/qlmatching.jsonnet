@@ -51,8 +51,18 @@ local wc = import 'wirecell.jsonnet';
 // until the time base is calibrated) without editing this file.
 function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          light_model='library', require_containment=true, flash_minPE=25,
+         // QLMatching QtoL (charge -> light scale).  Default 0.094 = the value
+         // that was a literal below => compiled config byte-identical.  The
+         // PDVD driver forwards its ql_qtol TLA (doc pdvd/100 sec 8).
+         qtol=0.094,
          trigger_offsets=null, drift_speed=null, drift_speeds=null,
-         cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false,
+         // Drift side ('bottom'/'top') of each joint input, in port order; sets
+         // anode_pd_channels per input.  null => the legacy [bottom, top]
+         // literal (byte-identical); wct-clustering.jsonnet passes the sides of
+         // the groups it actually built (doc pdvd/118: top-only runs).
+         anode_pd_sides=null,
+         cathode_ext1=null, anode_ext1_margin=null, use_saturation_flag=false, sat_flag_ignore_cathode=false,
+         sat_skip_round2=false, lasso_weight_unrailed=false, ks_sat_tol=null,
          saturation_mask_fit=true, chi2_sat_inflate=null,
          use_coverage_flag=false, coverage_min=1.0,
          coverage_mask_fit=true, pe_err_nodata=null,
@@ -313,7 +323,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // 2026-07-14: the crosser-anchor recalibration on the
             // saturation-fixed dumps keeps this value; the per-type residuals
             // are absorbed by the VUVEfficiency scale factors above.
-            QtoL: 0.094,
+            // 2026-09-13: the `qtol` arg (default 0.094).  Prediction is
+            // QtoL x VUVEfficiency, so a QtoL other than 0.094 renormalises
+            // all three per-type factors together (pdvd doc 100 sec 8).
+            QtoL: qtol,
             doReflectedLight: false,   // library vis is total photon arrival
             nchan: nchan,
             ch_mask: ch_mask,
@@ -358,7 +371,10 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // byte-identical pre-study config.
             pd_wall_channels_ylo: if wall_flags then wall_ylo_channels else [],
             pd_wall_channels_yhi: if wall_flags then wall_yhi_channels else [],
-            anode_pd_channels: [bottom_pmt_channels, []],  // [bottom volume, top volume]
+            anode_pd_channels: if anode_pd_sides == null
+                               then [bottom_pmt_channels, []]  // [bottom volume, top volume]
+                               else [if s == 'bottom' then bottom_pmt_channels else []
+                                     for s in anode_pd_sides],
 
             // Dead-PD self-check: per-event dynamic auto-mask on top of the
             // static ch_mask.  Same-type neighbour pool (XA vs PMT efficiencies
@@ -455,6 +471,27 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             // pdvd-saturation-recovery.md).  C++ default false.  Key omitted
             // when off => byte-identical pre-fix config.
             [if use_saturation_flag then 'use_saturation_flag']: true,
+            // Clear the rail flag on the cathode XAs (their railed pulses are
+            // repaired into measurements by the ToT fill; docs/qlmatch/32).
+            // C++ default empty list.  Key omitted when off => byte-identical.
+            [if sat_flag_ignore_cathode then 'sat_flag_ignore_channels']: cathode_channels,
+            // Skip the rail-flagged rows in fit_round2_shared as well (the
+            // other three LASSO fill sites already skip them; that one did
+            // not, so with saturation_mask_fit=false the railed PE entered the
+            // round-2 solve that sets strength; docs/qlmatch/33).  C++ default
+            // false.  Key omitted when off => byte-identical.
+            [if sat_skip_round2 then 'sat_skip_round2_shared']: true,
+            // Shared-fit LASSO weight base |pred-meas|/meas summed over the
+            // unrailed LASSO-row channels, not the all-channel flash total that
+            // a rail repair moves (docs/qlmatch/33).  C++ default false.  Key
+            // omitted when off => byte-identical.
+            [if lasso_weight_unrailed then 'lasso_weight_unrailed']: true,
+            // Tolerance on a railed channel in the bundle KS: it enters the KS
+            // clamped to within x(1+tol) of the bundle prediction scaled to its
+            // unrailed light (docs/qlmatch/34; tol calibrated on cathode
+            // crossers, 0.615 on ToT light).  C++ default 0 = off.  Key omitted
+            // when null => byte-identical.
+            [if ks_sat_tol != null then 'ks_sat_tol']: ks_sat_tol,
             // ...and whether a railed channel is DROPPED from the chi2/KS or
             // kept there at its clipped PE.  Keeping it is right: the clipped
             // value is a LOWER BOUND on the true light (11_pdvd-saturation-

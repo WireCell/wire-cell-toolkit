@@ -209,6 +209,7 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_xtpc_sc1_light_gate   = get(cfg, "xtpc_sc1_light_gate",   m_xtpc_sc1_light_gate);
     m_xtpc_sc1_ks_max       = get(cfg, "xtpc_sc1_ks_max",       m_xtpc_sc1_ks_max);
     m_xtpc_sc1_c2n_max      = get(cfg, "xtpc_sc1_c2n_max",      m_xtpc_sc1_c2n_max);
+    m_xtpc_sc1_overpred_max = get(cfg, "xtpc_sc1_overpred_max", m_xtpc_sc1_overpred_max);
     m_xtpc_cathode_ks_max   = get(cfg, "xtpc_cathode_ks_max",   m_xtpc_cathode_ks_max);
     m_xtpc_pin_confirms_rescue = get(cfg, "xtpc_pin_confirms_rescue", m_xtpc_pin_confirms_rescue);
     m_cathode_rescue_solo_ks   = get(cfg, "cathode_rescue_solo_ks",   m_cathode_rescue_solo_ks);
@@ -230,10 +231,11 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     if (m_xtpc_pin_min_strength > 0 || m_xtpc_sc1_light_gate ||
         m_xtpc_cathode_ks_max > 0 || m_postcull_unflagged) {
         log->debug("quality gates on: pin_min_strength={} sc1_light_gate={} "
-                   "(ks<={} c2n<={}) cathode_ks_max={} postcull_unflagged={} "
+                   "(ks<={} c2n<={} overpred<={}) cathode_ks_max={} postcull_unflagged={} "
                    "(ks<={} c2n<={})",
                    m_xtpc_pin_min_strength, m_xtpc_sc1_light_gate,
-                   m_xtpc_sc1_ks_max, m_xtpc_sc1_c2n_max, m_xtpc_cathode_ks_max,
+                   m_xtpc_sc1_ks_max, m_xtpc_sc1_c2n_max, m_xtpc_sc1_overpred_max,
+                   m_xtpc_cathode_ks_max,
                    m_postcull_unflagged, m_postcull_ks_max, m_postcull_c2n_max);
     }
 
@@ -294,6 +296,10 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     if (cfg.isMember("flash_sel_channels") && cfg["flash_sel_channels"].isArray()) {
         m_flash_sel_channels.clear();
         for (const auto& jch : cfg["flash_sel_channels"]) m_flash_sel_channels.push_back(jch.asInt());
+    }
+    if (cfg.isMember("sat_flag_ignore_channels") && cfg["sat_flag_ignore_channels"].isArray()) {
+        m_sat_flag_ignore_channels.clear();
+        for (const auto& jch : cfg["sat_flag_ignore_channels"]) m_sat_flag_ignore_channels.push_back(jch.asInt());
     }
     m_flash_sel_minPE     = get(cfg, "flash_sel_minPE",     m_flash_sel_minPE);
     m_flash_sel_min_fired = get(cfg, "flash_sel_min_fired", m_flash_sel_min_fired);
@@ -444,6 +450,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_flash_pe_threshold = get(cfg, "flash_pe_threshold", m_flash_pe_threshold);
     m_use_saturation_flag = get(cfg, "use_saturation_flag", m_use_saturation_flag);
     m_saturation_mask_fit = get(cfg, "saturation_mask_fit", m_saturation_mask_fit);
+    m_sat_skip_round2_shared = get(cfg, "sat_skip_round2_shared", m_sat_skip_round2_shared);
+    m_lasso_weight_unrailed = get(cfg, "lasso_weight_unrailed", m_lasso_weight_unrailed);
+    m_ks_sat_tol = get(cfg, "ks_sat_tol", m_ks_sat_tol);
     m_use_coverage_flag = get(cfg, "use_coverage_flag", m_use_coverage_flag);
     m_coverage_min = get(cfg, "coverage_min", m_coverage_min);
     m_coverage_mask_fit = get(cfg, "coverage_mask_fit", m_coverage_mask_fit);
@@ -732,6 +741,19 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
                    "chi2/KS at their clipped PE (chi2_sat_inflate={}); LASSO rows stay zeroed",
                    m_chi2_sat_inflate);
     }
+    if (m_ks_sat_tol > 0) {
+        log->debug("QLMatching ks_sat_tol={} => rail-flagged channels enter the bundle KS clamped to within "
+                   "x(1+tol) of the unrailed-scaled prediction (use_saturation_flag={})",
+                   m_ks_sat_tol, m_use_saturation_flag);
+    }
+    if (m_lasso_weight_unrailed) {
+        log->debug("QLMatching lasso_weight_unrailed=true => shared-fit LASSO weight base from unrailed "
+                   "LASSO-row channels (use_saturation_flag={})", m_use_saturation_flag);
+    }
+    if (m_sat_skip_round2_shared) {
+        log->debug("QLMatching sat_skip_round2_shared=true => fit_round2_shared skips rail-flagged "
+                   "LASSO rows (use_saturation_flag={})", m_use_saturation_flag);
+    }
 }
 
 WireCell::Configuration QLMatching::default_configuration() const
@@ -759,6 +781,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
     cfg["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
     cfg["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    cfg["xtpc_sc1_overpred_max"] = m_xtpc_sc1_overpred_max;
     cfg["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
     cfg["xtpc_pin_confirms_rescue"] = m_xtpc_pin_confirms_rescue;
     cfg["cathode_rescue_solo_ks"]  = m_cathode_rescue_solo_ks;
@@ -799,6 +822,7 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["anode_pd_channels"]      = Json::arrayValue;
     cfg["flash_minPE"]     = m_flash_minPE;
     cfg["flash_sel_channels"]  = Json::arrayValue;
+    cfg["sat_flag_ignore_channels"] = Json::arrayValue;
     cfg["flash_sel_minPE"]     = m_flash_sel_minPE;
     cfg["flash_sel_min_fired"] = m_flash_sel_min_fired;
     cfg["flash_sel_fired_pe"]  = m_flash_sel_fired_pe;
@@ -873,6 +897,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["flash_pe_threshold"] = m_flash_pe_threshold;
     cfg["use_saturation_flag"] = m_use_saturation_flag;
     cfg["saturation_mask_fit"] = m_saturation_mask_fit;
+    cfg["sat_skip_round2_shared"] = m_sat_skip_round2_shared;
+    cfg["lasso_weight_unrailed"] = m_lasso_weight_unrailed;
+    cfg["ks_sat_tol"] = m_ks_sat_tol;
     cfg["use_coverage_flag"] = m_use_coverage_flag;
     cfg["coverage_min"] = m_coverage_min;
     cfg["coverage_mask_fit"] = m_coverage_mask_fit;
@@ -1252,6 +1279,9 @@ void QLMatching::read_flashes(ApaRun& run)
         // "0 +- pe_err_floor"; widen its error to the threshold band before the
         // flash reaches the chi2/LASSO. No-op when pe_err_nodata <= 0 (default).
         flash->inflate_nodata_err(m_pe_err_nodata, m_coverage_min);
+        // Repaired-rail channels leave the saturation mask (docs/qlmatch/32).
+        // Empty list (default) => not called => bit-identical.
+        if (!m_sat_flag_ignore_channels.empty()) flash->clear_sat(m_sat_flag_ignore_channels);
         if (flash->get_time() < m_flash_mintime || flash->get_time() > m_flash_maxtime) continue;
         if (flash->get_total_PE() < m_flash_minPE) continue;
         // Channel-scoped admission (see the knob doc in the header): the flash must
@@ -1503,6 +1533,7 @@ void QLMatching::compute_geometry(ApaRun& run)
     run.qp.pe_err_ch_frac       = m_pe_err_ch_frac;
     run.qp.pe_err_ch_lowpe_frac = m_pe_err_ch_lowpe_frac;
     run.qp.pe_err_ch_lowpe_knee = m_pe_err_ch_lowpe_knee;
+    run.qp.ks_sat_tol           = m_ks_sat_tol;   // 0 (default) => off
 
     // Shared-flash mode relies on the ident-based sign_offset above encoding the
     // physical relation sign_offset == -s (true for SBND TPC0/1 and the PDVD
@@ -2720,6 +2751,23 @@ namespace {
     };
 }
 
+// lasso_weight_unrailed (doc pdvd/qlmatch/33): replace the weight-base totals by sums over the LASSO row channels
+// that are not rail-flagged; keep the legacy totals when the flash has no unrailed light there.
+static void unrailed_totals(const Opflash* f, const std::vector<int>& rows, const std::vector<double>& pred,
+                            double& meas_tot, double& pred_tot)
+{
+    double m = 0, p = 0;
+    for (const int ch : rows) {
+        if (f->get_sat(ch)) continue;
+        m += f->get_PE(ch);
+        p += pred.at(ch);
+    }
+    if (m > 0) {
+        meas_tot = m;
+        pred_tot = p;
+    }
+}
+
 void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
 {
     const auto t_build0 = wallclock::now();
@@ -2822,8 +2870,9 @@ void QLMatching::fit_round1_shared(std::vector<ApaRun>& runs)
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
                 }
-                const auto meas_pe_tot = f0->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
+                double meas_pe_tot = f0->get_total_PE();
+                double pred_pe_tot = bundle->get_total_pred_light();
+                if (m_lasso_weight_unrailed) unrailed_totals(f0, r0.opdet_idx_v, pred_flash, meas_pe_tot, pred_pe_tot);
                 const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                         ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
                                         : m_pe_mismatch_floor;
@@ -2937,12 +2986,16 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     col_bundles.reserve(nbundle);
     col_run.reserve(nbundle);
 
+    // sat_skip_round2_shared: skip rail-flagged rows like fit_round1_shared (off => legacy fill).
+    const bool skip_sat = m_sat_skip_round2_shared && m_use_saturation_flag;
+    std::size_t nskip_rows = 0;
     std::size_t i = 0, ik = 0;
     for (auto& [fid, pf] : phys) {
         (void)fid;
         Opflash* f0 = pf.insts.front().second;
         for (unsigned int j = 0; j < nopdet; ++j) {
             const int opdet_idx = r0.opdet_idx_v.at(j);
+            if (skip_sat && f0->get_sat(opdet_idx)) { ++nskip_rows; continue; }
             const double pe = f0->get_PE(opdet_idx);
             const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
             M(i * nopdet + j) = pe / pe_err;
@@ -2953,12 +3006,14 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
                 const auto& pred_flash = bundle->get_pred_flash();
                 for (unsigned int j = 0; j < nopdet; ++j) {
                     const int opdet_idx = r0.opdet_idx_v.at(j);
+                    if (skip_sat && f0->get_sat(opdet_idx)) continue;
                     const double pred_pe = pred_flash.at(opdet_idx);
                     const double pe_err = std::sqrt(f0->get_PE(opdet_idx) + std::pow(f0->get_PE_err(opdet_idx), 2));
                     P_trip.emplace_back((int)(i * nopdet + j), (int)col_bundles.size(), pred_pe / pe_err);
                 }
-                const auto meas_pe_tot = f0->get_total_PE();
-                const auto pred_pe_tot = bundle->get_total_pred_light();
+                double meas_pe_tot = f0->get_total_PE();
+                double pred_pe_tot = bundle->get_total_pred_light();
+                if (m_lasso_weight_unrailed) unrailed_totals(f0, r0.opdet_idx_v, pred_flash, meas_pe_tot, pred_pe_tot);
                 const double base = (std::abs(pred_pe_tot - meas_pe_tot) > m_pe_mismatch_knee * meas_pe_tot)
                                         ? std::abs(pred_pe_tot - meas_pe_tot) / meas_pe_tot
                                         : m_pe_mismatch_floor;
@@ -2973,6 +3028,7 @@ void QLMatching::fit_round2_shared(std::vector<ApaRun>& runs)
     for (std::size_t n = 0; n < col_bundles.size(); ++n) {
         PF_trip.emplace_back(cluster_idx_map.at(col_bundles[n]->get_main_cluster()), (int)n, 1. / delta_charge);
     }
+    if (skip_sat) log->debug("QLSATR2 fit_round2_shared skipped rows {} (of {})", nskip_rows, (std::size_t) nopdet * i);
 
     Eigen::SparseMatrix<double> P_sp((int)(nopdet * nflash), (int)nbundle);
     Eigen::SparseMatrix<double> PF_sp((int)ncluster, (int)nbundle);
@@ -4004,10 +4060,12 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
     qp["chi2_pmt_ratio"]   = m_chi2_pmt_ratio;
     qp["chi2_pmt_inflate"] = m_chi2_pmt_inflate;
     qp["chi2_sat_inflate"] = m_chi2_sat_inflate;
+    if (m_ks_sat_tol > 0) qp["ks_sat_tol"] = m_ks_sat_tol;   // key absent when off => dump bit-identical
     qp["xtpc_pin_min_strength"] = m_xtpc_pin_min_strength;
     qp["xtpc_sc1_light_gate"]   = m_xtpc_sc1_light_gate;
     qp["xtpc_sc1_ks_max"]       = m_xtpc_sc1_ks_max;
     qp["xtpc_sc1_c2n_max"]      = m_xtpc_sc1_c2n_max;
+    if (m_xtpc_sc1_overpred_max > 0) qp["xtpc_sc1_overpred_max"] = m_xtpc_sc1_overpred_max;   // key absent when off => dump bit-identical
     qp["xtpc_cathode_ks_max"]   = m_xtpc_cathode_ks_max;
     qp["postcull_unflagged"]    = m_postcull_unflagged;
     qp["postcull_ks_max"]       = m_postcull_ks_max;
@@ -4718,7 +4776,13 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
             auto sc1_light_pass = [this](const TimingTPCBundle* b) {
                 if (!m_xtpc_sc1_light_gate) return true;
                 const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
-                return b->get_ks_dis() <= m_xtpc_sc1_ks_max && c2n <= m_xtpc_sc1_c2n_max;
+                if (!(b->get_ks_dis() <= m_xtpc_sc1_ks_max && c2n <= m_xtpc_sc1_c2n_max)) return false;
+                // Over-prediction ceiling (doc sbnd_xin/123 sec 18, evt 59003); 0 => not tested.
+                if (m_xtpc_sc1_overpred_max > 0 && b->get_flash()) {
+                    const double meas = std::max(b->get_flash()->get_total_PE(), 1.0);
+                    if (b->get_total_pred_light() > m_xtpc_sc1_overpred_max * meas) return false;
+                }
+                return true;
             };
             if (sc1_light_pass(cands[i].mc.b)) {
                 cands[i].mc.b->set_flag_xtpc_consistent(true);

@@ -201,7 +201,7 @@ namespace WireCell::Clus {
                     oy0 = std::min(oy0, pp.y()); oy1 = std::max(oy1, pp.y());
                     oz0 = std::min(oz0, pp.z()); oz1 = std::max(oz1, pp.z());
                 }
-                const auto bb = m_face.at(apa).at(face)->sensitive().bounds();  // by value: bounds() returns a temporary (-Werror=maybe-uninitialized via a dangling reference)
+                const auto bb = m_face.at(apa).at(face)->sensitive().bounds();  // copy: sensitive() returns by value
                 const double tol = 1 * units::cm;
                 const double sy0 = std::min(bb.first.y(), bb.second.y()) - tol, sy1 = std::max(bb.first.y(), bb.second.y()) + tol;
                 const double sz0 = std::min(bb.first.z(), bb.second.z()) - tol, sz1 = std::max(bb.first.z(), bb.second.z()) + tol;
@@ -259,7 +259,7 @@ namespace WireCell::Clus {
 
 
 
-void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>,std::vector<WireCell::RayGrid::measure_t>>& map_slices_measures, int apa, int face) const{
+void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<std::pair<int, int>,std::vector<WireCell::RayGrid::measure_t>>& map_slices_measures, int apa, int face, bool extend) const{
 
     auto uvwt_min = cluster.get_uvwt_min(apa, face);
     auto uvwt_max = cluster.get_uvwt_max(apa, face);
@@ -401,7 +401,8 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     };
 
     // Step 2: Handle dead channels — one loop over planes replaces three identical blocks.
-    for (int pl = 0; pl < 3; ++pl) {
+    // doc pdvd/113: extend=false (retile_mode "footprint") skips Steps 2 and 3.
+    for (int pl = 0; extend && pl < 3; ++pl) {
         for (const auto& [start, end] : *dead_ch_ranges[pl]) {
             for (int ch = start; ch < end; ++ch) {
                 for (int time_slice = min_time; time_slice < max_time; time_slice += tick_span) {
@@ -415,7 +416,7 @@ void ImproveCluster_1::get_activity_improved(const Cluster& cluster, std::map<st
     }
 
     // Step 3: Handle good channels from CTPC — one loop over planes.
-    for (int pl = 0; pl < 3; ++pl) {
+    for (int pl = 0; extend && pl < 3; ++pl) {
         for (const auto& [time_ch, charge_info] : *tcc_maps[pl]) {
             int time_slice = time_ch.first;
             int ch = time_ch.second;

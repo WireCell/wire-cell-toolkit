@@ -252,6 +252,29 @@ function(
     // false omits the key => compiled config byte-identical to pre-pr/17
     // (runner: SBND_RESCUE_UNMATCHED=0 to escape).
     cathode_rescue_unmatched = true,
+    // xtpc_sc1_light_gate (doc sbnd_xin/123 §18, the QLXTPC coincident cull of
+    // a coincident half, evt 59003): when true a bundle acquires the cross-TPC
+    // scenario-1 crosser flags -- which cull_inconsistent then uses to drop the
+    // cluster's other bundles -- only if its OWN light fits (KS <= xtpc_sc1_ks_max,
+    // chi2/ndf <= xtpc_sc1_c2n_max); geometry alone no longer decides.  The
+    // C++ knob (QLMatching, default false, ks 0.3 / c2n 50) was written for
+    // PDVD (pdvd/docs/qlmatch/19, 27).  All three are tri-state: null omits the
+    // key (the C++ default applies); a value emits it.
+    // SBND PRODUCTION DEFAULT: ON since 2026-09-25 (owner: "Flip the light gate
+    // on for production"; doc sbnd_xin/123 sec 19, measured in sec 18 and doc
+    // 124: mcp1k 271 -> 273, 3000 data events 661 -> 664 numu (FV), 0 lost; MC
+    // cv purity 86.8 -> 87.0 %).  ks/c2n stay null = the C++ 0.3 / 50 that was
+    // measured.  Runner escape: SBND_XTPC_SC1_GATE=0 passes null for the gate
+    // and the ceiling => compiled config byte-identical to before the flip.
+    xtpc_sc1_light_gate = true,
+    xtpc_sc1_ks_max = null,
+    xtpc_sc1_c2n_max = null,
+    // xtpc_sc1_overpred_max: the same gate's over-prediction ceiling (C++
+    // default 0 = not tested; evt 59003's dim-flash half predicts 36x its
+    // measured light and passes ks/chi2).  null omits the key.  SBND
+    // production default 2.9 since 2026-09-25 (the prefilter's ratio, doc 123
+    // sec 18.2), flipped together with the gate.
+    xtpc_sc1_overpred_max = 2.9,
     // sep_vertex_veto (SBND default TRUE since doc pr/15, owner decision
     // 2026-08-01): per-APA separate() un-splits a neutrino-vertex "V" whose two
     // dominant pieces both END at their mutual closest approach (run 18255 evt
@@ -430,6 +453,9 @@ function(
     // detector is untouched.  Escape: SBND_DG_FAST=0 compiles back to the
     // byte-identical legacy config.
     dg_fast = true,
+    // dg_length_cut (doc sbnd_xin/113, default 0 = legacy => byte-identical): ClusteringDeghost length_cut
+    // in internal units; clusters longer than it are never deleted by the clustering-stage deghost.
+    dg_length_cut = 0,
 )
     // Build params inside the function so all physics values are TLAs.  These
     // are the documented Q/L drift/diffusion values (matching run_clust_QL_evt.sh),
@@ -468,7 +494,7 @@ function(
         rse_map=rse_map,
         evt_subdir=evt_subdir,
         reality=reality);
-    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast)
+    local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false, per_face_bee=perface_bee, trace_bee=trace_bee, save_assoc_id=save_assoc, sep_vertex_veto=sep_vertex_veto, sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point, nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard, nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut)
                         for n in std.range(0, nanodes - 1)];
 
     // --- Q/L matching nodes ---
@@ -486,6 +512,14 @@ function(
         },
     }, nin=0, nout=1) for n in std.range(0, nanodes - 1)];
     local flash_attach   = [qlm.flash_attach(n) for n in std.range(0, nanodes - 1)];
+    // The scenario-1 light gate overlay for QLMatching (see the TLAs above):
+    // every key omitted when its TLA is null => {} => byte-identical config.
+    local xtpc_sc1_extra = {
+        [if xtpc_sc1_light_gate != null then 'xtpc_sc1_light_gate']: xtpc_sc1_light_gate,
+        [if xtpc_sc1_ks_max != null then 'xtpc_sc1_ks_max']: xtpc_sc1_ks_max,
+        [if xtpc_sc1_c2n_max != null then 'xtpc_sc1_c2n_max']: xtpc_sc1_c2n_max,
+        [if xtpc_sc1_overpred_max != null then 'xtpc_sc1_overpred_max']: xtpc_sc1_overpred_max,
+    };
     local matching_pipes = [qlm.matching(anodes[n], clus_maker.detector_volumes([anodes[n]]),
                                          n, reality, semimodel_file,
                                          cathode_fiducial=cathode_fv.tn,
@@ -502,7 +536,8 @@ function(
                                          beam_pref=(if beam_pref then true else null),
                                          beam_pref_weight=(if beam_pref then beam_pref_weight else null),
                                          beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
-                                         main_flag=main_flag, lm=lm, realign_perblob=realign)
+                                         main_flag=main_flag, lm=lm, realign_perblob=realign,
+                                         extra=xtpc_sc1_extra)
                             for n in std.range(0, nanodes - 1)];
 
     // --- Graph: per-APA matching (default) or joint multi-APA matching ---
@@ -524,7 +559,7 @@ function(
                                                beam_pref_weight=(if beam_pref then beam_pref_weight else null),
                                                beam_pref_rescue=(if beam_pref then beam_pref_rescue else null),
                                                main_flag=main_flag, lm=lm, realign_perblob=realign,
-                                               merge_flash=merge_flash);
+                                               merge_flash=merge_flash, extra=xtpc_sc1_extra);
             // MABC takes the single pre-merged tree directly (no PointTreeMerging).
             local clus_all = clus_maker.all_apa(anodes, dump=true, all_apa_bee=allapa_bee, premerged=true, tensor_outname=save_tensors, save_real_cluster_id=save_rcid, save_assoc_cluster_id=save_assoc, trace_bee=trace_bee, real_cluster_id_global=rcid_global, cathode_rescue_on=cathode_rescue, cathode_rescue_unmatched=cathode_rescue_unmatched, adopt_nu_fragments=adopt_nu_fragments, save_bundle_main_provenance=save_bundle_main_provenance, rescue_allow_in_beam_far=rescue_in_beam_far, rescue_geom_first=rescue_geom_first, rescue_pierce_test=rescue_pierce_test, rescue_pierce_cut=rescue_pierce_cut, rescue_dest_beam_for_new=rescue_dest_beam_for_new, rescue_beam_main_only=rescue_beam_main_only, bee_flash_pred_min=bee_flash_pred_min, eb_fast=eb_fast);
             local per_apa_pre = [g.intern(

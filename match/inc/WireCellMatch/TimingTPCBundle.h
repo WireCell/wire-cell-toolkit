@@ -87,7 +87,26 @@ namespace WireCell::Match {
         std::vector<double> pe_err_ch_frac;
         std::vector<double> pe_err_ch_lowpe_frac;
         std::vector<double> pe_err_ch_lowpe_knee;
+        // Repaired-rail KS tolerance (doc pdvd/qlmatch/34). > 0: on a channel the
+        // flash flags saturated and the KS still sees, the measured value entering
+        // the KS is clamped into [pe/(1+tol), pe*(1+tol)] around the bundle
+        // prediction scaled by s = Sum(pe)/Sum(pred) over the bundle's unmasked
+        // UNRAILED channels (ks_sat_clamp) -- a rail agreeing with the scaled
+        // prediction within a factor (1+tol) counts as agreeing, a rail further off
+        // moves toward it by at most that factor.  No unrailed light => no clamp.
+        // Appended after the positional members (assigned separately, like the
+        // pe_err_ch_* arrays).  0 = off, bit-identical.
+        double ks_sat_tol = 0.0;
     };
+
+    /// ks_sat_tol arithmetic (see BundleQualityParams::ks_sat_tol), on the raw
+    /// (un-normalised) KS inputs.  meas/pred: per-channel measured and predicted
+    /// PE as they enter the KS; rail: flash saturation flag; fit: the channel is in
+    /// the bundle's opdet mask.  Rewrites meas[j] in place on railed channels with
+    /// meas[j] > 0; returns the number of channels whose value changed.  tol <= 0,
+    /// or no unrailed light in the fit mask, => no change (returns 0).
+    int ks_sat_clamp(std::vector<double>& meas, const std::vector<double>& pred,
+                     const std::vector<char>& rail, const std::vector<char>& fit, double tol);
 
     class TimingTPCBundle {
     public:

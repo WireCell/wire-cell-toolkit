@@ -1,9 +1,15 @@
 #include "WireCellClus/TaggerCheckNeutrino.h"
 #include "WireCellClus/NeutrinoPatternBase.h" // pattern recognition ...
 #include "WireCellClus/PatternDebugIO.h"      // debug dump/load
+#include "WireCellClus/NuBundleCensus.h"      // sbnd_xin/docs/109 selection census
 
 #include "WireCellUtil/Persist.h"
 #include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
+#include <cmath>      // sbnd_xin/docs/109: std::nan
+#include <functional> // sbnd_xin/docs/109 rev 4: std::greater
+#include <limits>     // sbnd_xin/docs/109 rev 4: infinity
+#include <map>
+#include <memory>
 #include <chrono>
 #include <set>
 
@@ -484,6 +490,12 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_nu_skip_cosmic_bundle_min_length = get(config, "nu_skip_cosmic_bundle_min_length", m_nu_skip_cosmic_bundle_min_length);  // cm
     m_skip_cosmic_companions  = get(config, "skip_cosmic_companions",  m_skip_cosmic_companions);
     m_cosmic_companion_min_length = get(config, "cosmic_companion_min_length", m_cosmic_companion_min_length);  // cm
+    // doc sbnd_xin/113 sec 6 (see the header)
+    m_nu_adopt_touching            = get(config, "nu_adopt_touching",            m_nu_adopt_touching);
+    m_nu_adopt_touching_dis        = get(config, "nu_adopt_touching_dis",        m_nu_adopt_touching_dis);         // cm
+    m_nu_adopt_touching_min_length = get(config, "nu_adopt_touching_min_length", m_nu_adopt_touching_min_length);  // cm
+    m_nu_adopt_touching_max_length = get(config, "nu_adopt_touching_max_length", m_nu_adopt_touching_max_length);  // cm
+    m_nu_adopt_touching_unmatched_only = get(config, "nu_adopt_touching_unmatched_only", m_nu_adopt_touching_unmatched_only);
     m_nu_fallback_demoted_mains = get(config, "nu_fallback_demoted_mains", m_nu_fallback_demoted_mains);
     // doc pr/94 Phase 2: see the member comments in the header.
     m_nu_per_bundle = get(config, "nu_per_bundle", m_nu_per_bundle);
@@ -498,6 +510,21 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     }
     m_nu_selected_as_main = get(config, "nu_selected_as_main", m_nu_selected_as_main);
     m_nu_selected_as_main_snapshot_all = get(config, "nu_selected_as_main_snapshot_all", m_nu_selected_as_main_snapshot_all);
+    // sbnd_xin/docs/109: see the member comments in the header.
+    m_nu_provenance = get(config, "nu_provenance", m_nu_provenance);
+    m_flash_pair_dt_us = get(config, "flash_pair_dt_us", m_flash_pair_dt_us);  // us
+    // sbnd_xin/docs/109 rev 3: DEFAULT FALSE => one candidate per bundle, as today.
+    m_nu_dedup_flash_group = get(config, "nu_dedup_flash_group", m_nu_dedup_flash_group);
+    // sbnd_xin/docs/109 rev 4: DEFAULT FALSE => bundles keyed on the raw gid, as today.
+    m_nu_bundle_flash_group      = get(config, "nu_bundle_flash_group",      m_nu_bundle_flash_group);
+    m_nu_bundle_flash_group_x    = get(config, "nu_bundle_flash_group_x",    m_nu_bundle_flash_group_x);     // cm
+    m_nu_bundle_flash_group_xcut = get(config, "nu_bundle_flash_group_xcut", m_nu_bundle_flash_group_xcut);  // cm
+    m_nu_bundle_flash_group_gap  = get(config, "nu_bundle_flash_group_gap",  m_nu_bundle_flash_group_gap);   // cm
+    if (m_nu_bundle_flash_group && m_nu_dedup_flash_group) {
+        SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: nu_bundle_flash_group and nu_dedup_flash_group are both on; "
+                                "a merged bundle is already one candidate per physical flash, so the dedup can only "
+                                "remove candidates the cathode test deliberately kept apart (a second neutrino).");
+    }
     m_sp_photon_flag          = get(config, "sp_photon_flag",          m_sp_photon_flag);
 
     // ---- doc sbnd_xin/docs/pr/36 §10 tagger-stage knobs ---------------------
@@ -1060,6 +1087,11 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_skip_cosmic_bundle_min_length"] = m_nu_skip_cosmic_bundle_min_length;  // cm; > 0 spares untagged bundle-mates at least this long (docs/pr/16 design A); 0 = veto all
     cfg["skip_cosmic_companions"] = m_skip_cosmic_companions;          // doc pr/20 I P4; drop a TGM/STM-tagged companion from other_clusters
     cfg["cosmic_companion_min_length"] = m_cosmic_companion_min_length;  // cm; a tagged companion shorter than this stays in regardless
+    cfg["nu_adopt_touching"]            = m_nu_adopt_touching;            // doc sbnd_xin/113 sec 6; adopt untagged flashless clusters touching the candidate as companions
+    cfg["nu_adopt_touching_dis"]        = m_nu_adopt_touching_dis;        // cm; closest approach to the main cluster
+    cfg["nu_adopt_touching_min_length"] = m_nu_adopt_touching_min_length; // cm
+    cfg["nu_adopt_touching_max_length"] = m_nu_adopt_touching_max_length; // cm
+    cfg["nu_adopt_touching_unmatched_only"] = m_nu_adopt_touching_unmatched_only;  // true = rescue-gid (>= 1000000) clusters only
     cfg["nu_fallback_demoted_mains"] = m_nu_fallback_demoted_mains;    // docs/73 sec 12 round 3; when NO candidate survives, consider demoted mains (same gates); false = legacy
     cfg["nu_per_bundle"]             = m_nu_per_bundle;                // doc pr/94; false = legacy single event-wide candidate
     cfg["nu_per_bundle_demoted_acts"] = m_nu_per_bundle_demoted_acts;  // doc pr/94; mirror of the taggers' evaluate_demoted_mains; inert unless nu_per_bundle
@@ -1067,6 +1099,13 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["nu_per_bundle_stm_only"]   = m_nu_per_bundle_stm_only;        // pdvd doc 25 sec 13.10; keep only bundles whose selected activity is STM-tagged; false = every bundle; inert unless nu_per_bundle
     cfg["nu_selected_as_main"]      = m_nu_selected_as_main;           // doc pr/94 round 3; give a demoted-main candidate the main-cluster PR treatment for the duration of its own pass; false = legacy
     cfg["nu_selected_as_main_snapshot_all"] = m_nu_selected_as_main_snapshot_all;  // doc 75; closes the DL-swap flag leak; false = legacy
+    cfg["nu_provenance"]            = m_nu_provenance;                 // sbnd_xin/docs/109; record the selection (TaggerInfo/KineInfo fields + NuBundleCensus); false = nothing filled
+    cfg["flash_pair_dt_us"]         = m_flash_pair_dt_us;              // sbnd_xin/docs/109; us; different-TPC flashes closer than this share a flash_group; read only under nu_provenance
+    cfg["nu_dedup_flash_group"]     = m_nu_dedup_flash_group;          // sbnd_xin/docs/109 rev 3; collapse candidates from one physical flash seen by both TPCs, keeping the longest; false = one candidate per bundle
+    cfg["nu_bundle_flash_group"]      = m_nu_bundle_flash_group;       // sbnd_xin/docs/109 rev 4; merge two in-window bundles of one flash group whose charge touches into ONE candidate (the other side's mains become companions); false = bundles keyed on the raw gid
+    cfg["nu_bundle_flash_group_x"]    = m_nu_bundle_flash_group_x;     // cm; cathode plane; read only when xcut > 0
+    cfg["nu_bundle_flash_group_xcut"] = m_nu_bundle_flash_group_xcut;  // cm; > 0 = also require both closest points within this of the plane; 0 = distance only
+    cfg["nu_bundle_flash_group_gap"]  = m_nu_bundle_flash_group_gap;   // cm; max closest-point distance; inert unless nu_bundle_flash_group
     cfg["sp_photon_flag"] = m_sp_photon_flag;     // doc pr/26 sec. 8.2; store singlephoton_tagger()'s verdict in TaggerInfo::photon_flag (prototype NeutrinoID.cxx:271)
     // doc sbnd_xin/docs/pr/36 §10.
     cfg["fiducial"] = Json::Value();                 // null = the historical FiducialUtils containment fallback
@@ -1909,8 +1948,25 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         std::vector<Cluster*> others;
         int gid{-1};
         std::vector<ActivityRec> acts;
+        // sbnd_xin/docs/109 bookkeeping (read only by the census / roster
+        // writes under nu_provenance; filling them decides nothing).
+        std::vector<Cluster*> dropped_companions;
+        int n_rej_cosmic{0};
+        int n_rej_stm_only{0};
+        int n_rej_floor{0};
+        // sbnd_xin/docs/109 rev 4: the OTHER side's mains admitted as
+        // companions of a cathode-merged bundle (a subset of `others`); they
+        // carry Flags::main_cluster and lose it for this candidate's PR pass.
+        std::vector<Cluster*> partner_mains;
     };
     std::vector<NuCandidate> candidates;
+    // sbnd_xin/docs/109 rev 4: gid -> merged-bundle root (smallest gid), filled
+    // only under nu_bundle_flash_group; absent gid => itself.
+    std::map<int, int> gid_root;
+    auto root_of = [&gid_root](int g) {
+        auto it = gid_root.find(g);
+        return it == gid_root.end() ? g : it->second;
+    };
 
     // Find clusters that have the main_cluster flag (set by clustering_recovering_bundle)
     Cluster* main_cluster = nullptr;
@@ -1919,7 +1975,116 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
     int nclusters = grouping.nchildren();
     int n_main_clusters = 0;
     int n_in_beam_clusters = 0;
+    int n_in_window_demoted = 0;   // sbnd_xin/docs/109 census counters (per-bundle path)
+    int n_in_window_nogid = 0;
     const bool beam_gate = m_beam_window_low < m_beam_window_high;
+
+    // ---- sbnd_xin/docs/109 -- nu_provenance: the selection census ------ //
+    // Observation only: nothing below reads the census back into a decision.
+    std::shared_ptr<NuBundleCensus> census;
+    if (m_nu_provenance) {
+        census = std::make_shared<NuBundleCensus>();
+        census->beam_window_low_us  = m_beam_window_low / units::us;
+        census->beam_window_high_us = m_beam_window_high / units::us;
+        census->beam_window_low     = m_beam_window_low;
+        census->beam_window_high    = m_beam_window_high;
+        census->flash_pair_dt_us    = m_flash_pair_dt_us;
+        census->beam_gate  = beam_gate ? 1 : 0;
+        census->per_bundle = (beam_gate && m_nu_per_bundle) ? 1 : 0;
+        // The flash table, from the merge-safe "opflash" PC.  It holds EVERY
+        // flash of every input, one row per (flash, channel), and its "apa"
+        // column is the flash's physical drift side
+        // (QLMatching::write_opflash_pc).  gid-keyed std::map => ascending
+        // gid, deterministic.
+        if (grouping.has_pc("opflash") && grouping.has_pcarray("gid", "opflash")) {
+            const auto ogid = grouping.get_pcarray<int>("gid", "opflash");
+            std::vector<int> apa_col;
+            if (grouping.has_pcarray("apa", "opflash")) {
+                const auto oapa = grouping.get_pcarray<int>("apa", "opflash");
+                for (size_t i = 0; i < oapa.size(); ++i) apa_col.push_back(oapa[i]);
+            }
+            std::map<int, int> gid_tpc;
+            for (size_t i = 0; i < ogid.size(); ++i) {
+                if (gid_tpc.count(ogid[i])) continue;
+                gid_tpc[ogid[i]] = i < apa_col.size() ? apa_col[i] : -1;
+            }
+            std::map<int, int> n_matched, n_matched_main;
+            for (auto* c : grouping.children()) {
+                const int g = c->get_scalar<int>("matched_flash_gid", -1);
+                if (g < 0) continue;
+                ++n_matched[g];
+                if (c->get_flag(Flags::main_cluster)) ++n_matched_main[g];
+            }
+            std::vector<int> vgid, vtpc;
+            std::vector<double> vtime;
+            for (const auto& [g, tpc] : gid_tpc) {
+                const auto fl = grouping.flash_by_gid(g);
+                NuBundleCensus::Flash f;
+                f.gid = g;
+                f.tpc = tpc;
+                if (fl) {
+                    f.time_us = fl.time() / units::us;
+                    f.pe = fl.value();
+                    f.in_window = (beam_gate && fl.time() >= m_beam_window_low
+                                   && fl.time() < m_beam_window_high) ? 1 : 0;
+                }
+                auto it = n_matched.find(g);
+                f.n_matched_clusters = it == n_matched.end() ? 0 : it->second;
+                it = n_matched_main.find(g);
+                f.n_matched_main = it == n_matched_main.end() ? 0 : it->second;
+                census->flashes.push_back(f);
+                vgid.push_back(g);
+                vtpc.push_back(tpc);
+                // An unresolvable flash (flash_by_gid refused it) never groups.
+                vtime.push_back(fl ? fl.time() / units::us : std::nan(""));
+            }
+            const auto groups = group_flashes(vgid, vtpc, vtime, m_flash_pair_dt_us);
+            for (size_t i = 0; i < census->flashes.size() && i < groups.size(); ++i) {
+                census->flashes[i].flash_group = groups[i];
+            }
+        }
+    }
+    // sbnd_xin/docs/109 rev 3 + rev 4: gid -> flash group and gid -> TPC.  From
+    // the census when nu_provenance built it; otherwise computed here from the
+    // same merge-safe "opflash" PC with the same group_flashes(), so neither
+    // nu_dedup_flash_group nor nu_bundle_flash_group silently needs
+    // nu_provenance on as well.  gid-keyed std::map => deterministic.
+    auto flash_tables = [&]() {
+        std::map<int, int> gid_group, gid_tpc;
+        if (census) {
+            for (const auto& f : census->flashes) {
+                gid_group[f.gid] = f.flash_group;
+                gid_tpc[f.gid] = f.tpc;
+            }
+        }
+        else if (grouping.has_pc("opflash") && grouping.has_pcarray("gid", "opflash")) {
+            const auto ogid = grouping.get_pcarray<int>("gid", "opflash");
+            std::vector<int> apa_col;
+            if (grouping.has_pcarray("apa", "opflash")) {
+                const auto oapa = grouping.get_pcarray<int>("apa", "opflash");
+                for (size_t i = 0; i < oapa.size(); ++i) apa_col.push_back(oapa[i]);
+            }
+            for (size_t i = 0; i < ogid.size(); ++i) {
+                if (gid_tpc.count(ogid[i])) continue;
+                gid_tpc[ogid[i]] = i < apa_col.size() ? apa_col[i] : -1;
+            }
+            std::vector<int> vgid, vtpc;
+            std::vector<double> vtime;
+            for (const auto& [g, tpc] : gid_tpc) {
+                const auto fl = grouping.flash_by_gid(g);
+                vgid.push_back(g);
+                vtpc.push_back(tpc);
+                // An unresolvable flash never groups (group_flashes' NaN rule).
+                vtime.push_back(fl ? fl.time() / units::us : std::nan(""));
+            }
+            const auto groups = group_flashes(vgid, vtpc, vtime, m_flash_pair_dt_us);
+            for (size_t i = 0; i < vgid.size() && i < groups.size(); ++i) {
+                gid_group[vgid[i]] = groups[i];
+            }
+        }
+        return std::make_pair(gid_group, gid_tpc);
+    };
+
     if (!beam_gate) {
         for (auto* cluster : grouping.children()) {
             if (cluster->get_flag(Flags::main_cluster)) {
@@ -2209,8 +2374,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             const double t0c = cluster->get_cluster_t0();
             if (t0c < m_beam_window_low || t0c >= m_beam_window_high) continue;
             if (is_main) n_in_beam_clusters++;
+            else n_in_window_demoted++;
             const int gid = cluster->get_scalar<int>("matched_flash_gid", -1);
-            if (gid < 0) continue;
+            if (gid < 0) {
+                n_in_window_nogid++;   // doc 109: dropped here with no other record
+                continue;
+            }
             if (is_main) gid_mains[gid].push_back(cluster);
             else if (m_nu_per_bundle_demoted_acts) gid_demoted[gid].push_back(cluster);
         }
@@ -2218,6 +2387,48 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         for (const auto& kv : gid_mains) gids.insert(kv.first);
         for (const auto& kv : gid_demoted) gids.insert(kv.first);
 
+        // sbnd_xin/docs/109: one census row per examined bundle, built from
+        // the same NuCandidate the selection filled so it cannot drift from it.
+        auto census_row = [&census](const NuCandidate& c, int nu_index) {
+            NuBundleCensus::Bundle b;
+            b.gid = c.gid;
+            for (const auto& a : c.acts) {
+                if (a.is_demoted) ++b.n_demoted;
+                else ++b.n_main;
+            }
+            b.n_companion = static_cast<int>(c.others.size());
+            b.n_companion_dropped = static_cast<int>(c.dropped_companions.size());
+            b.n_rej_cosmic = c.n_rej_cosmic;
+            b.n_rej_stm_only = c.n_rej_stm_only;
+            b.n_rej_floor = c.n_rej_floor;
+            b.nu_index = nu_index;
+            if (c.main) {
+                b.sel_cluster_id = c.main->get_cluster_id();
+                b.sel_length_cm = c.main->get_length() / units::cm;
+                b.reason = NuBundleCensus::kSelectedMain;
+                for (const auto& a : c.acts) {
+                    if (a.is_selected && a.is_demoted) b.reason = NuBundleCensus::kSelectedDemoted;
+                }
+            }
+            else if (c.n_rej_floor > 0) b.reason = NuBundleCensus::kLengthFloor;
+            else if (c.n_rej_stm_only > 0) b.reason = NuBundleCensus::kStmOnly;
+            else if (c.n_rej_cosmic > 0) b.reason = NuBundleCensus::kAllCosmic;
+            else b.reason = NuBundleCensus::kNoEligible;
+            const int fi = census ? census->flash_index(c.gid) : -1;
+            if (fi >= 0) {
+                const auto& f = census->flashes[fi];
+                b.flash_tpc = f.tpc;
+                b.flash_time_us = f.time_us;
+                b.flash_pe = f.pe;
+                b.flash_group = f.flash_group;
+            }
+            return b;
+        };
+
+        // sbnd_xin/docs/109 rev 4: the bundles that yielded no candidate, kept
+        // so a merge can fold their activities and companions into a partner.
+        // Filled only under the knob.
+        std::map<int, NuCandidate> nomain_cands;
         for (int gid : gids) {
             NuCandidate cand;
             cand.gid = gid;
@@ -2258,6 +2469,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                         if (tgm || stm || lm > 0) {
                             SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) cosmic-tagged (TGM={} STM={} lm_flag={}); not a candidate",
                                                gid, c->get_cluster_id(), c->get_length()/units::cm, tgm, stm, lm);
+                            ++cand.n_rej_cosmic;
                             continue;
                         }
                     }
@@ -2272,6 +2484,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                         SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) is not STM-tagged (TGM={} STM={}); not a candidate (nu_per_bundle_stm_only)",
                                            gid, c->get_cluster_id(), c->get_length()/units::cm,
                                            c->get_flag(Flags::TGM), c->get_flag(Flags::STM));
+                        ++cand.n_rej_stm_only;
                         continue;
                     }
                     // The dot guard.  Without it, dropping the bundle veto
@@ -2287,6 +2500,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                         SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {} activity {} (L {:.1f} cm) is under the {:.1f} cm floor and is not the legacy winner; not a candidate (nu_per_bundle_min_length)",
                                            gid, c->get_cluster_id(), c->get_length()/units::cm,
                                            m_nu_per_bundle_min_length);
+                        ++cand.n_rej_floor;
                         continue;
                     }
                     if (!best || c->get_length() > best->get_length()) best = c;
@@ -2300,6 +2514,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             if (!cand.main) {
                 SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {}: no neutrino candidate among {} evaluated activit(ies)",
                                    gid, cand.acts.size());
+                if (census) census->bundles.push_back(census_row(cand, -1));
+                if (m_nu_bundle_flash_group) nomain_cands[gid] = cand;   // rev 4
                 continue;
             }
             for (auto& a : cand.acts) {
@@ -2318,14 +2534,220 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                        gid, cluster->get_cluster_id(), cluster->get_length()/units::cm,
                                        cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
                                        m_cosmic_companion_min_length);
+                    cand.dropped_companions.push_back(cluster);
                     continue;
                 }
                 cand.others.push_back(cluster);
+            }
+            // doc sbnd_xin/113 sec 6: adopt untagged clusters that touch the candidate's main cluster but
+            // belong to no flash bundle (rescue gid >= 1000000) -- or, with unmatched_only false, to any
+            // other gid -- as companions.  Off by default => the companion set above is untouched.
+            if (m_nu_adopt_touching) {
+                const double dcut = m_nu_adopt_touching_dis * units::cm;
+                for (auto* cluster : grouping.children()) {
+                    if (cluster == cand.main) continue;
+                    if (std::find(cand.others.begin(), cand.others.end(), cluster) != cand.others.end()) continue;
+                    if (std::find(cand.dropped_companions.begin(), cand.dropped_companions.end(), cluster) != cand.dropped_companions.end()) continue;
+                    if (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM)) continue;
+                    const int cgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                    if (cgid == gid) continue;                       // the bundle's own non-associated clusters are the taggers' business
+                    if (m_nu_adopt_touching_unmatched_only && cgid < 1000000) continue;
+                    const double len_cm = cluster->get_length() / units::cm;
+                    if (len_cm < m_nu_adopt_touching_min_length || len_cm > m_nu_adopt_touching_max_length) continue;
+                    const auto [ia, ib, d] = cand.main->get_closest_points(*cluster);
+                    if (d > dcut) continue;
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_adopt_touching] gid {}: adopted cluster {} (gid {}, L {:.1f} cm, closest approach {:.2f} cm) as a companion of main {}",
+                                       gid, cluster->get_cluster_id(), cgid, len_cm, d / units::cm, cand.main->get_cluster_id());
+                    cand.others.push_back(cluster);
+                }
             }
             SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_per_bundle] gid {}: candidate main cluster {} (t0 {:.3f} us, L {:.1f} cm, {} associated) of {} evaluated activit(ies)",
                                gid, cand.main->get_cluster_id(), cand.main->get_cluster_t0()/units::us,
                                cand.main->get_length()/units::cm, cand.others.size(), cand.acts.size());
             candidates.push_back(std::move(cand));
+        }
+
+        // ---- sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group ----------- //
+        // A post-pass over the per-gid selection above, which stays textually
+        // and behaviourally what it was: two in-window bundles of one flash
+        // group on different TPCs whose charge TOUCHES (header comment on the
+        // knob) become ONE candidate.  The merged candidate is the LONGER of
+        // the two bundles' own selected activities -- each side keeps its own
+        // pick, main-then-demoted-fallback, so a stub main on one side can
+        // never pre-empt the demoted main the other side had already chosen
+        // (mcp1k 174422 / 280466 in the first rev 4 census: the 10 cm stub
+        // took the row and the numu score fell from 0.955 to -0.055).  The
+        // other side's selected activity and its other mains join as
+        // COMPANIONS (subject to skip_cosmic_companions like any companion),
+        // its evaluated activities join the act_* block, its no-candidate
+        // census row is folded away.  A merge needs a real winner: when the
+        // longer selected activity is under the nu_per_bundle_min_length floor
+        // the pair is left apart -- merging two stubs only gave a placeholder
+        // a companion and let the PR pass fabricate a 107 MeV muon-at-rest
+        // vertex on it (the same census).  A pair not in contact is left
+        // apart: that is how a second neutrino keeps its own row.
+        // DEFAULT OFF: with the knob off not a single line below runs.
+        int n_merged_away = 0;
+        if (m_nu_bundle_flash_group && gids.size() > 1) {
+            const auto [gid_group, gid_tpc] = flash_tables();
+            const std::vector<int> vg(gids.begin(), gids.end());
+            const auto pairs = cathode_pair_candidates(vg, gid_group, gid_tpc);
+            std::map<int, std::vector<Cluster*>> gid_clusters;   // every cluster of each in-window gid
+            if (!pairs.empty()) {
+                for (auto* c : grouping.children()) {
+                    const int g = c->get_scalar<int>("matched_flash_gid", -1);
+                    if (g < 0 || !gids.count(g)) continue;
+                    gid_clusters[g].push_back(c);
+                }
+            }
+            const double cb_x    = m_nu_bundle_flash_group_x * units::cm;
+            const double cb_xcut = m_nu_bundle_flash_group_xcut * units::cm;
+            const double cb_gap  = m_nu_bundle_flash_group_gap * units::cm;
+            std::vector<std::pair<int, int>> contacts;
+            for (const auto& [ga, gb] : pairs) {
+                bool hit = false;
+                double best_d = std::numeric_limits<double>::infinity();
+                double best_xa = std::nan(""), best_xb = std::nan("");
+                int best_a = -1, best_b = -1;
+                for (auto* a : gid_clusters[ga]) {
+                    if (hit) break;
+                    if (a->npoints() == 0) continue;
+                    for (auto* b : gid_clusters[gb]) {
+                        if (b->npoints() == 0) continue;
+                        const auto [ia, ib, d] = a->get_closest_points(*b);
+                        const double xa = a->point3d(ia).x();
+                        const double xb = b->point3d(ib).x();
+                        const bool contact = bundle_contact(d, xa, xb, cb_x, cb_xcut, cb_gap);
+                        if (contact || d < best_d) {
+                            best_d = d; best_xa = xa; best_xb = xb;
+                            best_a = a->get_cluster_id(); best_b = b->get_cluster_id();
+                        }
+                        if (contact) { hit = true; break; }
+                    }
+                }
+                auto tit = gid_tpc.find(ga);
+                auto tjt = gid_tpc.find(gb);
+                auto git = gid_group.find(ga);
+                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] gids {} (tpc {}) and {} (tpc {}) share flash group {}: closest clusters {} / {} at d {:.1f} cm, x {:.1f} / {:.1f} cm -> {}",
+                                   ga, tit == gid_tpc.end() ? -1 : tit->second,
+                                   gb, tjt == gid_tpc.end() ? -1 : tjt->second,
+                                   git == gid_group.end() ? ga : git->second,
+                                   best_a, best_b, best_d / units::cm, best_xa / units::cm, best_xb / units::cm,
+                                   hit ? "in contact, MERGED into one bundle" : "not in contact, kept apart");
+                if (hit) contacts.emplace_back(ga, gb);
+            }
+            if (!contacts.empty()) {
+                const auto root = merge_bundles(vg, contacts);
+                std::map<int, std::vector<int>> members;   // root -> gids, ascending
+                for (const auto& [g, r] : root) members[r].push_back(g);
+                auto cand_index = [&candidates](int g) {
+                    for (size_t i = 0; i < candidates.size(); ++i) {
+                        if (candidates[i].gid == g) return static_cast<int>(i);
+                    }
+                    return -1;
+                };
+                const double floor_len = m_nu_per_bundle_min_length * units::cm;
+                for (const auto& [r, mem] : members) {
+                    if (mem.size() < 2) continue;
+                    // The winner: the longest of the members' OWN selected activities.
+                    int wi = -1;
+                    for (int g : mem) {
+                        const int i = cand_index(g);
+                        if (i < 0) continue;
+                        if (wi < 0 || candidates[i].main->get_length() > candidates[wi].main->get_length()) wi = i;
+                    }
+                    if (wi < 0) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] flash group {}: bundles in contact but none has a candidate; kept apart", r);
+                        continue;
+                    }
+                    if (floor_len > 0 && candidates[wi].main->get_length() < floor_len) {
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] flash group {}: bundles in contact but the longer selected activity, cluster {} (L {:.1f} cm), is under the {:.1f} cm floor; kept apart",
+                                           r, candidates[wi].main->get_cluster_id(),
+                                           candidates[wi].main->get_length()/units::cm, m_nu_per_bundle_min_length);
+                        continue;
+                    }
+                    const int wgid = candidates[wi].gid;
+                    std::set<int> merged_gids;
+                    for (int g : mem) if (g != wgid) merged_gids.insert(g);
+                    {
+                        NuCandidate& w = candidates[wi];
+                        // Fold the other members' activities and rejection counts.
+                        for (int g : merged_gids) {
+                            const int i = cand_index(g);
+                            const NuCandidate* o = nullptr;
+                            if (i >= 0) o = &candidates[i];
+                            else {
+                                auto it = nomain_cands.find(g);
+                                if (it != nomain_cands.end()) o = &it->second;
+                            }
+                            if (!o) continue;
+                            for (auto a : o->acts) {
+                                a.is_selected = 0;
+                                w.acts.push_back(a);
+                            }
+                            w.n_rej_cosmic   += o->n_rej_cosmic;
+                            w.n_rej_stm_only += o->n_rej_stm_only;
+                            w.n_rej_floor    += o->n_rej_floor;
+                            if (o->main) {
+                                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] gid {}: its candidate cluster {} (L {:.1f} cm) is folded into gid {}'s candidate cluster {} (L {:.1f} cm)",
+                                                   g, o->main->get_cluster_id(), o->main->get_length()/units::cm,
+                                                   wgid, w.main->get_cluster_id(), w.main->get_length()/units::cm);
+                            }
+                        }
+                        // The other side's clusters, any role, as companions:
+                        // associated clusters as always, and its mains -- the
+                        // partner half -- under the same cosmic rule.
+                        for (auto* cluster : grouping.children()) {
+                            if (cluster == w.main) continue;
+                            const int cgid = cluster->get_scalar<int>("matched_flash_gid", -1);
+                            if (cgid < 0 || !merged_gids.count(cgid)) continue;
+                            const bool is_main = cluster->get_flag(Flags::main_cluster);
+                            if (!cluster->get_flag(Flags::associated_cluster) && !is_main) continue;
+                            if (m_skip_cosmic_companions
+                                && (cluster->get_flag(Flags::TGM) || cluster->get_flag(Flags::STM))
+                                && cluster->get_length() >= m_cosmic_companion_min_length * units::cm) {
+                                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] gid {} companion cluster {} (gid {}, L {:.1f} cm, TGM={} STM={}) dropped (skip_cosmic_companions, floor {:.1f} cm)",
+                                                   wgid, cluster->get_cluster_id(), cgid, cluster->get_length()/units::cm,
+                                                   cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                                                   m_cosmic_companion_min_length);
+                                w.dropped_companions.push_back(cluster);
+                                continue;
+                            }
+                            w.others.push_back(cluster);
+                            if (is_main) {
+                                w.partner_mains.push_back(cluster);
+                                SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] gid {}: partner main cluster {} (gid {}, L {:.1f} cm, TGM={} STM={}) admitted as companion of cluster {}",
+                                                   wgid, cluster->get_cluster_id(), cgid, cluster->get_length()/units::cm,
+                                                   cluster->get_flag(Flags::TGM), cluster->get_flag(Flags::STM),
+                                                   w.main->get_cluster_id());
+                            }
+                        }
+                        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] flash group {}: ONE candidate, gid {} cluster {} (L {:.1f} cm, {} associated of which {} partner main(s)) of {} evaluated activit(ies) from {} bundle(s)",
+                                           r, wgid, w.main->get_cluster_id(), w.main->get_length()/units::cm,
+                                           w.others.size(), w.partner_mains.size(), w.acts.size(), mem.size());
+                    }
+                    // Remove the folded candidates (descending index, so the
+                    // winner's index is only ever shifted after it is done
+                    // with) and the folded no-candidate census rows.
+                    std::vector<int> drop_idx;
+                    for (int g : merged_gids) {
+                        const int i = cand_index(g);
+                        if (i >= 0) drop_idx.push_back(i);
+                    }
+                    std::sort(drop_idx.begin(), drop_idx.end(), std::greater<int>());
+                    for (int i : drop_idx) candidates.erase(candidates.begin() + i);
+                    if (census) {
+                        auto& rows = census->bundles;
+                        rows.erase(std::remove_if(rows.begin(), rows.end(),
+                                                  [&merged_gids](const NuBundleCensus::Bundle& b) {
+                                                      return b.nu_index < 0 && merged_gids.count(b.gid);
+                                                  }),
+                                   rows.end());
+                    }
+                    for (int g : mem) gid_root[g] = wgid;
+                    n_merged_away += static_cast<int>(merged_gids.size());
+                }
+            }
         }
 
         // Order by the selected activity's length, longest first (ties by gid,
@@ -2350,6 +2772,78 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                              if (la != lb) return la > lb;
                              return a.gid < b.gid;
                          });
+        // ---- sbnd_xin/docs/109 rev 3 -- nu_dedup_flash_group ------------ //
+        // One physical beam flash is seen by both SBND drift volumes and
+        // arrives as two opflash gids a few ns apart.  Each gid keys its own
+        // bundle (see the gid_mains/gid_demoted maps above), so one flash makes
+        // two candidates and the event gets two neutrino rows -- 12 of the 3067
+        // sbnd_xin events.  Collapse them here, AFTER the longest-first sort, so
+        // the survivor is the same candidate slot 0 would have held anyway.
+        // DEFAULT OFF: with the knob off not a single line below runs.
+        if (m_nu_dedup_flash_group && candidates.size() > 1) {
+            // gid -> flash group (the smallest gid of the group).  From the
+            // census when nu_provenance built it; otherwise computed here from
+            // the same merge-safe "opflash" PC with the same group_flashes(),
+            // so this knob does not silently need nu_provenance on as well.
+            // (rev 4 moved the table build into flash_tables(), shared with
+            // nu_bundle_flash_group; same source, same group_flashes().)
+            const std::map<int, int> gid_group = flash_tables().first;
+            // The rule itself is PR::dedup_flash_groups (unit-tested in
+            // clus/test/doctest_nu_bundle_census.cxx): keep the first candidate
+            // of each group, which in this order is the longest.
+            std::vector<int> cand_gids;
+            cand_gids.reserve(candidates.size());
+            for (const auto& c : candidates) cand_gids.push_back(c.gid);
+            const auto keep_idx = dedup_flash_groups(cand_gids, gid_group);
+            std::set<size_t> keep_set(keep_idx.begin(), keep_idx.end());
+            std::vector<NuCandidate> kept, dropped;
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                auto& c = candidates[i];
+                if (!keep_set.count(i)) {
+                    auto git = gid_group.find(c.gid);
+                    SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_dedup_flash_group] gid {} (flash group {}) dropped: cluster {} (L {:.1f} cm) is not the longest candidate of this physical flash",
+                                       c.gid, git == gid_group.end() ? c.gid : git->second,
+                                       c.main ? c.main->get_cluster_id() : -1,
+                                       c.main ? c.main->get_length() / units::cm : 0.0);
+                    dropped.push_back(std::move(c));
+                    continue;
+                }
+                kept.push_back(std::move(c));
+            }
+            // UNCONDITIONAL: the loop above moved EVERY candidate into `kept`
+            // or `dropped`, so `candidates` now holds moved-from shells whether
+            // or not anything was dropped.  Guarding this assignment on
+            // `!dropped.empty()` silently emptied each candidate's `others`
+            // (its companions) and `acts` on every event where the knob found
+            // nothing to drop -- caught by d109r3_dedup_census.py's
+            // "changed surviving rows" check on ncpi0 18625, whose two rows
+            // are in different flash groups and whose reco Enu still moved
+            // 1448.6 -> 693.5 MeV and 174.1 -> 105.0 MeV.
+            candidates = std::move(kept);
+            // The dropped bundles still get a census row, so T_bundle keeps
+            // one row per examined bundle and names why this one has no
+            // T_tagger row.
+            if (census) {
+                for (const auto& c : dropped) {
+                    auto b = census_row(c, -1);
+                    b.reason = NuBundleCensus::kDedupFlashGroup;
+                    census->bundles.push_back(b);
+                }
+            }
+        }
+
+        // sbnd_xin/docs/109: the selected bundles' census rows, now that the
+        // row order (nu_index) is fixed; then every row in ascending gid.
+        if (census) {
+            for (size_t i = 0; i < candidates.size(); ++i) {
+                census->bundles.push_back(census_row(candidates[i], static_cast<int>(i)));
+            }
+            std::sort(census->bundles.begin(), census->bundles.end(),
+                      [](const NuBundleCensus::Bundle& a, const NuBundleCensus::Bundle& b) {
+                          return a.gid < b.gid;
+                      });
+            census->n_bundles = static_cast<int>(gids.size()) - n_merged_away;   // rev 4: merged bundles count once
+        }
     }
 
     // doc pr/94 -- unify the two shapes.  The two legacy branches above select
@@ -2362,6 +2856,30 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         cand.others = other_clusters;
         cand.gid    = main_cluster->get_scalar<int>("matched_flash_gid", -1);
         candidates.push_back(std::move(cand));
+    }
+
+    // sbnd_xin/docs/109: publish the census BEFORE the no-candidate return, so
+    // an event with no T_tagger row still records why.  final_cluster_id is
+    // filled per candidate below, through this same (shared) object.
+    if (census) {
+        census->n_main = n_main_clusters;
+        census->n_in_window_main = n_in_beam_clusters;
+        census->n_in_window_demoted = n_in_window_demoted;
+        census->n_in_window_nogid = n_in_window_nogid;
+        census->n_candidates = static_cast<int>(candidates.size());
+        for (auto& f : census->flashes) {
+            const int bi = census->bundle_index(f.gid);
+            if (bi >= 0) f.nu_index = census->bundles[bi].nu_index;
+            else if (!gid_root.empty()) {
+                // sbnd_xin/docs/109 rev 4: this flash's bundle was merged into
+                // another gid's; point it at that row.
+                const int r = root_of(f.gid);
+                for (const auto& b : census->bundles) {
+                    if (root_of(b.gid) == r) { f.nu_index = b.nu_index; break; }
+                }
+            }
+        }
+        grouping.set_nu_census(census);
     }
 
     if (candidates.empty()) {
@@ -2459,6 +2977,32 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         MainFlagSnapshotAllGuard& operator=(const MainFlagSnapshotAllGuard&) = delete;
     };
 
+    // sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group.  The cathode partner
+    // is a main_cluster-flagged cluster serving as a COMPANION of this pass.
+    // The PR algorithms read main-ness from that flag (NeutrinoPatternBase,
+    // NeutrinoVertexFinder, NeutrinoTrackShowerSep), so it is cleared for the
+    // duration of the pass and put back after.  Constructed AFTER the two
+    // guards above (their snapshot stays pristine) and destroyed BEFORE them.
+    // Empty list (knob off) => no write.
+    struct PartnerMainFlagGuard {
+        std::vector<Cluster*> cleared;
+        explicit PartnerMainFlagGuard(const std::vector<Cluster*>& partners)
+        {
+            for (auto* c : partners) {
+                if (c && c->get_flag(Flags::main_cluster)) {
+                    c->set_flag(Flags::main_cluster, 0);
+                    cleared.push_back(c);
+                }
+            }
+        }
+        ~PartnerMainFlagGuard()
+        {
+            for (auto* c : cleared) c->set_flag(Flags::main_cluster, 1);
+        }
+        PartnerMainFlagGuard(const PartnerMainFlagGuard&) = delete;
+        PartnerMainFlagGuard& operator=(const PartnerMainFlagGuard&) = delete;
+    };
+
     for (size_t nu_index = 0; nu_index < candidates.size(); ++nu_index) {
         main_cluster   = candidates[nu_index].main;
         other_clusters = candidates[nu_index].others;
@@ -2475,6 +3019,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_selected_as_main] candidate cluster {} "
                                "(L {:.1f} cm) is a demoted main; flagged main_cluster for its own PR pass",
                                main_cluster->get_cluster_id(), main_cluster->get_length()/units::cm);
+        }
+        PartnerMainFlagGuard partner_main_guard(candidates[nu_index].partner_mains);
+        for (auto* c : partner_main_guard.cleared) {
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: [nu_bundle_flash_group] partner main cluster {} "
+                               "(L {:.1f} cm) unflagged main_cluster for candidate {}'s PR pass",
+                               c->get_cluster_id(), c->get_length()/units::cm, main_cluster->get_cluster_id());
         }
 
         // The first candidate reuses the configured member fitter (legacy,
@@ -3560,6 +4110,70 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             }
         }
 
+        // sbnd_xin/docs/109 -- nu_provenance: what the selection did.
+        // candidates[nu_index].main is the selected activity: the loop copied
+        // it into main_cluster and never writes the vector element, while the
+        // overall-vertex search may have repointed main_cluster onto a
+        // companion of the same bundle (swap_main_cluster).
+        if (m_nu_provenance) {
+            const auto& cand = candidates[nu_index];
+            tagger_info.sel_cluster_id = cand.main->get_cluster_id();
+            tagger_info.vertex_moved_cluster = (main_cluster != cand.main) ? 1 : 0;
+            tagger_info.has_vertex = final_main_vertex ? 1 : 0;
+            if (census) {
+                const int fi = census->flash_index(cand.gid);
+                if (fi >= 0) {
+                    const auto& f = census->flashes[fi];
+                    tagger_info.flash_time_us = f.time_us;
+                    tagger_info.flash_pe = f.pe;
+                    tagger_info.flash_tpc = f.tpc;
+                    tagger_info.flash_group = f.flash_group;
+                }
+                const int bi = census->bundle_index(cand.gid);
+                if (bi >= 0) census->bundles[bi].final_cluster_id = main_cluster->get_cluster_id();
+            }
+            if (m_nu_per_bundle) {
+                const int final_id = main_cluster->get_cluster_id();
+                // Membership by cluster id (int-keyed; nothing pointer-keyed is iterated).
+                std::set<int> listed, in_pr;
+                in_pr.insert(cand.main->get_cluster_id());
+                for (auto* c : cand.others) in_pr.insert(c->get_cluster_id());
+                for (const auto& a : cand.acts) {
+                    listed.insert(a.cluster_id);
+                    tagger_info.act_role.push_back(a.is_demoted ? 1 : 0);
+                    tagger_info.act_in_pr.push_back(in_pr.count(a.cluster_id) ? 1 : 0);
+                    tagger_info.act_is_final.push_back(a.cluster_id == final_id ? 1 : 0);
+                }
+                // Companions not already in the roster, in cluster-id order
+                // (children() order is not a stable key).  The cosmic taggers'
+                // admission gate did not cover them, so act_evaluated = 0; a
+                // TGM/STM flag, when present, is still that tagger's positive
+                // verdict.
+                auto append = [&](std::vector<Cluster*> v, int role) {
+                    std::stable_sort(v.begin(), v.end(), [](const Cluster* x, const Cluster* y) {
+                        return x->get_cluster_id() < y->get_cluster_id();
+                    });
+                    for (auto* c : v) {
+                        if (!listed.insert(c->get_cluster_id()).second) continue;
+                        tagger_info.act_cluster_id.push_back(c->get_cluster_id());
+                        tagger_info.act_length_cm.push_back(c->get_length() / units::cm);
+                        tagger_info.act_is_selected.push_back(0);
+                        tagger_info.act_is_demoted.push_back(c->get_flag(Flags::demoted_main) ? 1 : 0);
+                        tagger_info.act_tgm.push_back(c->get_flag(Flags::TGM) ? 1 : 0);
+                        tagger_info.act_stm.push_back(c->get_flag(Flags::STM) ? 1 : 0);
+                        tagger_info.act_fc.push_back(c->get_flag(Flags::FC) ? 1 : 0);
+                        tagger_info.act_lm.push_back(c->get_scalar<int>("lm_flag", -1));
+                        tagger_info.act_evaluated.push_back(0);
+                        tagger_info.act_role.push_back(role);
+                        tagger_info.act_in_pr.push_back(role == 2 ? 1 : 0);
+                        tagger_info.act_is_final.push_back(c->get_cluster_id() == final_id ? 1 : 0);
+                    }
+                };
+                append(cand.others, 2);
+                append(cand.dropped_companions, 3);
+            }
+        }
+
         // Build the full list of beam-flash clusters (main + others) once;
         // used by cosmic_tagger and potentially other taggers.
         std::vector<Cluster*> all_clusters;
@@ -3759,6 +4373,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             kine_info.cluster_id        = main_cluster->get_cluster_id();
             kine_info.matched_flash_gid = candidates[nu_index].gid;
             kine_info.nu_index          = static_cast<int>(nu_index);
+        }
+        if (m_nu_provenance) {
+            kine_info.has_vertex = final_main_vertex ? 1 : 0;   // sbnd_xin/docs/109
         }
         // doc 80 round 2: MCS muon momentum, once per bundle, default OFF.
         // Placed here so all three muon_source modes see what they need --

@@ -83,6 +83,14 @@ static Configuration defaults_of(const std::string& type)
 // switch through this component.
 // ---------------------------------------------------------------------------
 
+TEST_CASE("clus knob defaults: group-mode calib-dump fixes are OFF (sbnd_xin/docs/110)")
+{
+    auto mabc = defaults_of("MultiAlgBlobClustering");
+    CHECK_KNOB_BOOL(mabc, "reset_shower_ids_per_event", false);
+    auto dump = defaults_of("PrDisplayDump");
+    CHECK_KNOB_BOOL(dump, "rse_from_ensemble", false);
+}
+
 TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
 {
     auto cfg = defaults_of("TaggerCheckNeutrino");
@@ -107,6 +115,30 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // DL-swap main-flag leak fix.  Both false = legacy path, byte-identical.
     CHECK_KNOB_BOOL(cfg, "nue_sp_consistent_fv", false);
     CHECK_KNOB_BOOL(cfg, "nu_selected_as_main_snapshot_all", false);
+    // sbnd_xin/docs/109 -- record the selection for the ROOT writers.  false =
+    // no TaggerInfo/KineInfo provenance fields, no NuBundleCensus published.
+    CHECK_KNOB_BOOL(cfg, "nu_provenance", false);
+    REQUIRE_MESSAGE(cfg.isMember("flash_pair_dt_us"), "missing knob: flash_pair_dt_us");
+    CHECK(cfg["flash_pair_dt_us"].asDouble() == doctest::Approx(0.05));
+    // sbnd_xin/docs/109 rev 3 -- nu_dedup_flash_group REMOVES T_tagger rows
+    // (the second candidate one physical flash makes when both drift volumes
+    // see it), so it moves the selection and must default off.  It is built and
+    // measured in doc 109 rev 3 and deliberately NOT flipped in production.
+    CHECK_KNOB_BOOL(cfg, "nu_dedup_flash_group", false);
+    // sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group MERGES two in-window
+    // bundles of one physical flash whose charge meets at the cathode into one
+    // candidate (the cathode partner becomes a companion).  It moves the
+    // selection, so it defaults off; SBND's cfg is where it is turned on.  The
+    // contact is a distance (gap = long_muon_cathode_bridge_gap's value); the
+    // cathode window xcut is 0 = off (doc 109 sec 9.2: the halves touch at the
+    // vertex, not at the seam).
+    CHECK_KNOB_BOOL(cfg, "nu_bundle_flash_group", false);
+    REQUIRE_MESSAGE(cfg.isMember("nu_bundle_flash_group_x"), "missing knob: nu_bundle_flash_group_x");
+    CHECK(cfg["nu_bundle_flash_group_x"].asDouble() == doctest::Approx(0.0));
+    REQUIRE_MESSAGE(cfg.isMember("nu_bundle_flash_group_xcut"), "missing knob: nu_bundle_flash_group_xcut");
+    CHECK(cfg["nu_bundle_flash_group_xcut"].asDouble() == doctest::Approx(0.0));
+    REQUIRE_MESSAGE(cfg.isMember("nu_bundle_flash_group_gap"), "missing knob: nu_bundle_flash_group_gap");
+    CHECK(cfg["nu_bundle_flash_group_gap"].asDouble() == doctest::Approx(20.0));
     // doc pr/40: track (proton/pion/muon) mis-identified as electron.
     CHECK_KNOB_BOOL(cfg, "track_pid_persist_dqdx", false);      // F1
     CHECK_KNOB_BOOL(cfg, "shower_reclass_dqdx_guard", false);   // F2

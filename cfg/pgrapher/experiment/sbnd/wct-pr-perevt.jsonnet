@@ -882,6 +882,39 @@ function(
     // cluster set from this zip, so turning it off costs nusel-evt<ID>.tsv
     // UNLESS save_in_scope is also on (then T_cluster carries it instead).
     pr_bee         = true,
+    // doc sbnd_xin/pr/149: the PR RETILE samplers' strategy (improve2 -> steiner /
+    // steiner_refresh, the Steiner cloud every PR stage reads); the clustering
+    // job's 3d PC is unaffected.  null => 'stepped' = today's config,
+    // byte-identical.  'charge_stepped' => the prototype's retile rule
+    // (sbnd/clus.jsonnet bs_live_face).  wire_product / charge_threshold override
+    // the C++ 2500 / 4000 under 'charge_stepped' only; null => keys omitted.
+    // A string TLA needs inner quotes: --tla-code "retile_sampler_strategy='charge_stepped'".
+    retile_sampler_strategy         = null,
+    retile_sampler_wire_product     = null,
+    retile_sampler_charge_threshold = null,
+    // doc sbnd_xin/pr/149 round 2: the PR job's RESAMPLE stage (ClusteringResampleLive,
+    // sbnd/clus.jsonnet cm_by_name.resample_live).  Non-null => 'resample_live' is
+    // prepended to pipeline_names and re-samples every live blob's "3d" cloud with this
+    // strategy before any other stage, as the prototype's PR executables do
+    // (wire-cell-prod-nue.cxx:1289-1294).  'charge_stepped' = the prototype's rule
+    // (disable_mix_dead_cell true); 'stepped' = the clustering job's settings (the
+    // identity gate).  null => nothing prepended => byte-identical.
+    // A string TLA needs inner quotes: --tla-code "resample_live_strategy='charge_stepped'".
+    resample_live_strategy          = null,
+    // doc sbnd_xin/pr/149 amendment 1: Steiner terminal minimum separation (cm) on
+    // both CreateSteinerGraph instances (doc pdvd/37 round 2 lever; PDVD production
+    // 0.5).  0 => key omitted => byte-identical.
+    steiner_terminal_min_separation = 0,
+    // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs (docs pdvd/114-116),
+    // forwarded to BOTH CreateSteinerGraph instances by sbnd/clus.jsonnet pr().
+    // PDHD/PDVD production runs 'prefer3' / 0.5 / 'tree+path'; SBND does NOT
+    // (study knobs, not adopted).  null => keys omitted => byte-identical.
+    // String TLAs need inner quotes: --tla-code "steiner_blank_plane_mode='prefer3'"
+    // --tla-code steiner_base_weight_blank_alpha=0.5 --tla-code "steiner_base_weight_scope='tree+path'".
+    steiner_blank_plane_mode        = null,
+    steiner_blank_plane_radius      = null,   // a LENGTH (e.g. 1.0 * wc.cm); C++ default 0
+    steiner_base_weight_blank_alpha = null,
+    steiner_base_weight_scope       = null,
     // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
     // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
     // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
@@ -1221,6 +1254,14 @@ function(
     // SBND_SKIP_COSMIC_COMPANIONS=0).
     skip_cosmic_companions = true,
     cosmic_companion_min_length = 15,
+    // nu_adopt_touching (doc sbnd_xin/113 sec 6; C++ default false, keys omitted when off => byte-identical):
+    // adopt untagged flashless (rescue-gid) image clusters that touch the candidate's main cluster as
+    // companions.  Study knob, NOT production.  dis / min_length / max_length in cm, null => C++ defaults 3 / 3 / 100.
+    nu_adopt_touching = false,
+    nu_adopt_touching_dis = null,
+    nu_adopt_touching_min_length = null,
+    nu_adopt_touching_max_length = null,
+    nu_adopt_touching_unmatched_only = null,
     // nu_fallback_demoted_mains (sbnd_xin/docs/73 sec 12, round 3; C++
     // default false = OFF): when the primary loop selects NO candidate
     // (every in-window main convicted or vetoed), consider DEMOTED mains
@@ -1349,6 +1390,69 @@ function(
     // mcs_enable, so the OFF compiled config is byte-identical pre-MCS.
     // C++ default false.
     mcs_enable = true,               // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1, owner pre-authorization; books the five kine_mcs_* T_kine branches)
+    // ---- sbnd_xin/docs/109: self-describing tracking-pr.root ------------ //
+    // root_nu_record: record what the neutrino selection did -- T_bundle (one
+    // row per in-beam-window flash bundle with the reason it did or did not
+    // yield a candidate), T_flash (every optical flash with its TPC and flash
+    // group), Trun event counters, and on T_tagger/T_kine the run/subrun/event,
+    // sel_cluster_id, vertex_moved_cluster, has_vertex, the row's flash and
+    // the companions appended to act_* (act_role / act_is_final).  One switch
+    // for TaggerCheckNeutrino's computing key and both writers' booking keys.
+    // root_cluster_flags: T_cluster tgm/stm/fc/lm read the flags SBND's
+    // taggers set (always 0 before), beam_flash derived with the selection's
+    // own in-window test, matched_flash_gid and flash_tpc added.
+    // root_provenance: Trun wct_version, the BDT weight files, the DL weights
+    // and the TrackFitting file, plus provenance_extra (run_pr_chain_batch.sh
+    // passes the operating-point sha256 and the git revisions).
+    // flash_pair_dt_us: null => C++ default 0.05 us (doc 108 sec 4.1).
+    // Observation only: no reconstruction output moves (doc 109 gates).
+    // C++ defaults false/empty; false here => keys omitted => byte-identical.
+    // SBND PRODUCTION ON 2026-09-14 on the owner's word (doc 109 sec 5): on 267
+    // sbnd_xin data events mabc-pr.zip, the pctree, nusel and the calib dump are
+    // identical knob-off vs knob-on; tracking-pr.root gains trees/branches and
+    // the corrected T_cluster flag columns.  Pre-flip arm: SBND_ROOT_OUTPUT=0.
+    root_nu_record = true,
+    root_cluster_flags = true,
+    root_provenance = true,
+    // sbnd_xin/docs/109 rev 3: T_rec_charge joinable to its candidate
+    // (cluster_id from the candidate's own TaggerInfo, + nu_index and
+    // point_cluster_id), and T_rec_charge / T_proj_data booked even when empty.
+    // Observation only: no reconstruction output moves (doc 109 rev 3 gates).
+    // C++ default stays false.
+    // SBND PRODUCTION ON 2026-09-17 on the owner's word (doc 109 sec 8.9): on
+    // 267 sbnd_xin data events mabc-pr.zip, the pctree, nusel and the calib
+    // dump are identical knob-off vs knob-on, and all 233 055 ROOT branches
+    // match except T_rec_charge.cluster_id (7 files, the column this fixes),
+    // the two added branches and the operating-point hash.
+    root_point_ids = true,
+    // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
+    // physical beam flash seen by both drift volumes (same flash_group), keeping
+    // the longest selected activity.  This MOVES the selection -- it removes
+    // T_tagger rows -- so it is built, measured and left OFF; flipping it is a
+    // separate owner decision.  C++ default false.
+    nu_dedup_flash_group = false,
+    // sbnd_xin/docs/109 rev 4: one neutrino candidate per physical flash WHEN the
+    // two drift volumes' bundles meet at the cathode -- the merge the dedup
+    // could not be.  Doc 109 sec 8.7.3: the "same neutrino on both sides" event
+    // is ONE interaction whose muon crossed x = 0; today its vertex half and its
+    // muon half are two candidates and can never share a PR pass.  With this
+    // on, two in-window bundles of one flash_group on different TPCs whose
+    // charge touches (closest points within nu_bundle_flash_group_gap, C++
+    // default 20 cm = the long_muon_cathode_bridge_gap value; the cathode
+    // window nu_bundle_flash_group_xcut is 0 = off, because on the colleague's
+    // event the halves touch at the VERTEX, not at the seam) become one bundle:
+    // same selection rule, companions from both sides, the other side's mains
+    // admitted as companions.  Bundles that share the light but do NOT touch
+    // -- two neutrinos, one per volume -- stay two candidates.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    // SBND PRODUCTION ON 2026-09-18 (doc 109 rev 4 sec 9.7, owner-directed): on
+    // the 142 of 3067 data events it can touch, 116 merges on the DL arm and
+    // 42 of 53 on the geometric arm, every dropped row a vertex-less
+    // placeholder, no non-eligible event moved (216 749 branches), no row
+    // lost its vertex; kept-apart pairs all >= 24.5 cm apart.
+    nu_bundle_flash_group = true,
+    provenance_extra = {},
+    flash_pair_dt_us = null,
     mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
     mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
     mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
@@ -3237,7 +3341,14 @@ function(
         [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
         [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
         [if cosmic_companion_min_length != null then 'cosmic_companion_min_length']: cosmic_companion_min_length,
+        [if nu_adopt_touching then 'nu_adopt_touching']: true,   // doc sbnd_xin/113 sec 6; C++ default false
+        [if nu_adopt_touching && nu_adopt_touching_dis != null then 'nu_adopt_touching_dis']: nu_adopt_touching_dis,
+        [if nu_adopt_touching && nu_adopt_touching_min_length != null then 'nu_adopt_touching_min_length']: nu_adopt_touching_min_length,
+        [if nu_adopt_touching && nu_adopt_touching_max_length != null then 'nu_adopt_touching_max_length']: nu_adopt_touching_max_length,
+        [if nu_adopt_touching && nu_adopt_touching_unmatched_only != null then 'nu_adopt_touching_unmatched_only']: nu_adopt_touching_unmatched_only,
         [if nu_fallback_demoted_mains then 'nu_fallback_demoted_mains']: true,
+        [if nu_dedup_flash_group then 'nu_dedup_flash_group']: true,  // sbnd_xin/docs/109 rev 3; C++ default false
+        [if nu_bundle_flash_group then 'nu_bundle_flash_group']: true,  // sbnd_xin/docs/109 rev 4; C++ default false
         [if sp_photon_flag then 'sp_photon_flag']: true,
         // Same offsets below the top face as clus.jsonnet's
         // pr() defaults, re-anchored to pr_y_top.
@@ -3653,11 +3764,22 @@ function(
     };
 
     local pr = clus_maker.pr(anodes, dump=true,
-                             pipeline_names=pipeline_names,
+                             // doc sbnd_xin/pr/149 round 2: resample_live runs FIRST when set.
+                             pipeline_names=(if resample_live_strategy != null then ['resample_live'] else [])
+                                            + pipeline_names,
                              tensor_outname=save_tensors,
                              save_in_scope=save_in_scope,
                              flash_by_gid=flash_by_gid,
                              pr_bee=pr_bee,
+                             retile_sampler_strategy=retile_sampler_strategy,   // doc sbnd_xin/pr/149
+                             retile_sampler_wire_product=retile_sampler_wire_product,
+                             retile_sampler_charge_threshold=retile_sampler_charge_threshold,
+                             resample_live_strategy=resample_live_strategy,   // doc sbnd_xin/pr/149 round 2
+                             steiner_terminal_min_separation=steiner_terminal_min_separation,
+                             steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc sbnd_xin/pr/150
+                             steiner_blank_plane_radius=steiner_blank_plane_radius,
+                             steiner_base_weight_blank_alpha=steiner_base_weight_blank_alpha,
+                             steiner_base_weight_scope=steiner_base_weight_scope,
                              trackfitting_config_file=trackfitting_config,
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,
@@ -3753,6 +3875,12 @@ function(
                              nu_per_bundle=nu_per_bundle,
                              nu_per_bundle_min_length=nu_per_bundle_min_length,
                              mcs_enable=mcs_enable,
+                             root_nu_record=root_nu_record,
+                             flash_pair_dt_us=flash_pair_dt_us,
+                             root_cluster_flags=root_cluster_flags,
+                             root_provenance=root_provenance,
+                             root_point_ids=root_point_ids,  // sbnd_xin/docs/109 rev 3
+                             provenance_extra=provenance_extra,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,
                              fast_xgb_forest=fast_xgb_forest,

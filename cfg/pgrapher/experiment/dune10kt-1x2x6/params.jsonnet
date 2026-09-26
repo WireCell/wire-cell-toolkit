@@ -54,10 +54,16 @@ function(params) base {
         // important is that the faces are listed "front" first.
         // Front is the one with the more positive X coordinates and
         // if we want to ignore a face it is made null.
+        // 2026-09-24: the wires file (dune10kt-1x2x6-wires-larsoft-v1) puts
+        // all 12 APAs at x = 0 (2 rows in y x 6 columns in z), both faces
+        // live, drifting both ways to the cathodes at +-apa_cpa.  The old
+        // `centerline = sign*apa_cpa` placed each APA at its cathode's x,
+        // 3.63 m away from its wires (STATUS.md sec 4).  simparams.jsonnet
+        // always had centerline 0; the two files now agree.
         volumes: [
             {
                 local sign = 2*(n%2)-1,
-                local centerline = sign*apa_cpa,
+                local centerline = 0, // was sign*apa_cpa (bug, see above)
                 wires: n,       // anode number
                 name: "apa%d"%n,
                 faces:

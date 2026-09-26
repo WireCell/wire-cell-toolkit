@@ -205,6 +205,18 @@ IFrame::pointer FrameFileSource::load()
                    m_count, m_cur.type, m_cur.tag);
 
         if (m_cur.type == "chanmask") {
+            // An empty channel mask map (a frame with the map but no masked
+            // channels, e.g. a clean simulation through a noise filter) is
+            // written by FrameFileSink as a (0,3) array, whose data pointer
+            // pigenc returns null for, so pigenc::eigen::load() fails.  It is
+            // a valid, empty mask: keep the tag with no entries.
+            const auto& cmshape = m_cur.pig.header().shape();
+            if (cmshape.size() == 2 && cmshape[0] == 0) {
+                cmm[m_cur.tag] = ChannelMasks{};
+                log->debug("call={}, add empty chanmask for tag \"{}\"", m_count, m_cur.tag);
+                clear();
+                continue;
+            }
             Eigen::Array<int, Eigen::Dynamic, Eigen::Dynamic> cmsarr;
             bool ok = pigenc::eigen::load(m_cur.pig, cmsarr);
             if (!ok) {

@@ -299,7 +299,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                          guard_entry_min_cm=null, guard_entry_max_cm=null,
                          guard_entry_min_len_cm=null, guard_entry_kink_deg=null,
                          michel_res_length_cut=null, proton_tm_max=null,
-                         proton_b_ks2_max=null, proton_c_peak_max=null) :: {
+                         proton_b_ks2_max=null, proton_c_peak_max=null,
+                         kink_asym_enable=false, kink_asym_entry_mip=null,
+                         kink_asym_far_mip=null) :: {
             type: "TaggerCheckSTM",
             name: prefix + name,
             data: {
@@ -374,6 +376,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if proton_tm_max != null then { proton_tm_max: proton_tm_max } else {})
               + (if proton_b_ks2_max != null then { proton_b_ks2_max: proton_b_ks2_max } else {})
               + (if proton_c_peak_max != null then { proton_c_peak_max: proton_c_peak_max } else {})
+              // doc pdvd/56 T1b: a third, additive OR-clause in find_first_kink's
+              // charge gate (both sweeps), admitting an ASYMMETRIC kink (Bragg
+              // into a cold Michel) that the existing "both arms hot" clauses
+              // never accept.  C++ defaults false/1.2/0.5; keys omitted when
+              // off => byte-identical legacy config.
+              + (if kink_asym_enable then { kink_asym_enable: true } else {})
+              + (if kink_asym_entry_mip != null then { kink_asym_entry_mip: kink_asym_entry_mip } else {})
+              + (if kink_asym_far_mip != null then { kink_asym_far_mip: kink_asym_far_mip } else {})
         },
 
         // doc pdvd/48: CheckSTM_Michel -- the stopping-muon + Michel-electron
@@ -407,6 +417,52 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               + (if mip_dqdx_median != null then { mip_dqdx_median: mip_dqdx_median } else {})
               + (if fiducial != null then { fiducial: fiducial } else {})
               + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + knobs,
+        },
+
+        // doc pdvd/120: CheckBeamParticle -- the neutrino PR chain run on the
+        // BEAM-flash-matched bundle only, with the main vertex at the beam
+        // particle's ENTRY point (the bundle cluster closest to the nominal
+        // entry, its axis end nearer that entry, snapped onto the PR graph),
+        // no DL vertex and no taggers.  Publishes the fitter/graph exactly like
+        // tagger_check_neutrino (the unnamed slot + "nu0"), so tracking_visitor /
+        // tagger_output (T_kine) / pr_display / the Bee PR layers read it
+        // unchanged with visitor 'CheckBeamParticle:<prefix>'.
+        // beam_window_low/high: internal units on cluster_t0 (the RAW matched
+        // flash time); C++ default 0/0 = the gate is OFF and the stage selects
+        // NOTHING (it never falls back to every bundle).  beam_entry_point_cm
+        // [x,y,z] cm and beam_dir [x,y,z] (travel sense): C++ defaults are the
+        // doc pdvd/120 sec 1 values; beam_entry_max_dist_cm (C++ 50).  `knobs`
+        // carries the PR-partition keys (CheckBeamParticle.cxx
+        // pattern_knob_keys, the same names as tagger_check_neutrino) and the
+        // stage's own switches (improve_entry_vertex, entry_fail_fallback_geo,
+        // ...; C++ defaults in default_configuration()).  Keys omitted => C++
+        // default.  Only active when named in pipeline_names => absent from
+        // every other compiled config (byte-identical).
+        check_beam_particle(name="", trackfitting_config_file="", particle_dataset="", recombination_model="",
+                            fiducial=null, fv_tolerance=[],
+                            mip_dqdx=null, mip_dqdx_median=null, perf=false,
+                            beam_window_low=null, beam_window_high=null,
+                            beam_entry_point_cm=null, beam_dir=null, beam_entry_max_dist_cm=null,
+                            knobs={}) :: {
+            type: "CheckBeamParticle",
+            name: prefix + name,
+            data: {
+                grouping: "live",
+                trackfitting_config_file: trackfitting_config_file,
+                particle_dataset: particle_dataset,
+                recombination_model: recombination_model,
+            } + dv_cfg + pcts_cfg
+              + (if perf then { perf: true } else {})
+              + (if mip_dqdx != null then { mip_dqdx: mip_dqdx } else {})
+              + (if mip_dqdx_median != null then { mip_dqdx_median: mip_dqdx_median } else {})
+              + (if fiducial != null then { fiducial: fiducial } else {})
+              + (if std.length(fv_tolerance) > 0 then { fv_tolerance: fv_tolerance } else {})
+              + (if beam_window_low != null then { beam_window_low: beam_window_low } else {})
+              + (if beam_window_high != null then { beam_window_high: beam_window_high } else {})
+              + (if beam_entry_point_cm != null then { beam_entry_point_cm: beam_entry_point_cm } else {})
+              + (if beam_dir != null then { beam_dir: beam_dir } else {})
+              + (if beam_entry_max_dist_cm != null then { beam_entry_max_dist_cm: beam_entry_max_dist_cm } else {})
               + knobs,
         },
 
@@ -800,7 +856,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false) :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false, nu_provenance=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
@@ -824,7 +880,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // doc 80 round 3: book the five kine_mcs_* T_kine branches (MCS
               // muon momentum).  C++ default false = branches not booked; key
               // omitted when off => byte-identical pre-knob config AND schema.
-              + (if mcs_output then { mcs_output: true } else {}),
+              + (if mcs_output then { mcs_output: true } else {})
+              // sbnd_xin/docs/109: book the selection-provenance branches
+              // (T_tagger run/subrun/event, sel_cluster_id,
+              // vertex_moved_cluster, has_vertex, flash_*, act_role,
+              // act_is_final; T_kine run/subrun/event, has_vertex).  C++
+              // default false = branches not booked; key omitted when off =>
+              // byte-identical pre-knob config AND schema.
+              + (if nu_provenance then { nu_provenance: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {
@@ -1537,7 +1600,15 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
                 edge_charge_forward_dead_mix=false, terminal_min_separation=0,
-                skip_flags=[]) :: {
+                skip_flags=[],
+                // doc pdvd/114: blank-plane admission policy for the terminal
+                // candidates.  C++ default "wcp" (no policy).  null => keys
+                // omitted => byte-identical pre-knob config.
+                terminal_blank_plane_mode=null, terminal_blank_plane_radius=null,
+                // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
+                // before the Voronoi step.  C++ default 0 / "tree".  null =>
+                // keys omitted => byte-identical pre-knob config.
+                base_weight_blank_alpha=null, base_weight_scope=null) :: {
             type: "CreateSteinerGraph",
             name: prefix+name,
             data: {
@@ -1595,6 +1666,30 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // byte-identical pre-knob config.  This is a SHARED function:
                 // SBND, uBooNE and ICARUS bind it too and are left at 0.
                 [if terminal_min_separation != 0 then 'terminal_min_separation']: terminal_min_separation,
+                // doc pdvd/114.  C++ default "wcp".  "prefer3" drops a blob's
+                // two-plane candidates when the blob holds a three-plane one;
+                // "nearby" drops them when a three-plane candidate of the
+                // cluster lies within terminal_blank_plane_radius (a LENGTH,
+                // WCT units); "prefer3+nearby" both.  A blob whose candidates
+                // all have a zero plane is never touched, so dead / inefficient
+                // regions keep their terminals.  Keys omitted when null =>
+                // byte-identical pre-knob config.  Shared function: SBND,
+                // uBooNE and ICARUS bind it too and leave both null.
+                [if terminal_blank_plane_mode != null then 'terminal_blank_plane_mode']: terminal_blank_plane_mode,
+                [if terminal_blank_plane_radius != null then 'terminal_blank_plane_radius']: terminal_blank_plane_radius,
+                // doc pdvd/115.  C++ default 0.  A positive alpha multiplies
+                // every BASE graph edge weight by 1 + alpha * 0.5 * (nz(s) +
+                // nz(t)), nz = planes at charge exactly 0 at the endpoint,
+                // before the Voronoi step that admits the tree's interiors, so
+                // an on-image route wins where one exists; a dead or empty
+                // region is priced alike everywhere and keeps its only route.
+                // base_weight_scope "tree" (C++ default) keeps the reduced
+                // graph's weights geometric; "tree+path" carries the priced
+                // length into the reduced graph too.  Keys omitted when null
+                // => byte-identical pre-knob config.  Shared function: SBND,
+                // uBooNE and ICARUS bind it too and leave both null.
+                [if base_weight_blank_alpha != null then 'base_weight_blank_alpha']: base_weight_blank_alpha,
+                [if base_weight_scope != null then 'base_weight_scope']: base_weight_scope,
             } + dv_cfg + pcts_cfg
               + (if beam_window_only then {
                      beam_window_only: true,

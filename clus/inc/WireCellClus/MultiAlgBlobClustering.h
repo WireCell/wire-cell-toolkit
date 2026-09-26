@@ -257,6 +257,16 @@ namespace WireCell::Clus {
             // em_ke_min applies to gamma/e+-, np_ke_min to n/p/nuclei
             // (prototype WCReader::KeepMC: 5 MeV / 10 MeV).
             double em_ke_min{0.0};
+            // doc pdvd/51: prototype_names renders KE as an INTEGER number of
+            // MeV (WCReader::MCJSON's "int e = KE*1000"), so every node below
+            // 1 MeV reads "0 MeV".  That was harmless while the smallest thing
+            // in a PF tree was a several-MeV shower; CheckSTM_Michel's
+            // muon-capture gammas are ~1 MeV (median 0.97 on PDVD d16vnu), so
+            // half of them would be labelled 0.  When this is > 0, a KE below
+            // it is written with two decimals instead.  0 = off = the prototype
+            // formatting for every energy, so the default is byte-identical and
+            // SBND is untouched.
+            double ke_decimal_below{0.0};
             double np_ke_min{0.0};
             // ---- doc sbnd_xin/docs/pr/34 §10 port-fidelity knobs ----
             // pf_track_main_cluster_only: the track BFS skips segments whose
@@ -547,6 +557,24 @@ namespace WireCell::Clus {
         // the legacy filter, byte-identical output; 0 shows every genuine
         // match.
         double m_bee_flash_pred_min{100.0};
+        // doc pdvd/119.  Optional [lo, hi] window (microseconds, on the op_t
+        // axis, i.e. the root opflash "time" = input-0 charge clock) inside which
+        // the brightest flash is labelled the in-beam flash: fill_bee_flashes
+        // then writes a per-row "op_beam" 0/1 array that the Bee "/" key prefers
+        // over its per-experiment op_t window.  PDVD computes the window per
+        // event from the beam-trigger time (the beam flash moves on op_t from
+        // event to event).  Empty (key absent) = no op_beam array, op JSON
+        // byte-identical to the pre-knob output.  Display label only: the Q/L
+        // selection is not touched.
+        std::vector<double> m_bee_beam_window_us;
+        // doc pdvd/119 sec 8.  When set, fill_bee_flashes also writes a per-row
+        // "op_cluster_anodes" array: each matched cluster's anode ident (the
+        // anode holding most of its blobs; at this pre-pipeline point a cluster
+        // lives on one drift side).  The Bee side panel needs it to put a
+        // cluster in its drift volume: from the uncorrected x alone a cluster
+        // within v*t of the cathode fits either volume.  Default OFF = no array,
+        // op JSON byte-identical.  Display only.
+        bool m_bee_flash_cluster_anodes{false};
         // When > 0, group the root opflash flashes across both TPC sides by this
         // ±time window (stored as a per-flash "group" array on the root opflash
         // PC, pre-pipeline) so the Bee viewer can show a TPC0/TPC1 coincidence
@@ -596,6 +624,13 @@ namespace WireCell::Clus {
         bool m_event_from_ident{false};
         // ident -> (run, subrun), consulted only when m_event_from_ident.
         std::map<int, std::pair<int,int>> m_rse_map;
+        // sbnd_xin/docs/110 -- restart PR::Shower's process-wide id counter at
+        // the start of every event this node processes, before any pipeline
+        // visitor can build a Shower, so a multi-event (group) process numbers
+        // each event's showers from 0 exactly as a one-event process does.  The
+        // ids reach the PrDisplayDump calib json.  Default false => the legacy
+        // process-wide numbering, byte-identical.
+        bool m_reset_shower_ids_per_event{false};
 
         // Own (non-shared) Bee zip.  A printf conversion in the configured
         // "bee_zip" means one zip per event: the open zip is closed and the

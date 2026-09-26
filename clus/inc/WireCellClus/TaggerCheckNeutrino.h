@@ -743,6 +743,77 @@ public:
         // visible downstream.  A no-op unless armed.  C++ default false =>
         // byte-identical.
         bool m_nu_selected_as_main_snapshot_all{false};
+        // ---- sbnd_xin/docs/109 -- nu_provenance ----------------------- //
+        // Record what the candidate selection did, for the ROOT writers:
+        // TaggerInfo sel_cluster_id / vertex_moved_cluster / has_vertex / the
+        // row's flash (time, PE, TPC, flash group) and the companions
+        // appended to the act_* roster (act_role, act_is_final); KineInfo
+        // has_vertex; and a NuBundleCensus (per-bundle reason codes, event
+        // counters incl. in-window clusters with no matched flash, the flash
+        // table) published on the grouping BEFORE the no-candidate return, so
+        // an event with no T_tagger row still says why.  Observation only:
+        // every selection decision is unchanged.  C++ default false =>
+        // nothing filled, nothing published => byte-identical.
+        bool m_nu_provenance{false};
+        // us.  Two flashes on different TPCs closer than this in time are one
+        // physical flash seen by both TPCs (NuBundleCensus flash_group).  0.05
+        // = where the one-flash peak of the different-TPC |dt| ends on 3000
+        // production events (doc 108 sec 4.1).  Read only under nu_provenance.
+        double m_flash_pair_dt_us{0.05};
+        // sbnd_xin/docs/109 rev 3.  One physical beam flash is seen by BOTH
+        // SBND drift volumes and arrives as two opflash gids a few ns apart
+        // (e.g. 5 on TPC 0 and 1000006 on TPC 1).  Bundles are keyed on the raw
+        // gid, so each side builds its own candidate and the event gets two
+        // neutrino rows for one flash -- 12 of the 3067 sbnd_xin events, and in
+        // the hand-scanned example only one of the two rows is the true
+        // neutrino.  group_flashes() already says which gids are one flash;
+        // until now that answer was only written to the output, never read back
+        // into a decision.  When true, candidates sharing a flash_group are
+        // collapsed to the longest selected activity (the same rule the row
+        // ordering already uses), and the dropped bundle keeps its census row
+        // with reason kDedupFlashGroup so the event still explains itself.
+        // C++ default false => every bundle keeps its candidate, as today.
+        bool m_nu_dedup_flash_group{false};
+        // sbnd_xin/docs/109 rev 4 -- nu_bundle_flash_group.  The MERGE that
+        // rev 3's dedup could not be: doc 109 sec 8.7.3 showed that the
+        // colleague's "same neutrino on both sides" event is ONE interaction
+        // whose 1540 MeV muon crossed the cathode -- vertex and hadrons in one
+        // drift volume (one bundle), most of the muon in the other (a second
+        // bundle with a fake vertex on the cathode) -- and that the companion
+        // rule (matched_flash_gid == gid) can never put the two halves in one
+        // PR pass.  Deleting one row (the dedup) throws away half the event.
+        //
+        // But a shared flash_group has TWO readings: one interaction split at
+        // the cathode, or two interactions -- one per drift volume -- whose
+        // light merged.  The owner wants no double counting AND no lost second
+        // neutrino.  So the group alone is not the bundle key: two in-window
+        // bundles of one flash group on different TPCs are merged ONLY when
+        // their charge TOUCHES -- the closest points of some cluster pair (one
+        // per bundle) closer than `gap` (PR::bundle_contact).  Two separate
+        // interactions' charge does not touch, so a second neutrino keeps its
+        // own row.  Measured on the colleague's event (doc 109 sec 9.2): the
+        // two bundles touch at 0.4 cm -- at the VERTEX, not at the cathode,
+        // because the Q/L matching had already put the muon's near-side
+        // segment into the far flash's bundle as an associated cluster.  That
+        // is why the contact is a distance and the cathode window (`xcut` > 0:
+        // both closest points within xcut of the plane `x`) is only an
+        // optional tightening, OFF by default.  Each side keeps its OWN
+        // selection (main, then the demoted-main fallback); the merged
+        // candidate is the LONGER of the two selected activities, and the
+        // other side's selected activity and mains -- the partner half --
+        // join the companions (subject to skip_cosmic_companions like any
+        // companion) with their main_cluster flag cleared for that PR pass
+        // only.  A merge needs a real winner: when the longer selected
+        // activity is under the nu_per_bundle_min_length floor the pair stays
+        // apart (two stubs merged only gave a placeholder a fake vertex).
+        // Inert unless nu_per_bundle.  C++ default false => every bundle
+        // keyed on its raw gid, as today.  gap's default is the
+        // long_muon_cathode_bridge_gap production value, the measured cathode
+        // charge-loss scale, so a split that DOES happen at the seam is caught.
+        bool   m_nu_bundle_flash_group{false};
+        double m_nu_bundle_flash_group_x{0.0};      // cm; the cathode plane (SBND seam at x = 0); read only when xcut > 0
+        double m_nu_bundle_flash_group_xcut{0.0};   // cm; > 0 = require both closest points within this of the plane; 0 = distance only
+        double m_nu_bundle_flash_group_gap{20.0};   // cm; max distance between the closest points
         bool m_sp_photon_flag{false};  // doc pr/26 sec. 8.2 port gap.  If true, the single-photon
                                        // tagger's verdict is stored in TaggerInfo::photon_flag,
                                        // as prototype NeutrinoID.cxx:271 does
@@ -752,6 +823,21 @@ public:
                                        // discarded.  C++ default false = legacy: photon_flag
                                        // stays at its init_tagger_info() 0, so the uBooNE tagger
                                        // ntuple branch is byte-identical.
+        // doc sbnd_xin/113 sec 6 -- nu_adopt_touching (default OFF): the candidate's companions are
+        // the associated clusters of its own flash bundle only, so an image cluster that TOUCHES the
+        // candidate but carries no flash (a rescue gid >= 1000000: the Q/L matching left it flashless)
+        // is never reconstructed and its charge never reaches kine_reco_Enu.  On the 3067 data events
+        // the blind scan found such prongs leaving the vertex (doc 113 sec 6).  With the knob on, after
+        // the bundle's own companions are gathered, every untagged (not TGM/STM), non-main cluster
+        // whose closest approach to the candidate's main cluster is <= nu_adopt_touching_dis (cm) and
+        // whose length lies in [min, max] (cm) is added to other_clusters; unmatched_only restricts it
+        // to rescue-gid clusters (a cluster matched to another flash keeps its own bundle).  Side result of
+        // doc 113 (the owner's target is the matched beam bundle itself); measured on a stage-B arm, not pursued.
+        bool   m_nu_adopt_touching{false};
+        double m_nu_adopt_touching_dis{3.0};          // cm
+        double m_nu_adopt_touching_min_length{3.0};   // cm
+        double m_nu_adopt_touching_max_length{100.0}; // cm; through-going cosmics are long
+        bool   m_nu_adopt_touching_unmatched_only{true};
         double m_cosmic_companion_min_length{0};  // cm.  A tagged companion SHORTER than this
                                                   // stays in regardless of verdict, so a
                                                   // mis-tagged short neutrino daughter can never

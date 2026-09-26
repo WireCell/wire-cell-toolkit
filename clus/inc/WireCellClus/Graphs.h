@@ -194,8 +194,18 @@ namespace WireCell::Clus::Graphs {
             /// @param index The starting vertex index
             /// @param nlevel The number of levels (hops) to search
             /// @param include_self Whether to include the original vertex in the result (default: true)
-            /// @return A set of vertex indices that are within nlevel hops from the input index
-            vertex_set find_neighbors_nlevel(size_t index, int nlevel, bool include_self = true) const;
+            /// @return The vertex indices within nlevel hops, ASCENDING and unique.
+            ///
+            /// doc sbnd_xin/119 round 3: this returned a `vertex_set` (std::set) and 71 % of the
+            /// function's cost was the red-black insertion, one node allocation per neighbour --
+            /// 3.3 % of the SBND nuecc job, since form_point_association calls it once per
+            /// projected fit point.  The BFS's `visited` array already guarantees uniqueness, so
+            /// the set was only supplying ORDER.  A vector sorted once at the end supplies the
+            /// same order with no per-element allocation, and both callers only iterate the
+            /// result.  The ascending order is load-bearing, not incidental: TrackFitting walks
+            /// this to build a blob set whose iteration order reaches the output, so returning
+            /// the raw BFS discovery order would NOT be byte-identical.
+            std::vector<vertex_type> find_neighbors_nlevel(size_t index, int nlevel, bool include_self = true) const;
 
         };
 

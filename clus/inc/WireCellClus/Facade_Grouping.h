@@ -28,6 +28,7 @@ namespace WireCell::Clus {
     class FiducialUtils;
     using FiducialUtilsPtr = std::shared_ptr<FiducialUtils>;
     class TrackFitting;
+    namespace PR { struct NuBundleCensus; }
 }
 
 namespace WireCell::Clus::Facade {
@@ -126,6 +127,15 @@ namespace WireCell::Clus::Facade {
             // (apa, face), once) but only READ when m_ctpc_aniso_metric is on.
             double drift_step{0.0};
             std::array<double, 3> yscale{1.0, 1.0, 1.0};
+            // doc sbnd_xin/119 round 3: the rest of what the per-point projection used to
+            // re-derive on every call.  cos_angle/sin_angle are cos/sin of angle[pind]; xsign and
+            // xorig are the two IAnodeFace constants drift2time() dug out of
+            // anodeface->planes()[2]->wires().front()->center() per call.  Same reasoning, and
+            // the same output-identity argument, as the memo above: these hold exactly the values
+            // the per-call derivation returns.  On SBND nuecc evt 2925 that derivation was 4.2 %
+            // of the job in drift2time and a further ~1.4 % in sin/cos under point2wind.
+            std::array<double, 3> cos_angle{}, sin_angle{};
+            double xsign{0.0}, xorig{0.0};
         };
         // Dense by key = apa*2+face (called per point in the good-point
         // tests; a hash lookup here was ~5% of busy clustering).  unique_ptr
@@ -390,6 +400,9 @@ namespace WireCell::Clus::Facade {
 
         /// @brief convert_3Dpoint_time_ch
         std::tuple<int, int> convert_3Dpoint_time_ch(const geo_point_t& point, const int apa, const int face, const int pind) const;
+        /// @brief doc pdvd/101: the UNROUNDED wire coordinate convert_3Dpoint_time_ch
+        /// rounds (wire k's centre at k).  std::round of it is exactly that wind.
+        double convert_3Dpoint_wire_cont(const geo_point_t& point, const int apa, const int face, const int pind) const;
         // In class Grouping definition
         /// @param wire  local wire index within the plane (NOT global channel number)
         std::pair<double,double> convert_time_wire_2Dpoint(const int timeslice, const int wire, const int apa, const int face, const int plane) const;
@@ -475,10 +488,19 @@ namespace WireCell::Clus::Facade {
         // Convenience accessor for PRGraph (delegates to TrackFitting)
         std::shared_ptr<WireCell::Clus::PR::Graph> get_pr_graph() const;
 
+        // sbnd_xin/docs/109: TaggerCheckNeutrino's selection census (per-bundle
+        // reasons, event counters, the flash table), carried to the ROOT
+        // writers the same way the TrackFitting is.  Null unless
+        // TaggerCheckNeutrino's nu_provenance knob is on.  Not a PC array, so
+        // it is never serialized.
+        std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> get_nu_census() const { return m_nu_census; }
+        void set_nu_census(std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> c) { m_nu_census = c; }
+
       private:
         FiducialUtilsPtr m_fiducialutils;
         std::shared_ptr<WireCell::Clus::TrackFitting> m_track_fitting;
         std::map<std::string, std::shared_ptr<WireCell::Clus::TrackFitting>> m_named_track_fitting;
+        std::shared_ptr<const WireCell::Clus::PR::NuBundleCensus> m_nu_census;
 
         // Build cache for a specific APA/face/plane
         void build_wire_cache(int apa, int face, int plane) const;

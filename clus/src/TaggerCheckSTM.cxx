@@ -216,6 +216,14 @@ public:
         m_readout_edge_guard = get<bool>(config, "readout_edge_guard", m_readout_edge_guard);
         m_guard_readout_edge_ticks = get<double>(config, "guard_readout_edge_ticks", m_guard_readout_edge_ticks);
         m_readout_nticks = get<int>(config, "readout_nticks", m_readout_nticks);
+        // readout_edge_defer (C++ default false => byte-identical legacy; doc
+        // pdvd/100 round 2): instead of rejecting, a pass the readout-edge guard
+        // fires on carries on exactly as with the guard off, and a cluster that
+        // pass accepts gets the scalar stm_readout_edge = 1.  The veto is then
+        // CheckSTM_Michel's readout_edge_require_michel (kept only with a Michel
+        // object at the stop, which does not exist yet here).  ON WITHOUT that
+        // key the guard is effectively off.
+        m_readout_edge_defer = get<bool>(config, "readout_edge_defer", m_readout_edge_defer);
         if (m_readout_edge_guard) {
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: readout_edge_guard ON (stop tick within {} of [0,{}))",
                                 m_guard_readout_edge_ticks, m_readout_nticks);
@@ -311,6 +319,13 @@ public:
         if (m_vertex_kink_guard) {
             SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: vertex_kink_guard ON (turn>{} deg && post>{} MIP)",
                                 m_guard_vertex_turn, m_guard_vertex_mip);
+        }
+        m_kink_asym_enable = get<bool>(config, "kink_asym_enable", m_kink_asym_enable);
+        m_kink_asym_entry_mip = get<double>(config, "kink_asym_entry_mip", m_kink_asym_entry_mip);
+        m_kink_asym_far_mip = get<double>(config, "kink_asym_far_mip", m_kink_asym_far_mip);
+        if (m_kink_asym_enable) {
+            SPDLOG_LOGGER_DEBUG(s_log, "configure: TaggerCheckSTM: kink_asym_enable ON (entry>={} MIP && far<={} MIP, either arm)",
+                                m_kink_asym_entry_mip, m_kink_asym_far_mip);
         }
 
         // descent_guard (C++ default false => byte-identical legacy): the
@@ -456,6 +471,7 @@ public:
         cfg["readout_edge_guard"] = m_readout_edge_guard;
         cfg["guard_readout_edge_ticks"] = m_guard_readout_edge_ticks;
         cfg["readout_nticks"] = m_readout_nticks;
+        cfg["readout_edge_defer"] = m_readout_edge_defer;   // doc pdvd/100 round 2
         cfg["guard_cathode_cm"] = m_guard_cathode_cm;
         cfg["guard_cathode_peak"] = m_guard_cathode_peak;
         // doc-63 round-4a dist_to_anode face fix; false = byte-identical legacy.
@@ -474,6 +490,10 @@ public:
         cfg["vertex_kink_guard"] = m_vertex_kink_guard;
         cfg["guard_vertex_turn"] = m_guard_vertex_turn;
         cfg["guard_vertex_mip"] = m_guard_vertex_mip;
+        // doc pdvd/56 T1b asymmetric kink clause; false = byte-identical legacy.
+        cfg["kink_asym_enable"] = m_kink_asym_enable;
+        cfg["kink_asym_entry_mip"] = m_kink_asym_entry_mip;
+        cfg["kink_asym_far_mip"] = m_kink_asym_far_mip;
         // doc-94 round-1 vertex-hadron veto; false = byte-identical legacy.
         cfg["vertex_hadron_guard"] = m_vertex_hadron_guard;
         cfg["guard_hadron_len_cm"] = m_guard_hadron_len_cm;
@@ -613,11 +633,17 @@ public:
 
             if (m_save_stm_fit) { m_pass_records.clear(); m_eval_records.clear(); }
 
+            m_readout_edge_accepted = false;   // doc pdvd/100 round 2
             bool is_stm = check_stm_conditions(*main_cluster, associated_clusters);
 
             // TGM is set inside check_stm_conditions; set STM only when not TGM
             if (is_stm && !main_cluster->get_flag(Flags::TGM)) {
                 main_cluster->set_flag(Flags::STM);
+                // doc pdvd/100 round 2 (readout_edge_defer): name the cluster
+                // whose accepted pass the readout-edge guard deferred, for
+                // CheckSTM_Michel's readout_edge_require_michel.  Never set
+                // with the knob off.
+                if (m_readout_edge_accepted) main_cluster->set_scalar<int>("stm_readout_edge", 1);
             }
 
             SPDLOG_LOGGER_INFO(s_log, "{}visit: TaggerCheckSTM: cluster {} → STM={} TGM={}", m_evt_tag,
@@ -810,6 +836,20 @@ private:
     double m_guard_vertex_turn{45.0};    // sharpest end-region turn above this (deg) ...
     double m_guard_vertex_mip{2.2};      // ... into a post-turn median above this (MIP) => vertex
 
+    // doc pdvd/56 T1b: a third, ADDITIVE clause in find_first_kink's charge
+    // gate (both sweeps), admitting an ASYMMETRIC kink -- Bragg into a cold
+    // Michel -- that the existing "both arms hot" gates never accept, so the
+    // kink search falls through to its no-kink sentinel on a real muon/Michel
+    // junction (doc 54 sec 1.2: 039349_18/36, sum_fQ 1.77, sum_bQ 0.09).
+    // false => byte-identical legacy (every existing geometry precondition
+    // and both existing charge clauses are untouched; this only adds a third
+    // OR-branch to each).  Thresholds are already-normalized MIP fractions
+    // (sum_fQ/sum_bQ are divided by m_mip_dqdx upstream), so no new absolute
+    // e/cm literal is introduced.
+    bool m_kink_asym_enable{false};
+    double m_kink_asym_entry_mip{1.2};   // hot arm >= this (MIP) ...
+    double m_kink_asym_far_mip{0.5};     // ... cold arm <= this (MIP), either direction => kink
+
     // doc-94 round-1 descent veto (see configure()).  cos_y default +1.01 is
     // above the feature's range => a pure probe even when the boolean is on,
     // which is how the population distribution is measured before a cut is
@@ -845,6 +885,8 @@ private:
     bool m_readout_edge_guard{false};       // doc pdvd/25: readout-window truncation veto
     double m_guard_readout_edge_ticks{60};  // stop tick within this of the window edges
     int m_readout_nticks{0};                // readout length in ticks; <= 0 = late edge unchecked
+    bool m_readout_edge_defer{false};       // doc pdvd/100: leave the veto to CheckSTM_Michel
+    mutable bool m_readout_edge_accepted{false};   // the accepted pass was a deferred one (per check_stm_conditions call)
     double m_guard_cathode_cm{5.0};     // stop-to-cathode distance below this
     double m_guard_cathode_peak{2.5};   // ... with end peak below this x MIP
 
@@ -973,6 +1015,8 @@ private:
         if (!m_pass_records.empty()) {
             std::vector<double> x, y, z, dQ, dx, L, rr, pu, pv, pw, pt, chi2;
             std::vector<int> apa, face, pass, status;
+            // doc pdvd/56 T4: writer-only per-plane dead-channel flags.
+            std::vector<int> reg_u, reg_v, reg_w;
             // doc 30: non-const so rec.cells can be moved into m_acc_pass_snapshots
             // below; every other member is read, not written.
             for (auto& rec : m_pass_records) {
@@ -994,6 +1038,9 @@ private:
                     chi2.push_back(f.reduced_chi2);
                     apa.push_back(f.paf.first); face.push_back(f.paf.second);
                     pass.push_back(rec.pass); status.push_back(rec.status);
+                    reg_u.push_back(f.reg_flag_u ? 1 : 0);
+                    reg_v.push_back(f.reg_flag_v ? 1 : 0);
+                    reg_w.push_back(f.reg_flag_w ? 1 : 0);
                 }
                 SPDLOG_LOGGER_INFO(s_log,
                     "persist_stm_fit: cluster {} stmfit pass={} status={} kink={} exit_L={:.1f} left_L={:.1f} npts={}",
@@ -1017,6 +1064,8 @@ private:
             arrays.emplace("reduced_chi2", Array(chi2));
             arrays.emplace("apa", Array(apa)); arrays.emplace("face", Array(face));
             arrays.emplace("pass", Array(pass)); arrays.emplace("status", Array(status));
+            arrays.emplace("reg_flag_u", Array(reg_u)); arrays.emplace("reg_flag_v", Array(reg_v));
+            arrays.emplace("reg_flag_w", Array(reg_w));
             cluster.local_pcs()["stm_fit"] = Dataset(arrays);
 
             std::vector<int> p_pass, p_status, p_kink, p_npts;
@@ -1177,6 +1226,13 @@ private:
         // 4. Use Steiner graph to find the shortest path
         const std::vector<size_t>& path_indices = 
             cluster.graph_algorithms("steiner_graph").shortest_path(first_index, last_index);
+
+        // doc pdvd/111 round 2: log-only, the steiner_pc indices this walk ran between, so the
+        // WCT_STEINER_GRAPH_DUMP graph of this cluster can replay it offline.
+        if (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr) {
+            std::cout << "STMRP " << cluster.ident() << " rough " << first_index << " " << last_index
+                      << " " << path_indices.size() << std::endl;
+        }
 
         // doc pdhd/11: log-only (WCT_STM_PATH_DEBUG) anatomy of the graph this path was
         // walked on.  The question it answers is whether a sparse rough path means the
@@ -1523,6 +1579,13 @@ private:
                 const std::vector<size_t>& path2_indices = 
                     cluster.graph_algorithms("steiner_graph").shortest_path(curr_index, last_index);
                 
+                // doc pdvd/111 round 2: log-only, the two crawl walks (see do_rough_path's STMRP).
+                if (getenv("WCT_STEINER_GRAPH_DUMP") != nullptr) {
+                    std::cout << "STMRP " << cluster.ident() << " crawl1 " << first_index << " " << curr_index
+                              << " " << path1_indices.size() << std::endl;
+                    std::cout << "STMRP " << cluster.ident() << " crawl2 " << curr_index << " " << last_index
+                              << " " << path2_indices.size() << std::endl;
+                }
                 std::list<size_t> path2_indices_list(path2_indices.begin(), path2_indices.end());
                 // Combine paths, removing duplicate middle point
                 // Copy first path to temporary storage
@@ -1793,9 +1856,15 @@ private:
                     sum_bQ /= (sum_bx / units::cm + 1e-9) * m_mip_dqdx;
                     
                     // Final selection criteria
-                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) || 
-                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) && 
-                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm)) {
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) ||
+                        (sum_fQ + sum_bQ > 1.4 && (sum_fQ > 0.8 || sum_bQ > 0.8) &&
+                        v10.magnitude() > 10*units::cm && v20.magnitude() > 10*units::cm) ||
+                        // doc pdvd/56 T1b: additive asymmetric clause (Bragg
+                        // into a cold Michel).  false by default => the two
+                        // clauses above are the only path, byte-identical.
+                        (m_kink_asym_enable &&
+                         ((sum_fQ >= m_kink_asym_entry_mip && sum_bQ <= m_kink_asym_far_mip) ||
+                          (sum_bQ >= m_kink_asym_entry_mip && sum_fQ <= m_kink_asym_far_mip)))) {
                         
                         if (i + 2 < dq_size) {
                             SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx, pu.at(i), pv.at(i), pw.at(i));
@@ -1898,7 +1967,13 @@ private:
                     //std::cout << sum_fQ << " " << sum_bQ << std::endl;
                     if (std::abs(sum_fQ-sum_bQ) < 0.07*(sum_fQ+sum_bQ) && (flag_bad_u||flag_bad_v||flag_bad_w)) continue;
                     
-                    if (sum_fQ > 0.6 && sum_bQ > 0.6 ){
+                    if ((sum_fQ > 0.6 && sum_bQ > 0.6) ||
+                        // doc pdvd/56 T1b: same additive asymmetric clause as
+                        // sweep 1, so a candidate this sweep's tighter
+                        // geometry admits is not lost to the strict gate.
+                        (m_kink_asym_enable &&
+                         ((sum_fQ >= m_kink_asym_entry_mip && sum_bQ <= m_kink_asym_far_mip) ||
+                          (sum_bQ >= m_kink_asym_entry_mip && sum_fQ <= m_kink_asym_far_mip)))) {
                         if (i+2<dq_size){
                             SPDLOG_LOGGER_TRACE(s_log, "find_first_kink: Kink: {} {} {} {} {} {} {}", i, refl_angles.at(i), para_angles.at(i), ave_angles.at(i), max_numbers.at(i), angle3, dQ.at(i)/dx.at(i)*units::cm/m_mip_dqdx);
                             return max_numbers.at(i);
@@ -3680,6 +3755,7 @@ private:
         //   is_forward=false: none of the above; always returns false if left_L>40cm.
         auto run_pass = [&](const geo_point_t& start_wcp, const geo_point_t& end_wcp,
                             bool is_forward) -> std::optional<bool> {
+            bool edge_deferred = false;   // doc pdvd/100 round 2: readout_edge_defer fired on THIS pass
             if (is_forward && flag_double_end)
                 SPDLOG_LOGGER_TRACE(s_log, "check_stm_conditions: Forward check!");
             if (!is_forward)
@@ -3919,8 +3995,17 @@ private:
             // placement rationale as cathode_guard above).
             if (m_readout_edge_guard && flag_pass &&
                 readout_edge_guard_reject(eval_arrs, kink_num, cluster.ident())) {
-                if (m_save_stm_fit) set_pass_status(7);
-                return std::nullopt;
+                // doc pdvd/100 round 2 (readout_edge_defer): carry on as with the
+                // guard off; the veto waits for CheckSTM_Michel's Michel.
+                if (m_readout_edge_defer) {
+                    edge_deferred = true;
+                    SPDLOG_LOGGER_INFO(s_log, "readout_edge_guard: cluster {} deferred to CheckSTM_Michel (readout_edge_defer)",
+                                       cluster.ident());
+                }
+                else {
+                    if (m_save_stm_fit) set_pass_status(7);
+                    return std::nullopt;
+                }
             }
             // doc-63 round-4b: long straight leftover = second track (own
             // knob; same placement rationale).  The short-track reset cannot
@@ -3978,6 +4063,7 @@ private:
                 }
                 if (!detect_proton(adjusted_segment, kink_num, fitted_segments)) {
                     if (m_save_stm_fit) set_pass_status(0);
+                    if (edge_deferred) m_readout_edge_accepted = true;   // doc pdvd/100 round 2
                     return true;
                 }
             }

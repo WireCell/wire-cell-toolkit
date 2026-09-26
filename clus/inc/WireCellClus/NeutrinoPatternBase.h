@@ -71,6 +71,23 @@ namespace WireCell::Clus::PR {
         /// :187), correct independently of the cache's refresh schedule.
         /// Config key kine_shower_pdg_live; absent => legacy, byte-identical.
         bool shower_pdg_live{false};
+        /// doc pdvd/120 sec 9.4 (kine_charge_t0_frame).  A 2-D charge cell's
+        /// geometric point (Grouping::convert_time_wire_2Dpoint) is in the raw
+        /// t0 = 0 drift frame; a segment's "fit"/"associate_points" clouds are
+        /// in the cluster's t0-CORRECTED frame.  They differ in drift by the
+        /// cluster's t0 drift plus any time-origin difference between the two
+        /// conversions -- negligible for a beam neutrino (t0 ~ 0) but tens of
+        /// cm on a PDVD beam particle (flash t0 ~ 2.8 ms after the readout
+        /// origin), where every cell then fails the 0.6 cm proximity test and
+        /// every EM shower gets kine_charge = 0 (measured: 5226 hits, 0 within
+        /// the cut, on run 39305 evt 157312 -- the same defect doc pdhd/16
+        /// found for the Michel charge).  false = legacy, byte-identical.
+        /// true = before the proximity test shift each cell's drift by the
+        /// median (raw - corrected) x of the object's OWN fit points in that
+        /// (apa, face) -- the CheckSTM_Michel michel_q2d rule, the round trip
+        /// through IPCTransform::backward without the tick rounding -- and skip
+        /// the cells of an (apa, face) the object has no fit point in.
+        bool t0_frame{false};
         /// doc pr/99 round 3 (C1).  false = legacy: every shower's
         /// cal_kine_charge independently rescans the whole event's 2D charge
         /// maps, so two spatially interleaved showers each collect the SAME
@@ -1163,6 +1180,29 @@ namespace WireCell::Clus::PR {
         // validation FAILED at 4 (nueCC48 nue ledger -4/+1) and it carried a
         // named nue loss at 8 (pr/102 sec 8.3), so it never left 0.
         double m_other_seg_keep_isolated_len_admit{0.0 * units::cm};    // 0 = off; internal units
+
+        // doc pdvd/62 (T3 of doc pdvd/56) -- a STOP-LOCAL admission for the
+        // isolated residual: when anchor_cm > 0 and either fitted endpoint of
+        // the residual lies within anchor_cm of one of the anchors, the
+        // residual is kept regardless of the terminal-count / length floors
+        // above (doc pdvd/54 sec 2: the pr54 drop discards every residual in
+        // the 2-24 terminal band, which is exactly a Michel fragment's size,
+        // with no notion of WHERE it sits).  Nothing in the neutrino path
+        // (TaggerCheckNeutrino) sets these; CheckSTM_Michel sets the STM
+        // tagger's stop as the single anchor per candidate.  0 / empty =
+        // off, byte-identical.  anchor_fires counts the keeps this made.
+        double m_other_seg_keep_anchor_cm{0.0};                          // internal units; 0 = off
+        std::vector<WireCell::Point> m_other_seg_keep_anchors;
+        int m_other_seg_keep_anchor_fires{0};
+        // doc pdvd/87 (doc pdvd/78 action item 7) -- a size floor on the
+        // stop-local keep above (other_seg_keep_anchor_ok): a residual inside
+        // anchor_cm is kept only with >= min_points Steiner terminals AND a
+        // fitted length >= min_length.  0 / 0 = no floor, doc 62's keep
+        // byte-identical; with anchor_cm at 0 they are never read.  floored
+        // counts the residuals inside the radius the floor refused.
+        int    m_other_seg_keep_anchor_min_points{0};
+        double m_other_seg_keep_anchor_min_length{0.0};                  // internal units; 0 = no floor
+        int m_other_seg_keep_anchor_floored{0};
 
         // doc sbnd_xin/docs/pr/102 P2 -- the B2 family (Steiner
         // fragmentation / nnf=0 shadowing): imaged charge farther than this

@@ -1,0 +1,4355 @@
+// PDHD per-event pattern-recognition (PR) job -- standalone, self-contained
+// (pdhd/docs/stm-tagger-chain.md sec 7).  Forked BY DUPLICATION from the PDVD
+// job pdvd/wct-pr-perevt.jsonnet (itself a duplication fork of the canonical
+// SBND job cfg/pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet); BOTH source
+// files are untouched.  Lives in the working repo (pdhd/), like
+// pdhd/wct-clustering.jsonnet: run_pr_evt.sh cd's here and WIRECELL_PATH
+// supplies toolkit/cfg for every import.
+//
+// Loads the post-Q/L point-cloud tree written by run_clus_evt.sh -save-pctree
+// (work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz) and runs the PR-tail visitors on it
+// inside a MultiAlgBlobClustering node built by
+// pgrapher/experiment/pdhd/pr.jsonnet.  With pipeline_names=[] it is the
+// round-trip identity gate: the 'clustering' Bee layer of mabc-pr.zip must be
+// content-identical to the Q/L job's mabc-all-apa.zip clustering layer.
+//
+// PDHD OPERATING POINT (every TLA default below is PDHD's; where it differs
+// from the PDVD or SBND default the comment says so):
+//   * scope is UP TO THE STM TAGGER.  The default pipeline_names stops after
+//     tagger_check_stm; TaggerCheckNeutrino and its ~700 knobs are carried
+//     verbatim from the PDVD fork so a later round can turn them on, but
+//     nothing here has been graded for PDHD;
+//   * stopping-muon (STM) tagged is the SIGNAL, not a veto (PDVD parity): every
+//     stm_*_guard that SBND turned on to abstain from an STM call defaults OFF
+//     here and must be re-derived on PDHD hand scans;
+//   * run on EVERY matched flash bundle: beam_window_only=true with a
+//     readout-wide window + nu_per_bundle=true (PDVD parity);
+//   * no unmerge stages, no DL/SCN vertex (dl_weights='' by DEFAULT here --
+//     PDVD flipped it on, PDHD has not graded it), no BDT scorers;
+//   * PDHD physics inputs: pdhd_track_fitting.json, pdhd/particle_dataset.jsonnet
+//     at E = 0.4959 kV/cm + mip_dqdx 56000 / mip_dqdx_median 48000,
+//     PracticalBoxRecombination at the same 0.4959 kV/cm (use_power_recomb=false
+//     -- PDHD has no fitted power box);
+//   * ONE drift speed (params.jsonnet lar.drift_speed = 1.576 mm/us, the
+//     calibrated value); unlike PDVD there is no per-crate TLA and no way for
+//     the PR job to disagree with the Q/L job about it;
+//   * NO curved fiducial and NO wrapped-strip knobs (see pdhd/pr.jsonnet).
+//
+// Usage (called from run_pr_evt.sh):
+//   wcsonnet -A input=work/029107_0/pctree-evt0.tar.gz -A output_dir=work/029107_0 \
+//            -S run=29107 -S subrun=0 -S event=0 \
+//            -S trigger_offset_us=250 -S readout_window_ticks=5999 \
+//            -S 'pipeline_names=[]' -o cfg.json wct-pr-perevt.jsonnet
+
+local g = import 'pgraph.jsonnet';
+local wc = import 'wirecell.jsonnet';
+local tools_maker = import 'pgrapher/common/tools.jsonnet';
+
+function(
+    input          = '.',
+    anode_indices  = std.range(0, 3),   // PDHD: 4 APAs (PDVD 8 CRPs)
+    output_dir     = '.',
+    run            = 0,
+    subrun         = 0,
+    event          = 0,
+    // ---- PDHD geometry / time TLAs (same names + semantics as
+    // pdhd/wct-clustering.jsonnet; run_pr_evt.sh copies the values the Q/L job
+    // used from the pctree-evt<ID>.tlas sidecar run_clus_evt.sh writes).
+    // PDHD has ONE drift speed and it is fixed in
+    // cfg/pgrapher/experiment/pdhd/params.jsonnet (lar.drift_speed = 1.576
+    // mm/us, the calibrated value), so -- unlike PDVD, where the runner has to
+    // pass 1.48073 or the fit silently mis-scales add_sigma_L by 6 % -- there is
+    // no drift-speed TLA here and no way for the PR job to disagree with the
+    // Q/L job.  Changing the drift speed means editing params.jsonnet and
+    // re-deriving pdhd_track_fitting.json's add_sigma_L and the field.
+    trigger_offset_us = 0,
+    time_offset    = 0,
+    // doc pdvd/31 rounds 3 and 5, and BOTH apply to PDHD in full: PDHD APAs WRAP
+    // their induction planes.  Each (anode, face, U or V) plane holds 1148 wires
+    // on 800 channels -- 400 segment-0, 400 segment-1, 348 segment-2
+    // (protodunehd-wires-larsoft-v1) -- so 65 % of the wires on an imaging U/V
+    // plane are continuations, against PDVD's 11.3 %.  IWirePlane::channels()
+    // omits them, so a lookup that indexes that list by WIRE index reads the
+    // wrong channel: in BlobSampler (wrapped_channel_charge) it can zero a
+    // sampled point's induction charge AND its uncertainty, which
+    // calc_charge_wcp reads as "no signal"; in ImproveCluster_2's retiler
+    // (retile_wrapped_channel_activity) it writes each slice's activity under
+    // the wrong channel, upstream of the Steiner terminal finder.
+    // BOTH PDHD PRODUCTION, owner decision 2026-09-05 (doc pdhd/01 sec 5; the
+    // STM hand scan of the 237 contested tags is deferred, not waived).  In
+    // this job the samplers feed ONLY ImproveCluster_2's retiler (compiled
+    // config: no other consumer), so wrapped_channel_charge here does not have
+    // to match the Q/L job that wrote the pctree -- the retiled cloud is never
+    // persisted.  The Q/L job's own sampler knob (pdhd/wct-clustering.jsonnet)
+    // is a separate, still-parked decision.  Measured on 029107, 4 events:
+    // ncharge=3 0.000 -> 0.532, eligible 0.217 -> 0.779.  Pre-flip arm:
+    // PDHD_PR_TLA="-S retile_wrapped_channel_activity=false -S wrapped_channel_charge=false".
+    wrapped_channel_charge = true,
+    retile_wrapped_channel_activity = true,
+    // doc 31 round 6 (owner Q5): ImproveCluster_2 runs its OWN Steiner terminal
+    // finder twice, and did so at the C++ default 4000 e regardless of
+    // steiner_terminal_charge -- so PDVD ran two thresholds in one stage.  Set
+    // to steiner_terminal_charge to sync them; null => 4000 => historical.
+    // PDVD PRODUCTION SYNCED, owner decision 2026-09-03: measured on 039349/14
+    // to move exactly one cluster (44: +61 steiner points, +4 terminals) and to
+    // leave the flagship cluster 34 bit-identical, so the sync costs nothing
+    // here and removes a real inconsistency.
+    retile_steiner_terminal_charge = steiner_terminal_charge,
+    // doc pdvd/40 round 3: ImproveCluster_1::remove_bad_blobs knobs.  A run of
+    // retiled blobs with no original-blob support longer than this (cm) is
+    // removed; 0 / null = the historical component vote (C++ default).
+    //
+    // PDVD PRODUCTION at 20 cm, owner decision 2026-09-05 (doc 40 sec 15.9).
+    // Pre-flip arm: -S retile_bad_blob_max_run=null.  Census log lines:
+    // -S retile_bad_blob_report=true (log-only, no output change).
+    //
+    // WHAT IT FIXES.  ImproveCluster_2 retiles a cluster face by face; the
+    // filter that is supposed to delete the blobs its whole-cluster shortest
+    // path fabricates was reading a ClusterCache (time_blob_map) that is never
+    // invalidated when blobs are inserted or removed, so from the SECOND face
+    // on it saw no blobs at all and removed nothing.  80 of 493 retiled
+    // clusters on 039252/2 span more than one (apa,face) and not one second
+    // face was ever filtered.  Above 0 the filter refreshes that cache, adds
+    // same-slice adjacency (a fabricated column at fixed drift time has no
+    // adjacent-slice edges, so without it every such blob is a run of length
+    // 1), keeps the historical any-blob component vote, and additionally
+    // removes a connected run of unsupported retiled blobs whose bounding-box
+    // diagonal exceeds this value.  Short unsupported fills -- the dead-region
+    // bridging the retile exists for -- survive.
+    //
+    // MEASURED, 120 events, d41base2 (off) vs d41fix20x (doc 40 sec 15.8):
+    // Steiner points more than 10 cm from any live charge 38652 -> 2040, more
+    // than 30 cm 8982 -> 24, groups >20 cm 649 -> 81; TGM 2586 -> 2586 and FC
+    // 2462 -> 2462 unchanged; wall 4071 -> 3619 s, peak RSS 3.20 -> 3.30 GB.
+    // On 039252/2 the owner's two 'no image' points are gone (nearest Steiner
+    // 0.01 -> 25.19 cm and 0.01 -> 17.58 cm, the live-charge distances).
+    //
+    // DISCLOSED COST: the STM tag set turns over 13 ids on 13 events for a net
+    // -1 (583 -> 582).  Nine are the dQ/dx KS test reacting to a cleaner
+    // Steiner graph on an unchanged fit; three are kink PLACEMENT moving
+    // within an unchanged trajectory (2 lost, 1 gained -- doc 40 sec 15.8
+    // correction; the kink finder is fragile to charge just past a track end
+    // in both directions and owns its own round); one is the extra-tracks
+    // veto.  No fit is shortened or broken by the flip.
+    //
+    // Thresholds scanned at 10/20/30 cm on 21 events (doc 40 sec 15.6): all
+    // three remove 97-98 % of the >10 cm points and give the same STM delta.
+    // 20 is chosen because it is above SBND's longest unsupported group
+    // (19.2 cm, where this defect does not occur) and below PDVD's p95 group
+    // span (22.3 cm).  Do NOT read the residual as a reason to lower it: what
+    // survives is class (c), blobs that overlap an original blob in WIRE space
+    // but sample far from it in 3D, and it needs a 3D support test instead.
+    retile_bad_blob_max_run = 20,
+    retile_bad_blob_report = false,
+    // doc pdhd/08.  Both default null = the C++ 0 = OFF = the pre-doc-08 path,
+    // so this file compiles byte-identically until one is set.
+    //   retile_hack_max_bridge (cm) caps the tube hack_activity_improved paints
+    //     across a gap in the cluster's own shortest path.  Uncapped today, as in
+    //     the prototype (ImprovePR3DCluster.cxx:973-990); the longest single gap
+    //     measured on 029107/991 is 480 cm, and 0.3-0.7 % of bridges (>20 cm)
+    //     make 49-62 % of every cell the retiler invents (doc pdhd/08 sec 2).
+    //   retile_bad_blob_run_merge (cm) merges the runs of ONE component whose
+    //     boxes lie within this distance before retile_bad_blob_max_run judges
+    //     them, so a fabricated column broken into short pieces is bounded whole
+    //     (doc pdhd/08 sec 3).  Needs retile_bad_blob_max_run > 0, which is set
+    //     above.  SENSITIVE: extra removal runs 12 % -> 74 % of survivors as this
+    //     goes 1 -> 8 cm; 3 cm is the measured operating point, 5 cm already
+    //     fuses two objects.  Scan before flipping either.
+    // Arms: -S retile_hack_max_bridge=null (the pre-flip path) -S retile_bad_blob_run_merge=3
+    //
+    // FLIPPED TO 10 cm, PDHD PRODUCTION, owner decision 2026-09-06 (doc pdhd/08
+    // sec 8-9).  30 events, 774 matched clusters: Steiner points more than 30 cm
+    // from any live charge 17 -> 0, more than 10 cm 1419 -> 6, the worst ghost
+    // 39.2 -> 11.3 cm, the TGM tagged set unchanged, wall time 50.0 -> 49.0 s.
+    // The criterion is fabrication, not the tag census: 0.88 of what a >60 cm
+    // bridge paints is a cell that did not exist, while cells already flagged
+    // dead are 0.3-0.8 % of what any bridge touches, so these bridges are
+    // inventing rather than crossing dead regions.  Cost: 45 of 174 STM objects
+    // flip (21 gained / 24 lost); the 45-object blind hand scan
+    // (pdhd/d08_scan, work/d08_scan_labels/d08flip0) scored the cap and the
+    // baseline EQUAL, 5/10, on the objects that could be judged.
+    // retile_bad_blob_run_merge stays OFF: every run it can merge is by
+    // construction shorter than retile_bad_blob_max_run, so it never reaches a
+    // far ghost -- the worst stayed 39.2 -> 39.2 cm at 1/3/5 cm (doc 08 sec 6).
+    retile_hack_max_bridge = 10,
+    retile_bad_blob_run_merge = null,
+    // Readout window in ticks: clamps T_bad_ch time ranges in the Magnify /
+    // PrDisplay writers (SBND 3427; PDVD 10000; PDHD 6000 = 3 ms at 0.5 us,
+    // 5999 after the Resampler -- run_pr_evt.sh passes the real value from the
+    // pctree sidecar).
+    readout_window_ticks = 6000,
+    // Minimum cluster length (cm) for flag_mains to make a matched cluster a main; 0 = all.
+    flag_mains_min_cm = 0,
+    // doc pdvd/101: light-less SIMULATION only -- let flag_mains admit clusters
+    // with no Q/L match (C++ default false; false => key omitted => byte-identical).
+    flag_mains_unmatched = false,
+    // doc pdvd/101: the PR RETILE samplers' stepped grid (Steiner cloud only):
+    // half-pitch crossings (C++ default false) and the step in wires (C++ default 3).
+    // false / null => keys omitted => byte-identical.  Set as code, e.g.
+    // PDHD_PR_TLA="-S retile_sampler_half_pitch=true -S retile_sampler_min_step=1".
+    retile_sampler_half_pitch = false,
+    retile_sampler_min_step = null,
+    // doc pdvd/102: the PR RETILE samplers' strategy (Steiner cloud only).  null =>
+    // 'stepped' (production); 'charge_stepped' => the prototype's retile rule (every
+    // wire when N_max*N_min <= wire_product, C++ 2500; extra wires above
+    // charge_threshold, C++ 4000).  All null => byte-identical.  Set as code, e.g.
+    // PDHD_PR_TLA="-S retile_sampler_strategy='charge_stepped' -S retile_sampler_wire_product=10000".
+    retile_sampler_strategy = null,
+    retile_sampler_wire_product = null,
+    retile_sampler_charge_threshold = null,
+    // doc pdvd/113: ImproveCluster_2 retile_mode for the Steiner stage's retiler.  null =>
+    // key omitted => the full retile (production, byte-identical).  'no_paint' | 'footprint' |
+    // 'none' (no tiling: the cluster's own blobs re-sampled with the retile samplers, so
+    // charge_stepped is kept).  Set as code: PDHD_PR_TLA="-S retile_mode='none'".
+    retile_mode = null,
+    // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
+    // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
+    // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
+    // PDHD_PR_TLA="-S steiner_blank_plane_mode='prefer3'".
+    steiner_blank_plane_mode = null,
+    steiner_blank_plane_radius_cm = null,
+    // doc pdvd/115: CreateSteinerGraph charge-aware pricing of the Steiner BASE graph before the
+    // Voronoi step.  null => keys omitted => production (C++ 0 / "tree"), byte-identical.  alpha > 0
+    // multiplies each base edge weight by 1 + alpha * 0.5 * (nz(s) + nz(t)); scope 'tree' |
+    // 'tree+path'.  Set as code: PDHD_PR_TLA="-S steiner_base_weight_blank_alpha=1.0".
+    steiner_base_weight_blank_alpha = null,
+    steiner_base_weight_scope = null,
+    // PR visitors to run, by name (see clus_pr's cm_by_name in
+    // cfg/pgrapher/experiment/sbnd/clus.jsonnet).  The default IS the SBND
+    // production tagger chain (run_full1k_nusel.sh with -unmerge-assoc), so a
+    // bare `wire-cell -c` run of this job exercises TGM/STM/FC.  Pass [] for the
+    // pass-through round-trip identity gate (run_pr_evt.sh does), or a subset
+    // like ['switch_scope','steiner','fiducialutils','tagger_check_stm'] for a
+    // single-tagger demo.  Production additionally appends 'stm_magnify' when
+    // save_stm_fit=true (the -stm-fit ROOT dump); it is left out of the default
+    // because save_stm_fit defaults false.
+    // Neutrino-PR chain (docs/pr/2-3): append
+    // ['tagger_check_neutrino','numu_bdt_scorer','nue_bdt_scorer',
+    //  'tracking_visitor','tagger_output'] -- ordering matters (BDTs after the
+    // neutrino stage, nue after numu, tagger_output after tracking_visitor
+    // because it opens tracking-pr.root in UPDATE mode).
+    // protect_bundle + steiner_refresh (doc pr/23 sec 9): SBND PRODUCTION
+    // DEFAULT since 2026-08-02 (owner, after the sec 8 fresh-tree gate: 0
+    // event_label / nu_evaluated flips in 572 valfast events).  They sit
+    // after tagger_check_fc (cosmic verdicts on UNSPLIT clusters,
+    // prototype wire-cell-prod-stm.cxx:806) and before any appended
+    // tagger_check_neutrino (prototype wire-cell-prod-nue.cxx:1322).
+    // steiner_refresh (replace=false) MUST follow protect_bundle: it
+    // rebuilds only the steiner products the split purged; a replace=true
+    // second pass dangles the tagger-stage GraphAlgorithms (evt 54095).
+    // NOT bit-identical to the pre-pr/23 chain by design; drop BOTH names
+    // from pipeline_names for the pre-flip chain (runner:
+    // SBND_PROTECT_BUNDLE=0).
+    // PDHD DEFAULT: the chain UP TO THE STM TAGGER, which is the scope of this
+    // round.  No unmerge_bundle / unmerge_assoc (PDHD's Q/L builds no bundle
+    // grouping to undo, and its clustering runs no cm.isolated() merge), no
+    // numu/nue BDT scorers (uBooNE-trained), and NO tagger_check_neutrino /
+    // tracking_visitor / tagger_output / pr_display -- those are where the
+    // neutrino PR, PID and the Michel finder live and none of it has been graded
+    // on PDHD.  PDVD's default carries them; append them here for a later round
+    // ( -A 'pipeline_names=[...]' ) once the STM layer is validated.
+    // flag_mains (ClusteringFlagMatchedMains) makes every flash-matched cluster a
+    // main -- like PDVD's, PDHD's QLMatching flags none (no MicroBooNE-style
+    // main+associated decomposition).
+    // protect_bundle / steiner_refresh are kept because tagger_check_stm reads
+    // the steiner products they rebuild.
+    // stm_magnify is appended by the runner (-stm-fit).  Pass [] for the
+    // round-trip identity gate.
+    pipeline_names = ['switch_scope', 'flag_mains', 'steiner', 'fiducialutils',
+                      'tagger_check_tgm', 'tagger_check_stm', 'tagger_check_fc',
+                      'protect_bundle', 'steiner_refresh'],
+    // doc pdhd/03 (counterpart of doc pdvd/48): verdict thresholds /
+    // PR-partition overrides for check_stm_michel, as an object
+    // (-S 'stm_michel_knobs={...}' replaces the whole bag).  The DEFAULT is the
+    // PDHD operating point of doc pdhd/03 sec 6, chosen on the 30-event run
+    // 029107 arms (d03nu1..6) -- every entry differs from the C++ default,
+    // which reproduces doc pdvd/48; pass {} to get that.  Inert unless
+    // 'check_stm_michel' is in pipeline_names (runner: -nu), so the
+    // production (-stm) compiled config does not carry it.
+    // doc pdvd/51: a bag MERGED ON TOP of stm_michel_knobs.  Passing
+    // -S stm_michel_knobs={...} REPLACES the default above, so flipping one
+    // knob for an A/B arm used to mean re-transcribing every other one -- a
+    // transcription the arm's correctness then silently depends on.  This
+    // merges last, so `-S stm_michel_extra={stop_gamma_enable:false}` changes
+    // exactly one key.  {} => compiled config byte-identical.
+    stm_michel_extra = {},
+    stm_michel_knobs = {
+        profile_min_dqdx_frac: 0.15,   // drop fit points below 0.15 MIP from the verdict metrics (dead cells; sec 5)
+        pid_mode: 2,                   // template PID = proton veto only (sec 6.1)
+        plateau_mip_lo: 0.6,           // plateau_med / mip_dqdx window (sec 6.2)
+        plateau_mip_hi: 1.6,
+        stop_extend_max: 3,            // follow a collinear MIP continuation past the tagger's stop (sec 6.3) ...
+        michel_guards_stop: true,      // ... unless a Michel arm or the Bragg rise says the muon stopped here (sec 6.3)
+        michel_shower_min_kink_deg: 15, // a shower-flagged stop arm must still turn 15 deg (sec 6.8; the muon's own Bragg stub is not a Michel)
+        // doc pdvd/116 (owner 2026-09-18) -- PDHD PRODUCTION, the R2 operating point of the tagger retune on the
+        // prefer3 + tree+path alpha 0.5 Steiner trajectory (toolkit pr.jsonnet call sites, same commit round).
+        // The stop-arm classifier (StmMichelFunctions classify_stop_arm) re-classified Michel arms the new
+        // trajectory bends less (kink 20-30 deg) or lengthens (25-30 cm with the far subtree) as non-Michel; sized on
+        // the eligible population (figs/116_arm_sizing_*.txt) and graded as a unit with proton_muon_guard (arms
+        // d116?r2 vs d115?off after the owner scans own116h / own116v): PDVD Michel efficiency +0.037 at purity
+        // +0.003, PDHD +0.064 at +0.019 (figs/116_grade_*_own116.txt).  C++ defaults 30 / 25; remove both lines (or
+        // -S stm_michel_extra={michel_min_kink_deg:30.0,michel_max_len_cm:25.0}) for the pre-116 behaviour.
+        michel_min_kink_deg: 20.0,
+        michel_max_len_cm: 30.0,
+        // absorb_bragg_stub is NOT set: absorbing 029107/1 cluster 113's 5.5 cm stub turned a clean STM into no_bragg (sec 6.8)
+        stop_fv_use_config_tolerance: true,  // stop containment with the taggers' per-wall margins, not a flat 5 cm (sec 6.9)
+        dead_volume_check: true,       // stop that walks into a dead region (sec 6.4; fired 0/165 on 029107, kept for the record)
+        // ---- doc pdhd/21: the first PDHD knobs graded on a PDHD hand-scan record ----
+        // Every knob below was OFF only because "no PDHD hand-scan record" existed; smx22
+        // (317 items, 61 events) is that record.  Graded on arm h21f against p82bhoff with
+        // the libpin_p82 binary (md5 5f2c3ede, identical before and after every arm):
+        //   is_stm 61/0/86/110 -> 80/0/67/110, purity 1.000 HELD, efficiency 0.415 -> 0.544,
+        //   michel_found unchanged at 56/11/30.  ZERO new false positives, which is why this
+        //   set needed no operating-point ruling.
+        // The four knobs act as a UNIT and must be re-graded as one: the anchor re-reads the
+        // Bragg peak, which moves ks_mu/ks_flat, so h21f gained 19 where the naive union of
+        // the single-knob arms predicted 17 (the pre-registered twin FAILED here; see
+        // docs/scan/h21/census_h21f.txt).  Never re-derive this gain by adding single arms.
+        ks_margin: -0.10,              // C++ default 0.0.  shape_flat fires when ks_mu + margin >= ks_flat;
+                                       // doc pdhd/21 set -0.02: arm h21k alone +11 stoppers, 0 FP (0 FP was
+                                       // structural -- the pool of hand-THRU items rejected by shape_flat ALONE was empty).
+                                       // doc pdhd/25 sec 9 moves it to -0.10 TOGETHER WITH the two P1 floors after
+                                       // topology_stop_evidence below, as ONE unit ("lever 1", arm h25k).
+        max_candidates: 64,            // C++ default 8.  The cap dropped 16 candidates on 7 of 61 events;
+                                       // arm h21m: all 325 existing candidates BIT-IDENTICAL, 0 is_stm flips,
+                                       // set 325 -> 341, and +5 hand stoppers / 0 FP among the extras.
+        bragg_peak_anchor: true,       // C++ default false.  Anchor the profile on the Bragg peak rather than
+        bragg_peak_search_cm: 3.0,     // C++ default 10.0.   the geometric end; arm h21g: +10 stoppers, 0 FP.
+        bragg_anchor_geo_fallback: true,  // C++ default false.  Keep the geometric reading when the peak anchor
+                                       // rejects a prominent rise (doc pdvd/75's mechanism, confirmed on PDHD).
+        // ---- doc pdhd/22: the Michel bag, graded on smx22 and FLIPPED ----
+        // Arm h22g on pin libpin_p65 (toolkit d65f8165, libWireCellClus md5 3e23bf8a):
+        //   michel_found 56/11/30 -> 68/2/18, purity 0.836 -> 0.971 AND efficiency
+        //   0.651 -> 0.791 (+12 true Michels, -9 false), for ONE stopper false positive
+        //   (029107_10/44): is_stm 80/0/67/110 -> 82/1/65/109, purity 1.000 -> 0.988.
+        //   That is exactly the trade the owner approved on 2026-09-12.
+        // These sixteen are a UNIT and must be re-graded as one; retreat_tail_strict acts on
+        // the retreat mechanism stop_retreat_max enables, so the three stop-topology knobs
+        // ride with the Michel knobs even though alone (arm h21s) they gained 0 stoppers.
+        // WARNING, doc pdhd/22 sec 1: six of these did NOT EXIST in round h21's pin
+        // (082376c5) and were silently ignored there -- get(config,key,default) drops an
+        // unknown key, and a compiled-config proof CANNOT see it.  h21z's "67/2/19 from 16
+        // keys" was really 10 keys.  Production's local/lib must be at or after d65f8165.
+        stop_retreat_max: 2,                    // C++ default 0
+        stop_split_max: 1,                      // C++ default 0
+        split_kink_min_deg: 10,                 // C++ default 15.0
+        michel_gamma_collect: true,             // C++ default false (doc pdvd/71 P4)
+        michel_gamma_radius_cm: 50.0,           // C++ default 35.0
+        moved_stop_michel_kink_min: 60.0,       // C++ default -1.0 = off
+        retreat_tail_strict: true,              // C++ default false
+        stop_local_michel_pieces: true,         // C++ default false
+        michel_range_energy_guard: true,        // C++ default false
+        stop_local_residual_cm: 5.0,            // C++ default 0.0 = off
+        // the six that round h21 could not actually test -- first measured on PDHD in doc 22,
+        // worth +1 true Michel (67/2/19 -> 68/2/18) at no cost, arm h22g vs h22t:
+        stop_gamma_require_stm: true,           // C++ default false (doc pdvd/85)
+        moved_stop_michel_reach_min_cm: 6.5,    // C++ default -1.0 = off (doc pdvd/84)
+        michel_near_stop_arm_cm: 5.0,           // C++ default 0.0 = off (doc pdvd/83)
+        stop_local_residual_min_points: 5,      // C++ default 0 = no floor (doc pdvd/87)
+        stop_local_residual_min_len_cm: 5.0,    // C++ default 0.0 = no floor (doc pdvd/87)
+        stop_snap_reachable: true,              // C++ default false (doc pdvd/88)
+        // ---- doc pdhd/23: the owner's ruling of 2026-09-12 -- turn on BOTH held sets ----
+        // Arm h23a (pin libpin_p65 = d65f8165), graded against h22g as ONE unit:
+        //   is_stm 82/1/65/109 -> 95/3/52/107, purity 0.988 -> 0.969, efficiency 0.558 -> 0.646.
+        //   michel_found UNCHANGED 68/2/18; point geometry identical 341/341 -- verdict bits only.
+        //   On owner + high-confidence truth: 60/1/10/58 -> 65/1/5/58, purity 0.984 -> 0.985,
+        //   efficiency 0.857 -> 0.929, i.e. +5 stoppers at ZERO new false positive.
+        // The two knobs SHARE a false positive rather than adding one: 028084_3/72 is tipped both
+        // by P1's topology clear and by the wide anchor, so the anchor's only unique contribution
+        // is the true stopper 028084_21/132.  Pre-registered and HELD EXACTLY -- the first
+        // combined arm of this campaign whose twin held, because the prediction was built from
+        // the per-item trace (doc pdhd/22 sec 5.1), not from arm-level arithmetic.
+        bragg_wide_anchor_cm: 8.0,       // C++ default 0.0 = off.  Fires on just 2 of 341 candidates.
+        bragg_wide_anchor_rise_min: 1.3, // C++ default 1.5
+        bragg_wide_anchor_tail_max: 0.8, // C++ default 0.8 -- written because the MEASURED arm wrote it
+        topology_stop_evidence: true,    // C++ default false (doc pdvd/70 P1).  A Michel at the end
+                                         // clears no_bragg|shape_flat AFTER every other bit, so is_stm
+                                         // moves only 0 -> 1.  Cleared bits on 25 of 341; +12 stoppers.
+        // ---- doc pdhd/25: the owner's ruling of 2026-09-12 -- "lever 1" ----
+        // ks_margin -0.02 -> -0.10 (above) plus the two P1 floors here, graded as ONE unit on arm h25k
+        // (pin libpin_p96 = toolkit 81ff37d7, libWireCellClus md5 4e1db810).  The pre-registered twin held
+        // item by item.  On the owner-ruled record smx27, APA0 strict (doc pdhd/23 sec 7 convention):
+        //   is_stm 77/0/27/68 -> 89/1/15/67, purity 1.000 -> 0.989, efficiency 0.740 -> 0.856;
+        //   all APAs 96/1/51/106 -> 114/2/33/105; michel_found unchanged; golden 0.579 -> 0.632.
+        // All 13 APA0-strict recoveries were ruled by the owner (tags own25 + own26): 12 stoppers and ONE
+        // through-going muon, 029107_21/65 -- the named false positive this flip accepts, the same kind of
+        // trade as the doc-22 Michel bag.  Never re-derive this gain by adding single-key arms.
+        // compare_range_cm 45 (arm h25r, free, +3) is NOT part of this flip: on top of lever 1 it adds
+        // nothing (h25kr == h25k); its free verdict stands for a separate decision.
+        topology_michel_ke_min: 5.0,     // C++ default 10.0 MeV (= the T2c floor moved_stop_michel_ke_min)
+        topology_michel_len_min_cm: 1.5, // C++ default 3.0 cm (the range-energy distance)
+        // CAUTION: CheckSTM_Michel.cxx (the moved_stop_michel_kink_min / _reach_min_cm notes) says a Michel
+        // spared by the moved-stop veto cannot reach P1 only while moved_stop_michel_ke_min equals
+        // topology_michel_ke_min.  They now differ (10 vs 5).  Harmless HERE: moved_stop_michel_guard is
+        // not set (C++ default false), so T2c never fires on PDHD, nothing is spared, and the kink/reach
+        // exemption keys above are inert.  Turning that guard on would let a spared 5-10 MeV Michel reach
+        // P1 -- re-grade before doing it.
+        // NOT set, and each for a measured PDHD reason (docs pdhd/21 sec 5, pdhd/22, pdhd/23):
+        //   plateau_mip_hi 2.0    -- PDVD's doc 90 flip recovers ZERO on PDHD; and no plateau window
+        //                            move earns its keep: the 12 plateau_off_mip misses are LONG tracks
+        //                            (138-446 cm) reading 0.28-0.56 MIP, interleaved with hand-THRU
+        //                            items at 0.22-0.54, so no window position separates them.
+        //   topology_clears_sparse -- arm h22p2: buys NOTHING on owner+high-confidence truth
+        //                            (identical to h22p1) while costing 2 more FP on all-truth.
+        //   topology_michel_ke_min:3 -- arm h22p3: costs purity under BOTH readings, and flips 5
+        //                            UNCLEAR + 1 MESSY item, a population the scanners could not judge.
+        //                            (doc pdhd/25 SETS it, to 5.0 with len 1.5 and ks_margin -0.10, as a
+        //                            separately graded unit -- see above.  3 on its own stays rejected.)
+        //   absorb_bragg_stub     -- see the note above: it broke 029107/1 cluster 113.
+        // min_chain_coverage is NOT set: measured 0.30-0.99 on clean stopping muons vs 0.46 on the
+        // one EM blob (sec 6.5), so the guard does not separate; chain_coverage is persisted for scans.
+        // doc pdhd/16: MCS momentum for the STM muon -- the third energy scale,
+        // and the only one that reads no charge at all.  C++ default is OFF.
+        // mcs_cathode_xcut 5 cm: PDHD is cathode-centred at x = 0 and the
+        // seam loses charge, so the 14 cm segments crossing it are dropped
+        // from the likelihood (mcs/inc/WireCellMcs/MuonMCS.h:68-79), the same
+        // value SBND production runs.  mcs_min_len_cm rides the C++ 40.
+        //
+        // doc pdhd/16 sec 9 MEASURED this band rather than inheriting it.  The
+        // 5 cm is at the plateau: widening to 8/10/15 cm changes the exposed
+        // stratum's ke_MCS/ke_range by <= 0.001 and at 15 cm starts losing
+        // muons outright, while dropping to 0 costs it 0.902 -> 0.961 (PDVD,
+        // paired n=12) / 0.621 -> 1.020 (PDHD, n=2).  Do not retune without
+        // re-running pdhd/docs/scripts/d16_mcs_cathode_{export,sweep,report}.
+        //
+        // mcs_cathode_x rides the shared cathode_x rather than a literal, the
+        // way the TaggerCheckNeutrino bag below already does -- both are 0
+        // today, so the compiled config is unchanged; this only stops the two
+        // bands silently diverging if the convention ever moves.
+        mcs_enable: true,
+        mcs_cathode_x: cathode_x,
+        mcs_cathode_xcut: 5.0,
+        // doc pdhd/17: read the unfitted-charge survival OUT of the
+        // recombination model this component is already holding, instead of
+        // the hard-coded michel_unfit_recom x michel_unfit_fudge = 0.7 x 0.95.
+        // Those two numbers and the dQ/dx -> dE/dx inverse are two carriers of
+        // ONE quantity and doc pdhd/16 moved only the second, leaving them
+        // 20 % (PDVD) / 16 % (PDHD) apart at MIP where they had been within
+        // 5 %.  Deriving one from the other cannot drift again.
+        //
+        // MIP-EQUIVALENT and unavoidably so: an unfitted cluster has no dx, so
+        // there is no dQ/dx to invert and a dE/dx must be assumed.  2.1 MeV/cm
+        // is the same pivot the PowerBox fit uses.  Because quenching rises
+        // with dE/dx, a deposit DENSER than MIP needs MORE MeV per electron
+        // than this gives, so the assumption UNDER-estimates a dense deposit
+        // (4.13e-5 MeV/e at 2.1 against 4.96e-5 at 5 MeV/cm on PDHD).
+        //
+        // What it moves: dots_ke_unfit, and michel_ke_best where that fires.
+        // PDVD: NOTHING -- dots_charge_unfit is 0 on all 160 michel_found
+        // candidates of the d16vnu arm.  PDHD: 17 of 124, x 1.1638, and on all
+        // 17 dots_ke_unfit IS michel_ke_best (they carry no fitted piece).
+        // C++ default false, so omitting the key is byte-identical.
+        michel_unfit_from_model: true,
+        michel_unfit_dedx: 2.1,
+        // ---- doc pdhd/26 part A: the region-based Michel energy, PDHD PRODUCTION (owner's go 2026-09-12:
+        // "PDHD should update to region based energy estimation" / "Please flip it as default for PDHD") ----
+        // The Michel's energy from the 2-D charge in a 10 cm region around the stop (own cells: main cluster +
+        // admitted companions), minus the charge the muon's trajectory fit predicts there, through the bound
+        // recombination model -- so it does not depend on how the Michel was segmented (doc pdvd/95, 96).
+        // Publishes michel_ke_q2d_region (+ the body control michel_ke_q2d_ctl 35 cm up the muon, the
+        // association reading michel_ke_q2d*, per-plane pieces) and the per-cell tree T_stm_michel_2d.
+        // KEY SET = PDVD PRODUCTION'S, INHERITED WITH NO PDHD TUNING, so the two detectors publish the same
+        // estimator: R = 10 is post-hoc on PDVD (doc 95) and scope 1 was flipped there on fidelity (doc 96).
+        // C++ defaults: michel_q2d false, michel_q2d_cells false, michel_q2d_region_cm 0.0 (off),
+        // michel_q2d_region_ctl_cm -1.0 (off), michel_q2d_region_scope 0.
+        //
+        // PURELY ADDITIVE, gated (docs/scan/d26/gate_h26q2d.txt): arm h26q2d (this file before the edit +
+        // these five keys, pin libpin_p96 = toolkit 81ff37d7, Clus md5 4e1db810) against production h26conf --
+        // 341/341 candidates bit-identical on all 149 pre-existing branches and every point row, 0 is_stm /
+        // michel_found / reject_bits changes, exactly 49 new branches + T_stm_michel_2d, every other tree,
+        // mabc-pr.zip and calib json identical on 61/61 events, census on smx27 unmoved.  No verdict reads it.
+        //
+        // CAVEAT the owner took this flip with (doc pdvd/81 sec 8a held PDHD OFF for it): PDHD Michels lean
+        // more on cross-shared cells, where the measurement is replaced by the fit's non-muon prediction --
+        // any such cell on 69 of 133 Michel candidates (52 %) against 40 of 171 (23 %) on PDVD (association
+        // cells, d81_readout).  Inside the 10 cm REGION it is smaller: 19 of 51 judged STM+Michel items carry
+        // one, share of the sum p50 0.00 / p90 0.10 (PDVD 0.00 / 0.02).  And PDHD's body control reads higher:
+        // median 8.5 MeV on hand Michel items against 2.6 on PDVD, where the region reads 39.5 vs 34.3 MeV --
+        // a PDHD region energy carries a larger non-Michel floor.  Doc pdhd/26 sec 3 has the spectra.
+        // No energy truth exists on either detector.
+        michel_q2d: true,
+        michel_q2d_cells: true,
+        michel_q2d_region_cm: 10.0,
+        michel_q2d_region_ctl_cm: 35.0,
+        michel_q2d_region_scope: 1,
+        // ---- doc pdhd/28: the WIRE LOOKUP for the region / control distances, PDHD PRODUCTION (owner's go
+        // 2026-09-12, "fix the bug", after doc pdhd/27 sec 2 found it) ----
+        // Without it a 2-D cell's distance to the stop / control centre is taken on its readout channel's FIRST
+        // (face, wire).  Every PDHD U/V channel wraps onto both APA faces (face 0 listed first) and 348 of 800 have
+        // two segments on one face, so on APA1/APA3 every muon-footprint U/V cell, and on every APA about half the
+        // two-segment ones, were measured on a wire the charge never touched (49-74 % of them beyond 100 cm).
+        // true: the cell is the first in-radius incarnation its own blobs cover (stm_michel_pick_wire).
+        // C++ default false.  Gates (docs/scan/d28/): the new build with the key absent is bit-identical to
+        // production h26q2dprod on 61/61 events (gate_h28off.txt); with it on (arm h28wl) only the region /
+        // control branches, michel_q2d_n_role0, the new michel_q2d_n_rewired and multi-wire U/V rows of
+        // T_stm_michel_2d move -- every W row, verdict, point row, tree, zip, calib and the smx27 census
+        // identical (gate_h28wl.txt).  U/V cells beyond 100 cm 0.49-0.74 -> 0.000; controls with no U/V cell
+        // 91 -> 6 of 341.  THE REGION READS HIGHER, not lower: hand Michel median 39.5 -> 45.3 MeV, above the
+        // 52.8 MeV endpoint 12 -> 20 of 44, body control 8.5 -> 11.1 -- the induction planes and unclaimed cells
+        // it restores carry the muon fit's under-prediction (doc pdhd/27 sec 1.4).  No verdict reads any of it.
+        michel_q2d_region_wire_lookup: true,
+    },
+    // TrackFitting parameter JSON, required whenever tagger_check_stm is in the
+    // pipeline: the C++ preset defaults are uBooNE-hard-coded, never right for
+    // SBND.  DEFAULT = the canonical in-tree file; TaggerCheckSTM resolves it
+    // through WIRECELL_PATH (Persist::resolve), and an absolute path is passed
+    // through unchanged, so the runners' absolute paths keep working.  '' selects
+    // the uBooNE presets.
+    trackfitting_config = 'pgrapher/experiment/pdhd/pdhd_track_fitting.json',  // PDHD; PDVD: protodunevd/pdvd_track_fitting.json; SBND: sbnd/sbnd_track_fitting.json
+    // MIP dQ/dx scale in e/cm handed to TaggerCheckSTM.  56000 = the SBND value
+    // (docs/48), matching the *DeDx tables now regenerated at 0.5 kV/cm.  Pass
+    // 50000 (the MicroBooNE value, and the C++ default) to isolate the
+    // reference-table change from the MIP-scale change in an A/B.
+    mip_dqdx       = 56000,   // PDHD: muon plateau 54609.2 e/cm at 0.4959 kV/cm x 1.02456 (SBND rule) = 55951 -> 56000; PDVD 55000; SBND 56000
+    // Median-dQ/dx threshold (shower topology / PID), scaled from SBND's 48000
+    // by the same table ratio (48000 x 54609.2/54657.7 = 47957 -> 48000, i.e.
+    // PDHD's 0.4959 kV/cm plateau is within 0.1 % of SBND's 0.5 kV/cm one).
+    mip_dqdx_median = 48000,
+    // Cathode kink veto (doc pr/20 Part II B0), both cm.  segment_search_kink's
+    // four accept criteria are each guarded by para_angle > 7.5-15 deg, a guard
+    // against isochronous imaging artifacts that is INVERTED at the cathode:
+    // the crossing is drift-x dominated so para_angle is 61-78 deg, wide open,
+    // while the ~2 cm transverse mismatch across the gap supplies the turn.
+    // cathode_kink_xcut suppresses kink ACCEPT candidates within that distance
+    // of x = cathode_x; the angle arithmetic itself is untouched.
+    // null on both = C++ default 0 = OFF = the legacy kink search, with the keys
+    // omitted (gate B0-2).  SBND DEFAULT ON (owner 2026-08-02 after the Part VI
+    // Bee scan): 5 cm around x = 0, matching clus.jsonnet's pr() default so a
+    // bare run is production.  NOT bit-identical -- doc pr/20 Part VI sec 1.
+    // Pass -A cathode_kink_xcut=null -A cathode_x=null for the legacy search.
+    cathode_x         = 0,
+    cathode_kink_xcut = 5,
+    // Wide-baseline cathode kink ACCEPT (doc pr/47 sec 8, O1), the converse
+    // of the veto above: a genuine kink AT the crossing never reaches the
+    // legacy accept thresholds (the gap/distortion suppresses every local
+    // refl_angle window -- 52085's 33-38 deg junction reads ~23 deg), so a
+    // fifth accept path fires when the skirt-excluded PCA turn angle across
+    // the crossing is >= this many degrees.  SBND DEFAULT ON (owner
+    // 2026-08-07): 25 deg, mid-gap in the bimodal census distribution (doc
+    // pr/47 sec 6).  NOT bit-identical -- doc pr/47 sec 8.
+    // Pass -A cathode_wide_kink_angle=null for the legacy search.  Skirt /
+    // baseline null = C++ defaults 3 cm / 15 cm.
+    cathode_wide_kink_angle    = 25,
+    cathode_wide_kink_skirt    = null,
+    cathode_wide_kink_baseline = null,
+    // shower_topo_demote_len (cm, doc pr/25 sec 3): demote any segment the
+    // topology test flags kShowerTopology whose geometric length exceeds this,
+    // so it receives real track PID instead of the hard-coded pdg=11/score=100.
+    // Rationale: the test's only measurement axis satisfies
+    // dir_3.xhat = sin(angle-to-drift), so for a near-isochronous segment it
+    // measures spread along the DRIFT axis, where points sit on a 0.313 cm
+    // time-slice lattice -- against a 0.4 cm "large spread" cut.  86 of 91 long
+    // firings across the 572-event valfast manifest carry no evidence above
+    // that noise floor, and an owner hand-scan of all 10 such segments on a
+    // selected nu-candidate main cluster found 10/10 tracks, 0 showers.
+    // null = C++ default 0 = OFF = byte-identical.  SHIPS OFF: the flip is the
+    // owner's call.  50 reproduces the scan-supported rule for 9 of the 10
+    // scanned events; ~45 covers all 10 (evt 400504 measures 49.1 cm by
+    // segment_track_length, the length the guard uses).
+    // **SBND PRODUCTION DEFAULT ON at 50 cm, owner 2026-08-03**, after a
+    // hand-scan of all 10 long shower-topology segments on a selected
+    // nu-candidate main cluster returned 10/10 TRACKS, 0 showers.
+    // Measured at 50 cm over 572 events: 23 long segments flip
+    // shower->track across 22 events, 0 the other way; 17/572 events (3.0%)
+    // move numu_score; evt 321107 goes pdg 11 -> 13, numu_score
+    // -0.783 -> +0.317.  Score moves are MIXED -- evt 286353 drops
+    // 2.023 -> -1.139 -- accepted by the owner with that caveat on record
+    // (doc pr/25 sec 3.10).  50 covers 9 of the 10 scanned events; evt
+    // 400504 measures 49.1 cm by segment_track_length (the length this
+    // guard uses), so ~45 would cover all 10.
+    // Set null for the legacy behavior (long segments stay shower-eligible).
+    shower_topo_demote_len = 50,
+    // ---- doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs -----------------
+    // SBND operating point for the four pr/30 findings.  This file is the
+    // single source of the SBND operating point (doc 68), so a bare run
+    // reproduces production exactly; diagnostic arms are produced by editing
+    // a COPY of cfg/ (WIRECELL_PATH override) or the runner's env hooks.
+    //   fit_exclusion (P1)            true  => the knobbed do_multi_tracking
+    //                                          sites pass flag_exclusion, as 28
+    //                                          of 30 live prototype sites do.
+    //   oov_prototype_parity (F2)     true  => a point outside every TPC votes
+    //                                          the way the prototype's own helper
+    //                                          answers, at all three sites.
+    //   first_seg_local_pca (P2)      false => drop the toolkit-only local-PCA
+    //                                          refinement of the first segment's
+    //                                          endpoints (null/true = production).
+    //   other_seg_relaxed_accept (P4) false => drop the toolkit-only
+    //                                          0.72/15cm/1.05 acceptance clause
+    //                                          (null/true = production).
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-20** (doc pr/98 §7: fits
+    // equal-or-better in 11/12 top movers after the -1.0 sentinel fix; perf
+    // rounds put the cost at ~1.15x median / 1.85x worst on nueCC48).  C++
+    // default stays false; -A fit_exclusion=false (or SBND_FIT_EXCLUSION=false)
+    // restores the pre-flip production path byte-exactly (doc pr/98 §10).
+    fit_exclusion = true,
+    // doc 77 round 1 (2026-08-24): graph_endpoint_strict removed -- "must
+    // stay OFF" (pr/30 P8; pr/86:450).  See sbnd_xin/docs/77_knob-ledger.tsv.
+    graph_endpoint_tol = null,
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04** (doc pr/30 §12.10).
+    // This is a port BUG, not tunable behaviour: at all three out-of-TPC guard
+    // sites the toolkit's implicit vote is the OPPOSITE of what the
+    // prototype's own helper returns for a point with no readout --
+    //   modify_segment_isochronous  toolkit "connected" vs is_good_point FALSE
+    //   examine_vertices_1p         toolkit "dead"      vs get_closest_dead_chs FALSE
+    //   examine_vertices_3          toolkit "not unique" (the segment is then
+    //                               REMOVED) vs a normally-evaluated distance
+    // Flipped ON while it is provably free: measured byte-identical on 48/48
+    // nueCC data events (work-pr30-baseHEAD vs work-pr30-f2on), because the
+    // guards fire once in total on this manifest.  The population where they
+    // WOULD fire -- the cathode region and the readout-window edges -- is
+    // barely represented here, so landing it now costs nothing and avoids
+    // having to A/B it later as a real behaviour change.
+    // Set false for the pre-flip arm.
+    oov_prototype_parity = true,
+    first_seg_local_pca = null,
+    other_seg_relaxed_accept = null,
+    // shower_topo_proto_dir (doc pr/31 §11, F2 was P2)
+    //                               true  => skip the stage-3
+    //                                        segment_determine_shower_direction
+    //                                        call, so a kShowerTopology segment
+    //                                        keeps the direction
+    //                                        segment_is_shower_topology set.
+    // The prototype runs determine_dir_shower_topology here, which does not
+    // touch flag_dir; its determine_shower_direction() is called from exactly
+    // one place in the whole prototype tree and that place is stage 4
+    // (NeutrinoID_track_shower.h:1532).  Deliberately NOT flipped on: unlike
+    // oov_prototype_parity this is not a clear port bug -- the prototype's own
+    // function carries a "// hack for now" comment and has both of its
+    // direction blocks commented out, so the toolkit's 305-line PCA may be the
+    // better physics.  OFF here = today's path = byte-identical; the arm that
+    // measures it sets this true.
+    shower_topo_proto_dir = false,
+    // ---- doc pr/32 §11: the four kept findings of the stage-4 (neutrino
+    // vertex identification) port audit.
+    //
+    // **ALL FOUR ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04.**  Each is
+    // a port BUG or a missing port, not a toolkit design choice, and all four
+    // land byte-identical on the nueCC48 manifest: work-pr32r2-off48 vs
+    // work-pr32r2-{f1on48,f2on48,f34on48,allon48} is 48/48 on pctree-pr
+    // member-content hashes and identical on nusel-table.tsv /
+    // nusel-events.tsv.  They are engaged, not inert -- see the PR32AUDIT
+    // counters quoted per knob below.
+    //
+    // vertex_dir_use_fit_point (F1, was P1): calc_conflict_maps and
+    //   compare_main_vertices_all_showers measure from the vertex fit SNAPPED
+    //   to the nearest Steiner node; the prototype uses get_fit_pt(), the
+    //   continuous fit (NeutrinoID_track_shower.h:1804/1808, :1468/:1480/
+    //   :1504-1505/:1542/:1551/:1567/:1574).  Eleven expressions in two
+    //   functions, against 23 expressions in the same file that already read
+    //   `fit().valid() ? fit : wcpt`.  NOT byte-identical when on.
+    // MEASURED: 5047 reads on 48 events, ALL with a valid fit;
+    //   mean |fit - wcpt| 0.613 cm, max 11.41 cm.
+    vertex_dir_use_fit_point = true,
+    // shower_traj_recheck_parity (F2, was P3): the improve_vertex
+    //   shower-trajectory recheck.  Prototype reads the STORED flag at both
+    //   outer gates (NeutrinoID_improve_vertex.h:248, :287) and recomputes the
+    //   inner test at the 10 cm default with the 50000-analog scale; the
+    //   toolkit recomputes both gates and runs the inner test at 1.0 cm with
+    //   the 43e3-analog.  Fixing the inner parameters ALONE makes the block
+    //   dead code, so this knob moves all three together -- including letting
+    //   segment_is_shower_trajectory clear kShowerTrajectory, which the
+    //   prototype's is_shower_trajectory does on every call and the toolkit
+    //   has never done.
+    // MEASURED: the stored flag and a fresh 10 cm test
+    //   disagree 22 times on 48 events; parity demotes 4 segments and runs the
+    //   recheck body 4 times instead of 7.
+    shower_traj_recheck_parity = true,
+    // main_vertex_require_descriptor (F3, was P7): compare_main_vertices
+    //   guards two of its six blocks on descriptor_valid(); an
+    //   invalid-descriptor candidate reaches the argmax with score
+    //   `0 + (0.5 if in FV) - conflicts/4` and can beat real candidates.
+    //   Expected byte-identical -- the path looks unreachable -- but that is a
+    //   control-flow argument, so the drop is counted (PR32AUDIT f3_dropped).
+    // MEASURED: 0 of 2219 candidates dropped on 48
+    //   events -- P7 is now MEASURED dead code, not argued dead code.
+    main_vertex_require_descriptor = true,
+    // main_vertex_candidate_flag (F4, was P12): set kMainCandidate on each
+    //   per-cluster main-vertex candidate, the prototype's
+    //   map_cluster_main_candidate_vertices (NeutrinoID_track_shower.h:1332).
+    //   DIAGNOSTIC ONLY: only PrDisplayDump reads it, exactly as the prototype
+    //   exposes it only to app-level tree fillers.
+    // MEASURED: 3774 vertices flagged on 48 events.
+    main_vertex_candidate_flag = true,
+    // ---- doc pr/31 §12: the §10.12 topology/PID/direction port-fidelity
+    // round.  All five fixes ship default-OFF in C++/cfg; the values here are
+    // the SBND operating point.
+    //
+    // **ALL FIVE ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04** (the
+    // owner's standing instruction for this round: production keeps bug
+    // fixes and improvements).  Each restores a prototype behaviour the port
+    // dropped by accident, and every one is MEASURED NULL on the nueCC48
+    // manifest: gate work-pr31r2-off48 vs work-pr32r2-allon48 48/48; per-knob
+    // arms work-pr31r2-{f5on,f6on,f3on,f1onb,f4on}48 and the joint
+    // work-pr31r2-allonb48 are 48/48 pctree-hash identical to off, with both
+    // nusel TSVs, every T_tagger/T_kine leaf and every mabc-pr.zip member
+    // unchanged.  Null does NOT mean inert: F1's preserve path fires on 47/48
+    // events (its first implementation crashed there, doc pr/31 §12.5) -- the
+    // rewritten 4-momenta are simply never consumed by any persisted output.
+    // The flips therefore change no production number today and close five
+    // latent divergence classes.
+    //
+    // cont_muon_dir3_30cm (F5, was P6): find_cont_muon_segment_nue's hoisted
+    //   dir3 always at 30 cm as the prototype computes it, instead of falling
+    //   back to the 15 cm dir1 for a short reference segment.  The reachable
+    //   divergent case is "short reference segment, long neighbour".
+    cont_muon_dir3_30cm = true,
+    // track_comp_empty_abstain (F6, was P7): an empty dQ/dx comparison window
+    //   ABSTAINS from the direction gate instead of confirming the
+    //   orientation.  0.0 is the prototype's degenerate answer, verified by
+    //   execution (zero-bin TH1F KolmogorovTest -> ks1 == ks2 == 0 ->
+    //   eval_ks_ratio false).
+    track_comp_empty_abstain = true,
+    // shower_topo_reset (F3, was P13): segment_is_shower_topology clears
+    //   kShowerTopology and dirsign at entry, before its early returns, as the
+    //   prototype does (ProtoSegment.cxx:319-321) -- no stale flag survives a
+    //   re-test.  Also closes shower_topo_proto_dir's stated residual.
+    shower_topo_reset = true,
+    // reclass_preserve_4mom (F1, was P1+P3a+P4): the 15 reclassification
+    //   sites preserve the existing 4-momentum, recomputing only where the
+    //   prototype's get_particle_4mom(3)>0 guard passes.  The only fix in this
+    //   round that moves kine_reco_Enu directly.
+    reclass_preserve_4mom = true,
+    // dir_track_median_local (F4, was P8): determine_dir_track's median
+    //   dQ/dx over the SAME local vector the PID receives (prototype
+    //   nth_element), not the filtered helper rebuild.
+    dir_track_median_local = true,
+    // examine_showers_vertex_by_index (F7, was P5): DELIBERATELY DORMANT.
+    //   Orders examine_all_showers' vertex pair by graph index before the
+    //   asymmetric 165/150-degree branches -- A deterministic convention, not
+    //   provably the prototype's.  Stays false pending pr/30 F4's
+    //   find_vertices adjudication (that decision owns all three known
+    //   order-sensitive callers).
+    examine_showers_vertex_by_index = false,
+    // Steiner TERMINAL filter fidelity -- doc pr/29 D1 and D12.
+    //
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-04**: both are port BUGS, not
+    // tunable behaviour.  The toolkit filter was strictly tighter than the WCP
+    // prototype in two independent ways, and on SBND evt 388 that discarded
+    // 47.7% of every cluster's Steiner terminals and left 24 clusters below the
+    // two-terminal minimum -- i.e. with no Steiner tree at all.  With both on:
+    // 20.0% and 3.  NOT bit-identical: PR segments 75 -> 88, vertices 118 ->
+    // 131, numu_score -3.199 -> -2.166, kine_reco_Enu 2900.5 -> 2865.6 MeV,
+    // and the event's pi0 candidate disappears (kine_pio_flag 1 -> 0) -- the
+    // event label, TGM/STM/FC verdicts do not move.  Measured on ONE event
+    // against a zero noise floor (same-binary repeat byte-identical); doc pr/29
+    // sec.11.4/11.7.
+    //
+    // The C++ defaults stay OFF, so uBooNE/ICARUS/PDHD/PDVD are unaffected --
+    // this is an SBND operating-point decision and lives here (doc 68: the
+    // operating point is in cfg only, and a bare run IS production).
+    // Set steiner_terminal_wire_tol=0 and steiner_terminal_adjacent_slice=false
+    // for the pre-fix arm that every legacy comparison needs.
+    //   steiner_terminal_wire_tol = 1     restores the prototype's one wire of
+    //     slack on both sides of all three planes in the terminal containment
+    //     test (PR3DCluster_steiner.h:285-290, :310-315, :336-341).  Under the
+    //     toolkit's half-open [min,max) convention that is `>= min-1 && < max+1`
+    //     -- NOT `<= max+1`, which would be asymmetric.  get_extreme_wcps shares
+    //     the same C++ helper and is deliberately left at 0, matching its own
+    //     prototype counterpart (PR3DCluster_path.h:111-119), which has no slack.
+    //   steiner_terminal_adjacent_slice = true    makes the prototype's t+-1
+    //     slice fallback resolve.  The map is keyed by blob->slice_index_min(),
+    //     which is in TICKS, so the historical step of 1 names no real slice on
+    //     SBND (nticks_live_slice = 4) and the branch is dead code.  ON, the
+    //     step comes from the face's own nticks-per-slice, not a literal 4.
+    // Both can only ADD terminals: each restores a way to PASS the filter.
+    steiner_terminal_wire_tol = 1,
+    steiner_terminal_adjacent_slice = true,
+    // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  ON at the owner's
+    // instruction, same reasoning as the two above: the prototype weights
+    // steiner edges with charges computed under the disable_dead_mix_cell this
+    // chain actually passes (false, CreateSteinerGraph.cxx:234 ->
+    // PR3DCluster_steiner.h:514,:521), and the toolkit dropped the argument at
+    // the call so create_enhanced_steiner_graph's `= true` default won.  Not a
+    // tunable: the toolkit was computing a charge the port did not intend.
+    //   ON  -> only planes with a NONZERO charge value enter the Qs/Qt RMS.
+    //   OFF -> all three planes enter and DEAD ones (charge_uncertainty > 1e10)
+    //          are subtracted -- an independent predicate, so the two disagree
+    //          on any live-but-zero or dead-but-nonzero plane.
+    // Unlike the terminal-filter knobs this moves weights in EITHER direction,
+    // so it can add or drop tree edges rather than only add terminals.
+    // Set to false for the pre-fix arm.
+    steiner_edge_charge_forward_dead_mix = true,
+    // Cross-blob Steiner terminal thinning, in CENTIMETRES (doc pdvd/37 R1).
+    // **PDVD PRODUCTION DEFAULT 0.5 cm, owner 2026-09-04.**  C++ default 0
+    // (none) and pr.jsonnet's default is 0 too, so this line -- not the
+    // toolkit -- IS the PDVD operating point, exactly as the two terminal
+    // filter knobs above are.  A bare pr.jsonnet run is NOT PDVD production.
+    // SBND is deliberately NOT changed: it binds the same shared cm.steiner()
+    // and stays at 0.
+    //
+    // WHY.  Phase 1 selects terminals one blob at a time
+    // (find_steiner_terminals -> find_peak_point_indices, whose candidate map
+    // never leaves the blob), so its local-maximum test cannot compare across
+    // a blob boundary and cannot remove a blob's LAST candidate.  Terminal
+    // density is therefore floored at the candidate-bearing blob density
+    // (1.02 terminals per such blob, doc pdvd/31 round 6) -- i.e. set by the
+    // time-slice pitch over the track's drift alignment, not by anything
+    // physical.  Doc pdvd/37 sec.3.2 measures the same law on PDVD, SBND and
+    // uBooNE.  This does not touch selection: after the reference and path
+    // filters the terminals are walked in DECREASING charge and one is kept
+    // only when no already-kept terminal lies strictly within this distance.
+    //
+    // WHY 0.5 AND NOT 1.0.  Doc pdvd/37 sec.5: at 1.0 cm, 7.4-16 % of PDVD's
+    // multi-branch PR vertices lose EVERY terminal within 1 cm of the vertex
+    // (order-dependent, three orders quoted); at 0.5 cm that is 1.5-3.1 %.
+    // The owner's fourth criterion is "do not miss terminals near the vertex",
+    // and 1.0 cm is where it breaks.  0.5 cm removes ~19 % of PDVD terminals,
+    // all of them near-duplicates: the survivors' median distance to the
+    // fitted skeleton moves by <= 0.02 cm and the largest terminal-free run
+    // does not move at all (doc pdvd/37 sec.4).
+    //
+    // Set to 0 for the pre-flip arm: -S steiner_terminal_min_sep_cm=0.
+    steiner_terminal_min_sep_cm = 0.5,
+    // Skip the Steiner build for clusters an earlier visitor already tagged
+    // (doc pdvd/39).  PDVD passes ["TGM"] together with the reordered pipeline
+    // that puts tagger_check_tgm AHEAD of 'steiner': a through-going muon can
+    // never reach the STM tagger, which skips TGM-flagged mains
+    // (TaggerCheckSTM.cxx:566), so building its Steiner graph is pure cost.
+    // On PDVD this is worth real time because there is NO effective beam
+    // bundle: beam_window_us below is readout-wide, so the beam_window_only
+    // gate selects everything, and flag_mains makes every flash-matched
+    // cluster a main.
+    //
+    // NOT free of output change: tagger_check_fc then sees no steiner_pc on a
+    // TGM cluster and returns the conservative is_fc=false, so the FC flag can
+    // move on TGM-tagged clusters.  The TGM and STM verdict SETS must be
+    // unchanged -- that is the gate this ships behind (doc pdvd/39 sec.5).
+    //
+    // Set to [] for the pre-flip arm: -S 'steiner_skip_flags=[]' (and use the
+    // legacy pipeline order, runner: -stm).
+    steiner_skip_flags = [],
+    // Isochronous first-segment endpoint finding (doc pr/24 round 2, SBND evt
+    // 271851): for a long cluster whose quantile-trimmed drift-x extent is
+    // small (a filled 2-D sheet), the first PR segment's endpoints come from
+    // the sheet's principal axis instead of the wire-footprint boundary
+    // metric (which degenerates to sheet-edge corners and produces the
+    // two-edge-track fan), and the local-PCA endpoint refinement is skipped
+    // on that branch.
+    // **SBND PRODUCTION DEFAULT ON, owner 2026-08-03**, after the doc pr/24
+    // sec 15 (round 3) scan.  Round 3 is what made it flippable: the endpoint
+    // is the UNTRIMMED axial extreme (round 2's quantile-trimmed one left a tip
+    // stub that find_other_segments claimed, planting a 0.9 deg "vertex" in the
+    // straight track of evt 284794), and iso_endpoint_min_aspect requires real
+    // 2-D sheet-ness so 1-D tracks never enter the branch -- evts 284794 and
+    // 59899 are byte-identical to legacy again.  Evidence: evt 271851 vertex
+    // 30.9 -> 2.4 cm from truth on the DL arm (the production chain), nue_score
+    // -15 -> +4.30; evt 122660 nue -15 -> +4.30; 0/17 mcp1k events gain a
+    // straight-through segment junction (round 2: 4/17); every non-firing event
+    // stays archive-identical.  CAVEAT on record (doc pr/24 sec 15.6): on the
+    // DIAGNOSTIC geometric-vertex arm evt 271851 goes 1.7 -> 6.6 cm and loses
+    // the nue selection -- accepted by the owner, and the first thing to check
+    // if the next valfast census surprises.
+    // The four sizing knobs stay null = the C++ defaults (40 cm min length,
+    // 25 cm max drift extent, 0.35 frac, 0.02 quantile, 4 cm diagnostic tube
+    // radius, 0.12 min sheet aspect).
+    // Set iso_endpoint=false for the legacy wire-footprint boundary endpoints
+    // (SBND_ISO_ENDPOINT=0 on the run_pr_chain_batch.sh runner).
+    // NOT bit-identical to the pre-flip chain -- a deliberate production change.
+    iso_endpoint = true,
+    iso_endpoint_min_length = null,
+    iso_endpoint_max_xext = null,
+    iso_endpoint_xext_frac = null,
+    iso_endpoint_xext_quantile = null,
+    iso_endpoint_tube_radius = null,
+    iso_endpoint_min_aspect = null,
+    // examine_vertices_3 extension-retraction guard (doc pr/24 sec 18, round
+    // 5, SBND 18259-42280 / 18255-271851 / 18255-350186).  get_local_extension's
+    // Hough-based direction estimate can return a point CLOSER to the far
+    // endpoint than the vertex it started from -- worst at the axial extreme
+    // of an isochronous sheet, which is exactly where iso_endpoint (above)
+    // picks its seed, so an iso-picked trunk tip can lose 7.5-8.9 cm of its
+    // delivered trajectory to a stage nominally meant to extend it further.
+    // SBND production default since 2026-08-06 (owner: "you can put them on
+    // for SBND running", doc pr/24 sec 19.1, gate work-pr24r6-off48 vs
+    // work-pr24r5-off48 -- legacy restorable via SBND_V3_EXT_GUARD=0).
+    // v3_extension_min_gain stays null = the C++ default (-1 cm); the key is
+    // suppressed in the compiled config either way.
+    v3_extension_guard = true,
+    v3_extension_min_gain = null,
+    // doc sbnd_xin/docs/pr/67 -- LOG-ONLY diagnostic probe for "the fitted
+    // trajectory does not cover the image", worst in isochronous topologies
+    // (owner cases 18264-137238 / 18259-42280 / 18345-21073 / 18255-58717).
+    // Names the find_iso_first_segment_endpoints gate that rejected a cluster
+    // (today only the aspect gate logs), reports get_local_extension's
+    // perpendicular-to-drift no-op, the per-round find_other_segments census,
+    // and what examine_end_ps_vec trims off each end.
+    // C++ default false; key suppressed when off => byte-identical config.
+    // Set SBND_TRAJ_COVER_PROBE=1 on run_pr_chain_batch.sh.
+    traj_cover_probe = false,
+    // doc pr/67 -- counterfactual ONLY, not a production setting.
+    // find_proto_vertex's nrounds_find_other_tracks is hardcoded (2 for the
+    // main cluster) with no config surface; > 0 overrides it so the owner's
+    // "not sufficient rounds of branch searching" hypothesis can be measured.
+    // C++ default 0 = keep the hardcoded 2.  A value > 0 CHANGES OUTPUT.
+    // Set SBND_PR_FIND_OTHER_ROUNDS=<n>.
+    pr_find_other_rounds = null,
+    // protect_bundle stage knobs (doc pr/23): the PR-stage overclustering
+    // protection (uboone's second graph examination).  The stage is in
+    // pipeline_names by DEFAULT since the sec 9 production flip; the knobs
+    // are inert only when it is dropped.  The cathode re-join
+    // values are the SBND operating point in INTERNAL units (unlike
+    // cathode_kink_xcut above, which is cm), matching clus.jsonnet's pr()
+    // defaults so a bare run is production; nulls = prototype-faithful
+    // (re-join pass disabled -- would break cathode crossers, doc pr/20).
+    // **SBND PRODUCTION DEFAULT 'relaxed_strict_img_2d_rescue_long', owner
+    // 2026-08-11 (doc pr/62; adds S7 on top of doc pr/57 round 6's S6+rescue,
+    // preserved below).** S6's flood-fill kill test is capped at
+    // `s6_dis_cap`=30cm (its cost tracks candidate distance, and its
+    // `cell_budget` breaker fails CLOSED on exhaustion -- raising the cap
+    // trades missed gaps for silent false-kills of large sparse real
+    // objects).  Above 30cm the only surviving test was S1-S3's per-plane
+    // *independent* radius query, which a track can pass with charge from
+    // three unrelated nearby objects.  S7 (`Graphs::long_corridor_bad`,
+    // `connect_graph_relaxed_strict.cxx`) closes exactly that gap: a
+    // corridor-restricted BFS between the candidate's own two endpoint
+    // lattice cells, O(D) not O(D^2) so the budget stays non-live, breaker
+    // inverted to fail OPEN (abstain, not kill, on exhaustion) -- the
+    // opposite of S6's posture, deliberately.  Operating point
+    // min_gapped_planes=1 (mirrors S6's owner-instructed single-plane rule);
+    // the more conservative min_gapped_planes=2 flavor
+    // ('relaxed_strict_img_2d_rescue_long2') ships alongside, not selected
+    // here.  117-event validation (48 nueCC + 19 NCpi0 + 50 PR-data): 17/117
+    // movers, nusel (final neutrino selection) byte-identical in every
+    // event at BOTH operating points (identical mover sets on this sample);
+    // S7 kill rate on evaluated candidates 97.4% (184/189) -- higher than
+    // doc pr/56 sec 8.4's own S6 ceiling (89% at 15-30cm), an aggressive
+    // point, not a conservative one.  min_gapped_planes/gap_floor_cm are
+    // UNFITTED -- no hand-scan labels exist yet in this distance band,
+    // unlike S6's 899-label fit below.  Owner reviewed the 17-event Bee
+    // before/after and flipped.  protect_bundle is the only consumer, so
+    // clustering and TGM/STM/FC verdicts stay byte-identical for every
+    // event S7 does not touch.  See doc pr/62.
+    //
+    // S6+rescue itself (doc pr/57 round 6, owner 2026-08-10, superseding
+    // round 7's 'relaxed_strict_img'): adds S6, a per-plane 2D wire/tick
+    // gap-kill OFF in every earlier default, plus a pure post-kill RESCUE
+    // (`Graphs::two_d_rescue_ok`, killed -> kept only, never the reverse)
+    // fitted to the owner's full 899-label hand scan (230 events / 847
+    // component pairs).  Rescue recognizes dead-W-channel gaps, prolonged/
+    // isochronous induction-plane signal on high-direction-consistency long
+    // tracks, W allowed a tighter gap than U/V, and W-anchored two-view
+    // footprint co-location.  Also repairs a dir-MST emission gap: a killed
+    // closest candidate no longer silently drops a pair's dir-bridge
+    // emissions when S6/rescue judged it should survive.  Final table on the
+    // owner's hand scan: bad-separation (must reconnect) 124/127,
+    // good-separation (must stay split) 154/156, the two misses being the
+    // owner's own unsatisfiable label triangles.
+    //
+    // **SBND PRODUCTION DEFAULT '..._rescue_long_wtrack', owner 2026-08-11
+    // (doc pr/64 round 4; adds the S6 W-plane long-track exception on top of
+    // pr/62's S7, preserved above).** W (collection) has no excuse channel in
+    // S6 -- `excused[3]={excuse_u,excuse_v,false}` -- so a genuinely straight
+    // long track with a small W-only hole is broken by the one plane that
+    // cannot be excused (18259-174224 plain 6-wire W charge hole,
+    // 18255-276836 drift-parallel all-plane prolongation where only W
+    // convicts, 18255-314507).  `Graphs::two_d_w_track_ok` revives an
+    // S6-killed candidate iff W is the SOLE voting plane and both components
+    // are long/thin/globally-collinear (Lmin>6cm, npmin>=50, Tmax<2cm,
+    // angle<25deg, tightened by Tmax<1.7cm OR angle<6deg -- the owner-chosen
+    // zero-regression point on the 899-label hand scan: protects evt122660's
+    // good pair, forgoes the marginal 64959/172656 recoveries), or a dead-W
+    // band explains the gap (dead_w>=3, npmin>=20, dis<3cm).  Revive-only,
+    // composed after the shipped rescue, whose local-axis W branch is
+    // byte-untouched; the exception uses the GLOBAL per-component PCA axis
+    // (the local break-point axis is noisy exactly at a break -- 174224:
+    // local 20.7deg vs global 4.2deg).  Validation (doc pr/64 round 4):
+    // off-gates 0/66 movers on same-config fresh arms + 1000-event bare
+    // rerun fully attributed to pr/65's flip; on-arm movers on the FULL
+    // 1000-event PR-data sample are EXACTLY the three target events
+    // (174224 fully rejoined, 276836/314507 partially -- their all-plane S7
+    // breaks remain by design) plus evt122660's owner-OK 4/5/6 component
+    // merge on nueCC48; the owner-labelled good pair 122660 13-16 stays
+    // split on-arm; nusel byte-identical in all 1067 gated events.
+    //
+    // Legacy escapes: -A protect_graph_name=relaxed_strict_img_2d_rescue_long
+    // (SBND_PROTECT_GRAPH=relaxed_strict_img_2d_rescue_long) restores
+    // pre-pr/64 production (S7, no W exception);
+    // =relaxed_strict_img_2d_rescue restores pre-pr/62
+    // production (round 6, S6+rescue only, no S7);
+    // =relaxed_strict_img_2d_rescue_long2 selects the conservative S7
+    // min_gapped_planes=2 point; =relaxed_strict_img restores round 7;
+    // =relaxed_strict restores round 6's predecessor; =relaxed restores
+    // pre-round-6.
+    //
+    // PDVD default since clus/docs/connect-graph-strict-perf-round1.md round
+    // 12 (doc pdvd/25 sec 13.11 addendum): the '_fast' sibling carries doc
+    // 78's busy-gated lazy Kruskal walk (busy_num_threshold=200), which
+    // defers the closest-pair MST verdict for a pair only once the cluster's
+    // component count exceeds 200 -- below that it is byte-identical to the
+    // eager walk by construction (the print-and-compare gate below only
+    // exercises clusters that actually crossed the threshold).  Round 12
+    // reran all 120 doc-25 `_keep` events under both flavors on the SAME
+    // pctree inputs (protect_stm_only_bundles/nu_per_bundle_stm_only stay at
+    // their PDVD defaults): 119/120 events completed (039349/32 SIGSEGVs
+    // identically in both arms, in TrackFitting::form_point_association
+    // downstream of TaggerCheckNeutrino's dual-chain-off pass -- unrelated
+    // to this knob, not fixed here); of 189 STM-bundle clusters censused via
+    // the 'connect_graph_relaxed_strict: ... ncomp=... lazy=' debug line,
+    // exactly 2 crossed ncomp>200 and actually took the lazy path (039252/8
+    // ncomp=509, 039253/5 ncomp=205; the rest of the tail tops out at 117) --
+    // both byte-identical (abtest/hash_archive.py member hashes) to the
+    // eager flavor's mabc-pr.zip and calib-pr-evt*.json (dual_chain timer
+    // excluded).  All 238 possible bee+calib hash pairs across the 119
+    // completed events matched; the 2 unpaired entries (039349/32, /60) were
+    // absent in BOTH arms identically, not a divergence.  Round 1's own
+    // controlled measurement on 039252/8 (cluster 84, ncomp=509) had this
+    // flavor take ClusteringProtectBundle 1710.99 s -> 797.65 s (2.15x, not
+    // 30x -- see the round-1 doc for why: the dir1/dir2 walks stay eager).
+    // Legacy escape:
+    // PDVD_PR_TLA="-S protect_graph_name='relaxed_strict_img_2d_rescue_long_wtrack'"
+    // restores the pre-round-12 eager production path.
+    protect_graph_name          = 'relaxed_strict_img_2d_rescue_long_wtrack_fast',   // null => 'relaxed'
+    // C++ default true (doc pr/23 ordering): a TGM/STM/lm-convicted in-window
+    // main does not open its bundle for splitting.  null => key omitted.
+    protect_skip_convicted      = null,
+    // doc pr/94 round 3.  When true a convicted main still OPENS its bundle,
+    // so the bundle's unconvicted members -- the secondary activity the
+    // demoted-main fallback goes on to call the neutrino -- get the second
+    // graph examination every member of an unconvicted bundle gets.  The
+    // convicted cluster itself is still never split.  SBND 18255/395148: the
+    // 198.9 cm secondary keeps a graph bridge that fits 17 cm of trajectory
+    // through empty space because ClusteringProtectBundle logged
+    // "OC53SKIP main ident=10 ... convicted STM=1 -- bundle not opened".
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip, doc sec
+    // 9.13).**  This is the knob that removes SBND 395148's 17 cm trajectory
+    // excursion through empty space (fit points > 3 cm from any charge
+    // 15 -> 0, worst 8.40 -> 0.83 cm).  null => C++ default false; pre-flip
+    // arm: SBND_OPEN_CONVICTED_BUNDLES=0.
+    protect_open_convicted_bundles = true,
+    // doc pdvd/25 sec 13.11 -- the mirror of nu_per_bundle_stm_only (sec
+    // 13.10), one stage earlier, and the PDVD working mode since 2026-09-02.
+    //
+    // With nu_per_bundle_stm_only on, the per-bundle neutrino PR only ever
+    // runs on STM-tagged activities.  Every split ClusteringProtectBundle
+    // performs in a bundle that holds no STM tag is therefore work no
+    // downstream stage reads -- and on PDVD that is where the time goes,
+    // because the beam window is readout-wide by design (sec 2.1) so EVERY
+    // matched bundle is opened, not the ~1 an SBND-width window opens.
+    // Measured on 039252/8 (stm2 arm): the stage took 1621 s, of which 1602 s
+    // (98.8 %) was ONE unconvicted 18876-blob cluster -- 93584 points, 509
+    // graph components, 129286 component pairs at 12.4 ms each in
+    // connect_graph_relaxed_strict, which has no fast path (the doc 78
+    // eb_fast/po_fast lazy walk was never threaded into the strict family).
+    //
+    // When true only a bundle holding an STM-tagged cluster is opened.  The
+    // gate reads the flag on ANY cluster in the bundle, not only its longest
+    // main, because an STM-tagged activity need not be its bundle's main (sec
+    // 13.10) -- gating on the main would change the PR's input instead of only
+    // its cost.
+    //
+    // NOT byte-identical when on: a cosmic bundle that is no longer split
+    // keeps its over-clustered shape in mabc-pr.zip and calib-pr-evt*.json.
+    // Every STM bundle's cluster set is unchanged, which is the property the
+    // sec 13.11 gate checks.  C++ default false; key omitted when off.
+    // PDVD_PR_TLA="-S protect_stm_only_bundles=false" restores the
+    // every-bundle stage the stm1/stm2/stm3 arms ran.
+    protect_stm_only_bundles    = true,
+    protect_cathode_x           = 0,
+    protect_cathode_rejoin_xcut = 5 * wc.cm,
+    protect_cathode_rejoin_dyz  = 4 * wc.cm,
+    protect_cathode_rejoin_dis  = 8 * wc.cm,
+    // Direction-agreement fallback for a dyz-only failure (doc pr/25 sec 1,
+    // SBND evt 489327).  **SBND PRODUCTION DEFAULT ON, owner 2026-08-03.**
+    // A cathode crosser whose two halves are collinear but whose transverse
+    // travel exceeds cathode_rejoin_dyz -- which happens by construction as
+    // a track tips toward the cathode plane -- is re-joined on direction
+    // agreement instead of being left split.  Operating point from doc
+    // pr/25 sec 1: measured 5/5 target re-joins, 1/1 junk pair still
+    // rejected (89.2 deg direction mismatch, also fails dir_npts), 8/8
+    // regression events byte- AND score-identical.
+    // INTERNAL units except _angle (degrees) and _dir_npts (count).
+    // Set null for the legacy dyz-only behavior.  Per doc 68 the SBND
+    // operating point lives HERE only; clus.jsonnet's clus_pr()/pr()
+    // function defaults stay null (the doc pr/23 both-files trap is about
+    // an explicit null in the OTHER direction overriding a value set here).
+    protect_cathode_rejoin_perp       = 3 * wc.cm,
+    protect_cathode_rejoin_angle      = 20.0,
+    protect_cathode_rejoin_dir_radius = 15 * wc.cm,
+    protect_cathode_rejoin_dir_npts   = 20,
+    // TaggerCheckSTM's containment gate (cluster_fc_check) uses the same fiducial
+    // + margins as tagger_check_tgm / tagger_check_fc, so "contained" means one
+    // thing across all three verdicts.  true = SBND production (docs/49); false
+    // restores the pre-doc-49 FiducialUtils sensitive-volume fallback, which is
+    // what the A/B compares against.  Runner flag: -no-stm-fv.
+    stm_consistent_fv = true,
+    // doc-63 round-1 STM acceptance guards (charge-desert one-objectness,
+    // spike-not-ramp nu-vertex veto, eval ratio2 cap).  C++ default false;
+    // key omitted when off => byte-identical compiled config.  DEFAULT TRUE
+    // = SBND production as of doc 63 (owner 2026-07-26); pass false for a
+    // pre-campaign A/B.  Runner flag: -stm-guards / SBND_STM_GUARDS=1.
+    stm_accept_guards = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    // doc-63 round-2 muon-consistency guard on detect_proton (an end region
+    // matching the muon hypothesis in shape and normalization is not called a
+    // proton).  C++ default false; key omitted when off => byte-identical.
+    // DEFAULT TRUE = SBND production as of doc 63 (owner 2026-07-26).
+    // Runner flag: -stm-proton-guard / SBND_STM_PROTON_GUARD=1.
+    // doc pdvd/116 (owner 2026-09-18): FLIPPED to true for PDHD production, the R2 operating point of the
+    // tagger retune on the prefer3 + tree+path alpha 0.5 trajectory (the R1 lever: +3 PDVD stoppers, 0 FP;
+    // graded after the owner scans own116h / own116v, figs/116_grade_*_own116.txt).  Was false since doc 25
+    // sec 2.3 (STM is the signal).  -S stm_proton_muon_guard=false restores the pre-116 compile (key omitted).
+    stm_proton_muon_guard = true,
+    // doc-63 round-3 cathode-truncation veto (a fitted stop within ~5 cm of
+    // the CPA with no Bragg rise did not stop -- drift-boundary truncation).
+    // C++ default false; key omitted when off => byte-identical.  DEFAULT
+    // TRUE = SBND production as of doc 63 (owner 2026-07-26).  Runner flag:
+    // -stm-cathode-guard / SBND_STM_CATHODE_GUARD=1.
+    stm_cathode_guard = true,    // PDVD: ON -- a stop within stm_cathode_guard_cm of the 6 cm cathode slab with no Bragg rise is a crosser half, not a stop (doc 25 M3: 2 of 5 first-event STMs were such); SBND production true
+    stm_cathode_guard_cm = 12,   // cm; PDVD cathode half-thickness 3 cm + SCE/stitch slack; C++/SBND 5
+    // readout_edge_guard (doc 25 M3): a stop whose arrival tick is within
+    // stm_readout_edge_ticks of the 10000-tick window edges was cut by the
+    // window (a cosmic with its own flash t0 can be truncated at ANY x).
+    // PDVD ON; SBND does not have the knob (C++ default false).
+    stm_readout_edge_guard = true,
+    stm_readout_edge_ticks = 60,   // 30 us = 4.4 cm of drift
+    // Steiner-terminal per-point charge floor (e).  C++/SBND 4000 (prototype);
+    // PDVD value from the doc-25 sec 13 threshold census (null = 4000).
+    steiner_terminal_charge = 500,   // e; doc 25 sec 13.6 census over 4000/2000/1000/500 on 3 events: no-steiner exits 39 -> 14, STM tags 16 -> 18, first Bragg-clean track appears at 500; W-plane per-point median ~1400 e
+    // doc-63 round-4a fix of the inverted face selection in the STM tagger's
+    // dist_to_anode helper (the anode-clipped-TGM catch fired at the SBND
+    // cathode).  C++ default false; key omitted when off => byte-identical.
+    // DEFAULT TRUE = SBND production as of doc 63 (owner 2026-07-26, after
+    // validation).  Runner flag: -stm-anode-fix / SBND_STM_ANODE_FIX=1.
+    stm_anode_dist_fix = true,
+    // doc-63 round-4b/4c second-track vetoes (long straight leftover past
+    // the kink = V topology; long MIP-like other-track segment).  C++
+    // default false; key omitted when off => byte-identical.  DEFAULT TRUE
+    // = SBND production as of doc 63 (owner 2026-07-26, after validation).
+    // Runner flag: -stm-track-guard / SBND_STM_TRACK_GUARD=1.
+    stm_second_track_guard = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    // doc-63 round-5 stop-region vetoes.  5a deficit_guard: an end whose
+    // last-5cm median dQ/dx is below 0.6 MIP with no Bragg rise in the last
+    // 15 cm is a reconstruction truncation, not a stop.  5b
+    // vertex_kink_guard: a sharp (>45 deg) turn within 12 cm of the stop
+    // into a >2.2 MIP prong is a nu vertex plus proton, not a Bragg.  C++
+    // defaults false; keys omitted when off => byte-identical.  DEFAULT
+    // TRUE = SBND production as of doc 63 (owner 2026-07-26, after
+    // validation).  Runner flags: -stm-deficit-guard / SBND_STM_DEFICIT_GUARD=1,
+    // -stm-vertex-guard / SBND_STM_VERTEX_GUARD=1.
+    stm_deficit_guard = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    stm_vertex_kink_guard = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    // doc pdvd/56 T1b: a third, additive OR-clause in find_first_kink's
+    // charge gate (both sweeps), admitting an ASYMMETRIC kink (Bragg into a
+    // cold Michel).  C++ defaults false/1.2/0.5; keys omitted when off =>
+    // byte-identical.  DEFAULT OFF: no PDHD STM/Michel hand-scan record
+    // exists to confirm this here, PDVD-only measurement (doc 59).
+    stm_kink_asym_enable = false,
+    stm_kink_asym_entry_mip = 1.2,
+    stm_kink_asym_far_mip = 0.5,
+    // stm_descent_guard (doc 94 round 1): veto an STM accept whose stop was
+    // reached travelling UPWARD or near-horizontally.  A cosmic stopping muon
+    // arrived from the sky, so it entered a boundary face ABOVE the point
+    // where it came to rest; the flux falls as cos^2(zenith) and a stopping
+    // muon crossing near-horizontally needs an impossible slant depth.  This
+    // is the first STM guard to read TRAVEL DIRECTION -- every earlier one
+    // reads charge or topology -- which is the new information source docs/63
+    // sec 9 required before any further STM round.
+    //
+    // stm_descent_cos_y is compared against dy/|d| of (stop - entry): -1
+    // straight down, 0 horizontal, +1 straight up.  DEFAULT +1.01 is ABOVE
+    // the feature's range, so setting stm_descent_guard=true WITHOUT lowering
+    // the cut is a pure probe: the DEBUG line prints the feature on every
+    // evaluated bundle and no verdict moves.  DEFAULT FALSE.
+    // Keys omitted when off => byte-identical.  See sbnd_xin/docs/94.
+    stm_descent_guard = false,
+    stm_descent_cos_y = 1.01,
+    stm_descent_min_cm = 10.0,
+    // stm_vertex_hadron_guard (doc 94 round 1): veto an STM accept whose
+    // fitted main carries a LONG, HEAVILY IONIZING prong -- vertex hadronic
+    // activity from a neutrino interaction.  check_other_tracks was ported to
+    // find a second MUON: every acceptance clause there wants high
+    // straightness or MIP-band charge, and a hot CURVED segment is skipped by
+    // name.  A proton scatters, so it escapes all of it.
+    // DEFAULT TRUE = SBND production as of doc 94 (owner 2026-09-02).
+    // Recovers 3 of the 4 owner-adjudicated neutrinos; over all 3067 SBND
+    // data events the measured A/B flips 1 bundle of 34,827 and the owner
+    // adjudicated that bundle (64475:23) a NEUTRINO, so the measured cost is
+    // zero; 0 of the 36 owner-adjudicated correct STMs (doc 62) break.
+    // NOT byte-identical.  Escape for the A/B: PR_EXTRA_TLA line
+    // "stm_vertex_hadron_guard=false".  See sbnd_xin/docs/94.
+    stm_vertex_hadron_guard = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    stm_hadron_len_cm = 12.0,
+    stm_hadron_mip = 1.5,
+    // stm_entry_rise_guard (doc 94 round 2): veto an STM accept whose fit
+    // carries a CONTIGUOUS elevated dQ/dx run ANCHORED at the BOUNDARY end
+    // that then DECAYS to the body level.  At the boundary a cosmic stopping
+    // muon is at its most energetic, so its dQ/dx there is at its LOWEST;
+    // charge well above MIP there that comes back down within a few tens of
+    // cm is two particles sharing that stretch, one of which left the
+    // detector -- the "entry" point is an EXIT and the vertex sits inside.
+    // This is the only predicate in TaggerCheckSTM that reads the end where
+    // the fit STARTS; every other one reads the stop.
+    //
+    // stm_entry_min_cm is the shortest anchored run that vetoes.  Setting it
+    // ABOVE the feature's range (e.g. 1000) makes stm_entry_rise_guard=true a
+    // pure probe: the DEBUG line prints shoulder, its no-first-point twin and
+    // the integrated excess on every evaluated bundle and no verdict moves.
+    // Round 3 (owner hand-scan, 2026-09-02): stm_entry_kink_deg -- the path
+    // must ALSO turn.  A two-particle vertex turns; a delta-ray fluctuation on
+    // a straight muon does not.  The AND is the discriminator: the kink is
+    // worthless alone (42.3% of the evaluated STM population clears 22 deg).
+    // stm_entry_max_cm 30 -> 60 in the same round (the owner adjudicated
+    // 350099, shoulder 48.8 cm, a NEUTRINO).
+    //
+    // DEFAULT TRUE = SBND production as of doc 94 round 3 (owner 2026-09-02).
+    // Recovers 827-27-4; over all 3067 SBND data events the measured A/B flips
+    // 2 bundles of 34,827 and the owner adjudicated BOTH (164466:7, 350099:15)
+    // NEUTRINOS, so measured contamination is zero; no bundle gains a cosmic
+    // tag; 414 of 416 STM bundles keep their tag.  NOT byte-identical.
+    // Escape for the A/B: PR_EXTRA_TLA line "stm_entry_rise_guard=false".
+    // See sbnd_xin/docs/94 sec 13.
+    stm_entry_rise_guard = false,   // PDVD: OFF (STM is the signal, doc 25 sec 2.3); SBND production true
+    stm_entry_frac = 1.3,
+    stm_entry_min_cm = 5.0,
+    stm_entry_max_cm = 60.0,
+    stm_entry_min_len_cm = 70.0,
+    stm_entry_kink_deg = 22.0,
+    // doc-66 sec 12 diffusion-margin cut package: Michel-veto res_length
+    // floor 6 -> 6.5 cm, detect_proton track_medium gate 1.0 -> 1.05,
+    // block-B ks2 entry 0.05 -> 0.055, C1 peak clause 4.3 -> 4.1.  Restores
+    // the four vetoes the 4.0/8.8 diffusion revert lost by hairline margins
+    // (owner-adjudicated; full-1000-event sweep found zero collateral).  C++
+    // defaults are the prototype constants; false omits the keys =>
+    // byte-identical pre-package config.  The four values themselves are
+    // module defaults in clus.jsonnet (pr(...) args stm_michel_res_cm etc.).
+    // DEFAULT TRUE = SBND production as of doc 66 (owner 2026-07-27).
+    // Runner flag: -no-stm-d66cuts / SBND_STM_D66CUTS=0.
+    stm_d66_cuts = true,
+    // Detector-extent literals of the PR chain (docs/pr/2 sec 2e(iv)).  The
+    // uBooNE prototype's cosmic_tagger quotes its four "reaches the top" cuts as
+    // 17 / 15 / 37 / 67 cm below its y = +117 cm top face (100/102/80/50 cm);
+    // pr_y_top re-anchors the same offsets to a detector whose top is elsewhere.
+    // DEFAULT 200 = SBND (sensitive |y| <= 199.965 cm) => 183/185/163/133 cm.
+    // The uBooNE arm of an A/B is one flag: --tla-code 'pr_y_top=117'
+    // (reproduces 100/102/80/50 exactly), paired with vertex_z_prior_scale=200.
+    pr_y_top = 606.0,   // PDHD top of the active volume (cm, pdhd/clus.jsonnet dvm y); PDVD 336.4; SBND 200.0
+    // Denominator (cm) of the upstream-z main-vertex penalty (z-min_z)/scale.
+    // uBooNE 200 cm over a 1037 cm detector; DEFAULT 100 = SBND's 501 cm scaled
+    // (200 x 501/1037 = 96.6).  See the clus.jsonnet arg comment for the
+    // alternative reading that keeps 200.
+    vertex_z_prior_scale = 100.0,
+    // SSM beam-line reference directions [x,y,z] in the detector frame, feeding
+    // the 8 ssm_*_angle_{target,absorber} BDT features (docs/pr/2 sec 2e(i)).
+    // null = the C++ defaults = the prototype's uBooNE BNB-target
+    // (0.46,0.05,0.885) / NuMI-absorber (0.33,0.75,-0.59) vectors, so the
+    // compiled config is unchanged.  NO SBND VALUE EXISTS YET -- these are
+    // reachable, not calibrated.  Diagnostic use: --tla-code
+    // 'ssm_target_dir=[0,0,1]' makes ssm_*_angle_target identical to
+    // ssm_*_angle_z, which is how the plumbing was verified.
+    ssm_target_dir   = null,
+    ssm_absorber_dir = null,
+    // Charge -> kinetic-energy calibration constants of NeutrinoEnergyReco
+    // (docs/pr/2 sec 2e(iii)), i.e. what turns the summed 2D charge of a shower
+    // or track into kine_charge [MeV]:
+    //   E = sum_p(w_p Q_p)/sum(w) / recom / fudge * kine_w_value * 1e-6 MeV
+    // null = the C++ defaults = the uBooNE-tuned literals these keys replaced,
+    // so the compiled config is unchanged.  NO SBND VALUE EXISTS FOR ANY OF
+    // THEM -- reachable, not calibrated:
+    //   kine_recom_factor        0.7   average recombination survival, track
+    //   kine_fudge_factor        0.95  residual scale, track
+    //   kine_shower_recom_factor 0.5   } same pair when the object is
+    //   kine_shower_fudge_factor 0.8   } flagged shower-like
+    //   kine_proton_recom_factor 0.35  |pdg|==2212 (fudge stays at the track one)
+    //   kine_plane_weights  [0.25,0.25,1.0]  [U,V,W] charge-average weights
+    //   kine_plane_asym_switch   0.04  drop the largest plane above this
+    //                                  (median,max) relative asymmetry
+    //   kine_w_value             23.6  argon W-value in eV
+    // The recombination/fudge pairs are field- and calibration-dependent; the
+    // plane weights and the asymmetry switch encode uBooNE induction-plane
+    // quality.  Sensitivity check: --tla-code 'kine_recom_factor=0.6' scales
+    // every kine_charge by 0.7/0.6.
+    // 2026-07-30 (docs/pr/10 sec 6): the three RECOMBINATION factors now
+    // default to the SBND transfer values -- the uBooNE empiricals scaled by
+    // the table-integrated survival ratio (official uBooNE Box at 0.273
+    // kV/cm -> doc-55 free-power SBND fit, C excluded).  The fudge factors
+    // stay uBooNE (they absorb gain/lifetime normalization, which the C of
+    // the fit carries -- keeping both would double-count).  Effect: Enu in
+    // the T_kine tree drops 12-14% on nuecc48 172230/235435/444187.
+    // null on any factor restores its uBooNE value.
+    kine_fudge_factor        = null,
+    kine_recom_factor        = 0.87,   // 0.70 x 1.249 (track)
+    // 2026-08-29 (docs/pr/132 sec 4 + docs/pr/126 sec 4g): the pi0-mass
+    // calibration.  Owner order: "adjust the EM charge scaling factor to
+    // 0.84, so that the pi0 mass is aligned to 135 MeV."  Peak fit on the
+    // hand-paired pi0 gives fudge 0.833-0.835 (floors, per the toy bias
+    // study); the prototype's own cal_pi0_mass.cxx x0.95 implies 0.842.
+    // At 0.84 every EM kine_charge scales x0.952 and the fitted peak lands
+    // at 134.1 MeV.  SBND PRODUCTION ON (was null => uBooNE 0.80).
+    // 2026-08-31 (docs/pr/135 sec 8+10): owner order "Let's update the
+    // parameter to 0.86 and redo the campaign."  The refit at the flipped
+    // production point put the fixed-pairing peak at 138.3 MeV [134.5,141.7]
+    // => implied fudge 0.861 (mode estimators 0.93-0.96, in-window median
+    // 0.892); 0.86 is the primary-estimator value.  Every EM kine_charge
+    // scales a further x0.977 (0.84/0.86); masses and EM energies drop 2.3%.
+    // NOT byte-identical by construction -- this is a production constant.
+    kine_shower_fudge_factor = 0.86,
+    kine_shower_recom_factor = 0.58,   // 0.50 x 1.169 (shower)
+    kine_proton_recom_factor = 0.51,   // 0.35 x 1.453 (proton)
+    kine_plane_weights       = null,
+    kine_plane_asym_switch   = null,
+    kine_w_value             = null,
+    // doc pr/35 sec 10.2 (F1 = P1+P8): read the shower PDG live from the
+    // start segment at the four fill_kine_tree sites (prototype kine.h:53
+    // :67 :175 :187) instead of Shower's cached particle_type, whose refresh
+    // path is incomplete.  C++ default false = the cached read.
+    // SBND PRODUCTION DEFAULT ON (owner 2026-08-04, doc pr/35 sec 11): the
+    // unconditional cached-vs-live counter measured 2/48 nueCC events with a
+    // stale cache (13 vs live 11); knob-on moves ONLY the calib-pr kine block
+    // on exactly those two (137238: type 13->11 + Enu -0.511 MeV; 469665:
+    // type array only).  Gate work-pr35-off48 vs work-pr34-prod48 +
+    // work-pr35-prod48 vs work-pr35-f1on48.  =false restores the cached read.
+    kine_shower_pdg_live     = true,
+    // Muon median-dQ/dx-vs-length envelope [c0, c1, pivot_cm, power]:
+    //   dQ_dx_cut = c0 + c1*(pivot/L)^power   (a multiple of mip_dqdx_median)
+    // used by nine tagger cuts (numu x2, vertex-finder, nue x4, ssm, cosmic).
+    // DEFAULT = the docs/pr/10 sec 4 SBND fit (2026-07-30): SBND stopping-
+    // muon table median (0.5 kV/cm, / mip_dqdx_median=48000) times the
+    // uBooNE empirical/table margin g(L), same functional form.  Scales as
+    // 1/mip_dqdx_median -- re-derive when 48000 becomes a measurement.
+    // null = the C++ defaults = the prototype's empirical uBooNE refit
+    // [0.8866, 0.9533, 18, 0.4234] (byte-identical pre-knob config; also
+    // bit-identical when passed explicitly -- verified, docs/pr/10 sec 7).
+    muon_dqdx_curve          = [0.8826, 1.0587, 18, 0.4745],
+    // Recombination-model selection for BOTH taggers (STM + neutrino PR).
+    // DEFAULT ON (owner 2026-07-30, docs/pr/10 sec 7): sbnd_power_recomb,
+    // the free-power Modified Box fitted to SBND stopping tracks (docs/55
+    // sec 7g canonical) -- every model-driven dQ/dx -> dE/dx conversion
+    // (kinematics, PID energies) uses the measured SBND recombination.
+    // false restores sbnd_box_recomb (A=1.0, B=0.255 at 0.5 kV/cm), the
+    // byte-identical pre-pr/10 config.  doc 88: that node is typed
+    // PracticalBoxRecombination so its practical-unit numbers keep computing
+    // the pre-pr/10 values -- upstream e6fb7ef3 changed how
+    // Gen::BoxRecombination interprets them.
+    use_power_recomb         = false,   // PDVD: no fitted power box yet (doc 25 M7); SBND true
+    // doc pdhd/16: check_stm_michel ALONE gets a Modified-Box inverse that
+    // carries the 0.85 its own *DeDx tables were built with, times the charge
+    // deficit measured against the CSDA range energy of the same stopping
+    // muons.  The STM and neutrino taggers keep the uncalibrated instance, so
+    // no verdict and no tagger energy moves; what moves is muon_ke_dqdx and
+    // the Michel energies in T_stm_michel.  false = the pre-doc-16 job.
+    stm_recomb_calibrated    = true,
+    // Single-photon stem dE/dx: DEFAULT ON (owner 2026-07-30) -- route
+    // shw_sp_vec_{median,mean}_dedx through the configured recombination
+    // model above, with sp_mean_dedx_cut = 2.23 MeV/cm, the physical-scale
+    // transfer of the legacy 2.3 (docs/pr/2 sec 2e(i) third correctness
+    // item; docs/pr/10 sec 5).  false/null restore the inline uBooNE-field
+    // (0.273 kV/cm) inverse Box and the 2.3 literal.
+    sp_dedx_use_recomb_model = true,
+    sp_mean_dedx_cut         = 2.23,
+    // dl_vtx_cut (mm) is a configurability thread only (docs/pr/2 sec
+    // 7.4); null keeps the C++ 25.0 (= 2.5 cm) default.
+    dl_vtx_cut               = null,
+    // fast_xgb_forest: book the numu/nue XGB BDT combiners with
+    // TmvaGradForest (compact exact re-evaluation of the same XML) instead
+    // of TMVA::Reader.  Same scores (docs/76 sec 6 gate: 308 events, every
+    // archive/branch/table identical); the PR job loses ~3 s of wall and
+    // ~0.3-0.8 GB of peak RSS per event.  **SBND PRODUCTION DEFAULT ON
+    // (docs/76 round 2, 2026-08-23).**  C++ default false; false here
+    // omits the key => the byte-identical pre-knob config (the docs/76
+    // "off" arm; runner env SBND_FAST_XGB_FOREST=0).
+    fast_xgb_forest          = true,
+    // When set, re-save the (post-PR) tree to this TensorDM tarball.  Used by the
+    // round-trip gate (re-save with pipeline_names=[] and compare member hashes
+    // against the input tarball).
+    save_tensors   = '',
+    // save_in_scope (doc 87): write the per-cluster T_cluster tree into
+    // tracking-pr.root -- the in-scope cluster set plus the per-bundle summary
+    // (flags, flash, npoints, length).  This is what lets an arm run with
+    // mabc-pr.zip and the pctree suppressed and still yield a full nusel table:
+    // in_scope is otherwise recorded ONLY implicitly, by which clusters the Bee
+    // clustering layer happens to contain.
+    // C++ default false.  Key omitted when off => byte-identical config.
+    // SBND PRODUCTION ON, owner ask 2026-09-01: "Can we fix this problem, I
+    // think we want the final rootfile for each event to contain this
+    // information?"  C++ default stays false (doctest_sbnd_pr_tracking_defaults
+    // pins it); this is the SBND job's operating point, not a default change.
+    // CONSEQUENCE, stated where a future round will read it: tracking-pr.root
+    // now carries a T_cluster tree, so pr94_root_gate.py comparing a new arm
+    // against any PRE-doc-87 arm will FAIL on the tree list.  That is expected;
+    // use scripts/pr87_root_tree_diff.py, which reports every SHARED tree as
+    // identical and names T_cluster as the only addition.
+    save_in_scope  = true,
+    // pr_bee (doc 87): write pr_evt<ID>/mabc-pr.zip (~0.24 GB/1000 evt).
+    // DEFAULT TRUE = today's behaviour, byte-identical.  false sets the MABC
+    // node's bee_zip to '', which means "write no Bee zip at all".
+    // NOTE the coupling: nusel_extract.py's parse_prbee() takes the IN-SCOPE
+    // cluster set from this zip, so turning it off costs nusel-evt<ID>.tsv
+    // UNLESS save_in_scope is also on (then T_cluster carries it instead).
+    pr_bee         = true,
+    // SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
+    // DEFAULT = ON, the uBooNE-trained net (owner adopted 2026-07-30 on nueCC48
+    // evt 18253/1/172230: the geometric vertex sat at the far end of a proton
+    // track, the DL vertex moved it 9.7 cm onto the true interaction point --
+    // docs/pr/4).  '' restores the geometric-only vertex, which is what every
+    // identity gate must keep passing (CLAUDE.md M4).
+    // The weights are still uBooNE-TRAINED -- SBND retraining is docs/pr/2 gap G3.
+    // Inert unless 'tagger_check_neutrino' is in pipeline_names.
+    // REQUIRES libpython preloaded in the job:
+    //     LD_PRELOAD=$(python3 -c "import sysconfig;print(sysconfig.get_config_var('LIBDIR'))")/libpython3.11.so.1.0
+    // Without it the SCN module import fails and TaggerCheckNeutrino silently
+    // falls back to the geometric vertex after one WARN line -- always
+    //     grep -c "DL vertex failed" <log>   # expect 0
+    // PDVD 2026-09-04, owner flip (doc pdvd/28 sec 27): "for the single chain,
+    // I think we can use the MicroBooNE DL vertex as the main result".  The
+    // uBooNE-trained SCN net is the main-vertex result on PDVD from this date;
+    // doc 25 sec 4 had dropped it ('').  run_pr_evt.sh preloads libpython for
+    // it (WCT_PYLIB=off drops the preload).  Identity gates (CLAUDE.md M4: the
+    // DL vertex is not bit-stable) run PDVD_PR_TLA="-S dl_weights=''".
+    dl_weights     = '',   // PDHD: geometric vertex only -- the uBooNE-trained SCN net is ungraded here and is not bit-stable (CLAUDE.md M4).  PDVD flipped it ON 2026-09-04; pass the path to try it (needs libpython preloaded).
+    // DL re-rank operating point (TaggerCheckNeutrino), threaded as TLAs for
+    // A/B runs (doc pr/79).  min_accept 4.0 -> 10.0 adopted 2026-08-15
+    // (owner, doc pr/79: +36/473 on the hand-scan live A/B); top_k=5 kept —
+    // the pr/79 step-3 k=20 arm measured exactly zero realized gain (0
+    // fixed / 0 regressed; admitted candidates all lose the rerank).
+    // Pass 4.0 for the pre-flip arm.
+    dl_vtx_min_accept_score = 10.0,
+    dl_vtx_top_k   = 5,
+    // doc pr/105: false = the legacy single-argmax DL branch (no composite
+    // re-rank; top voxel snapped, dl_vtx_cut gate, else the traditional
+    // vertex).  Default true = production; unset => byte-identical compiled
+    // config.  Validation: --tla-code dl_vtx_rerank=false (or
+    // SBND_DL_VTX_RERANK=false).
+    dl_vtx_rerank = true,
+    // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
+    // the bundle that gets neutrino PR.  [0,0] disables the gate (then
+    // tagger_check_neutrino falls back to uBooNE single-main selection, which on
+    // SBND picks an arbitrary main -- always set a window with tagger_check_neutrino).
+    beam_window_us = [-10000.0, 10000.0],   // PDVD: readout-wide window on cluster_t0 => every matched bundle is 'in window' (doc 25 sec 2.1); SBND [0.2, 2.2]
+    // Run the PR tail (steiner + tagger_check_{tgm,stm,fc}) ONLY on the
+    // beam-coincident bundle, i.e. the mains whose cluster_t0 is inside
+    // beam_window_us (plus, for steiner, the companions sharing their
+    // matched_flash_gid).  TRUE = SBND production default as of docs/56;
+    // false restores the evaluate-every-bundle behavior with a compiled config
+    // byte-identical to the pre-doc-56 one.  Inert when beam_window_us is empty.
+    // Runner flag: -no-bwonly.
+    beam_window_only = true,
+    // nu_skip_cosmic / nu_skip_cosmic_bundle: TaggerCheckNeutrino refuses to run
+    // neutrino PR on an in-window main already convicted as cosmic -- per-main
+    // (TGM/STM/lm_flag) and, lifted to the whole flash bundle, per-bundle.
+    // BOTH TRUE = the SBND production operating point (docs/pr/3 sec. 8,
+    // docs/pr/16 sec. 7); these TLAs only surface what clus.jsonnet's pr()
+    // already defaults to, so the compiled config is unchanged when they are
+    // not passed.  Setting them false is a DIAGNOSTIC, not an operating point:
+    // it makes PR run on a convicted cosmic, which is how you get track_fit /
+    // shower_track / vertices layers for an event that legitimately has no
+    // neutrino candidate (e.g. SBND evt 116962, sole in-window main TGM).
+    // Runner env: SBND_NU_SKIP_COSMIC=0|1.
+    nu_skip_cosmic = false,          // PDVD: STM/TGM-tagged mains MUST enter the neutrino PR (doc 25 sec 2.3); SBND true
+    nu_skip_cosmic_bundle = false,   // PDVD; SBND true
+    // Enable the ported check_neutrino_candidate veto in tagger_check_tgm so
+    // in-beam-window bundles may be tagged TGM (C++ default false; key
+    // omitted when off => byte-identical pre-port config).
+    tgm_neutrino_candidate = true,
+    // Require charge along the chord between the two extreme points before a
+    // pair may tag TGM (C++ default false; key omitted when off =>
+    // byte-identical pre-fix config).  Guards against the QL flash-time merge
+    // grafting a detached fragment into the tagged cluster -- see
+    // docs/29_tgm-chord-charge.md.
+    tgm_chord_charge = true,
+    // How the chord-charge guard measures support (C++ default "chord"; key
+    // omitted then => byte-identical).  "chord" samples the STRAIGHT segment
+    // between the extremes -- it falsely rejects curved tracks (evt285185
+    // cluster 16: a continuous 480 cm top->anode crosser bows 10 cm off its
+    // chord and lost a real TGM, doc 31).  "path" requires a piecewise charge
+    // path through the cluster's own points with no jump > chord_max_gap.
+    // The -chord runner flag passes "path" (SBND_TGM_CHORD_MODE overrides).
+    tgm_chord_mode = 'path',
+    // Find the extreme points PER connected component and union them, instead
+    // of 8 global extremes over the whole flash-merged cluster (C++ default
+    // false; key omitted when off).  Must be used WITH tgm_chord_charge -- see
+    // docs/29_tgm-chord-charge.md.  The -chord runner flag sets both.
+    tgm_component_extremes = true,
+    // Let a component shorter than component_min_length still donate its
+    // extremes when it is path-connected (30 cm-step charge path) to a
+    // component that passed the length cut, so a fragmented genuine track END
+    // keeps its wall exit (evt286681 cluster 7) while detached specks stay
+    // dropped (C++ default false; key omitted when off => byte-identical).
+    // Only meaningful WITH tgm_component_extremes.  Runner flag: -rescue.
+    tgm_component_rescue = true,
+    // Rescued-end pairs must ALSO pass the straight-chord support test even
+    // in path mode (C++ default false; key omitted when off => byte-identical
+    // doc-32 rescue behavior).  Path mode alone lets a rescued speck pair
+    // across TWO merged cosmics through an L-shaped charge detour (evt288727
+    // cluster 6, doc 33).  Only meaningful WITH tgm_component_rescue.
+    // Runner flag: -rescue-chord.
+    tgm_rescue_chord = true,
+    // A pair may tag TGM only when at least one end lies in the cluster's
+    // MAIN charge component -- the largest 30 cm path component; a cathode
+    // crosser is ONE such component (C++ default false; key omitted when off
+    // => byte-identical).  A merged-in fragment that is itself through-going
+    // otherwise tags the whole bundle on its own within-component pair,
+    // which the chord guard deliberately allows and the nu-candidate veto
+    // cannot protect (it walks the pair's own path): evt289343 cluster 9,
+    // in-beam bundle tagged TGM by a 26 cm corner-clipping cosmic fragment
+    // 450 cm from the main track (doc 36).  Runner flag: -main-pair.
+    tgm_main_pair = true,
+    // How tgm_main_pair identifies the main (C++ default "path"; key omitted
+    // then => byte-identical doc-36 behavior).  "path" = largest 30 cm path
+    // component (proxy; wrong if a merged-in cosmic outweighs the main).
+    // "real" = per-blob real_cluster_main flash-merge provenance -- exact,
+    // needs a pctree saved with run_ql_evt.sh -save-rcid; falls back to the
+    // proxy on old tarballs (doc 38).  Runner flag: -main-pair-real.
+    tgm_main_pair_mode = 'real',
+    // Exempt a flag_demoted_main cluster from main_pair_rejects (C++ default
+    // false; key omitted when off => byte-identical).  With tgm_main_pair on,
+    // a demoted main's own real_cluster_main/path-component provenance is
+    // all-zero by construction post-carve, so the guard vetoed EVERY
+    // demoted-main pair unconditionally, before any CASE-A/CASE-B geometry
+    // ran (doc pr/25, SBND evt 320029/18255-1: cluster 30, a 37 cm
+    // corner-clipping shape with both ends on a boundary).
+    //
+    // SBND DEFAULT ON (owner 2026-08-02, doc pr/25 sec 2): small-group
+    // measurement (15 events: the target + the pr/20 Part I 14-event
+    // demoted-main census) showed the fix works on the target (cluster 30
+    // correctly convicts and its charge is excluded via the already-shipped
+    // skip_cosmic_companions guard) but ALSO surfaces a pre-existing,
+    // unrelated check_tgm CASE-A gap (the "2 extreme groups" branch has no
+    // length floor), letting a handful of wall-hugging demoted-main debris
+    // specks (8-14 points) pick up a spurious tag.  Owner judged the
+    // measured impact small enough to accept (one event moved
+    // kine_reco_Enu_MeV by +3.6 out of ~800, i.e. ~0.4%) rather than block
+    // on a separate co-requisite fix to check_tgm.  NOT bit-identical.
+    // Set false to restore the pre-flip behavior (runner:
+    // SBND_TGM_EXEMPT_DEMOTED_MAIN=0).
+    tgm_exempt_demoted_main = true,
+    // Downstream-z (z ~ 500 cm face) inset of the TGM/FC fiducial box, in cm
+    // (default 3 = byte-identical legacy margin).  Shared by tagger_check_tgm
+    // and tagger_check_fc so containment keeps one meaning.  Runner flag:
+    // -fvz <cm>.
+    tgm_fv_zmax_margin = 18,   // 15 (space charge) + 3 (dvm FV_z_margin)
+    // Downstream-z inset used by check_tgm's CASE-A INTERIOR-support tests
+    // (chord midpoints + waypoint re-check) when > 0, in cm (default 0 =
+    // OFF, key omitted => byte-identical; the interior tests then share
+    // tgm_fv_zmax_margin).  Makes the doc-32 widening endpoint-only so a
+    // wall-hugging corner clipper keeps its midpoint support (doc 35,
+    // evt287517 cluster 16 / evt289805 cluster 9).  TGM only; FC untouched.
+    // Runner flag: -fvzi <cm>.
+    // PDVD doc 35: 0, i.e. the key is suppressed and TaggerCheckTGM.cxx:692
+    // falls back to fv_tolerance -- the interior-support tests use the SAME
+    // volume as the endpoint tests, which is the whole point of "consistent
+    // with clustering".  The doc-35 concern this knob exists for was measured
+    // at the 15 cm scale rather than assumed: interior 3 vs 0 moves 46 of 7135
+    // clusters' TGM verdict (2231 vs 2185) and moves the fully-contained
+    // population by ZERO (2290 either way).  Pass 3 here for the alternative.
+    tgm_fv_zmax_margin_interior = 0,
+    // Drift-x and vertical-y insets of the TGM/FC fiducial box, in cm, both
+    // faces symmetric (defaults 2 / 2.5 = byte-identical legacy margins).
+    // Shared by tagger_check_tgm and tagger_check_fc, same as
+    // tgm_fv_zmax_margin.  Runner flags: -fvx <cm> / -fvy <cm>.
+    // PDHD: the tagger fiducial IS the Q/L-matching fiducial, by construction --
+    // the owner's instruction for this round.  pdhd/pr.jsonnet's box carries the
+    // ACTIVE volume, and these four margins put back exactly the 15 cm
+    // space-charge inset plus the per-face margins that
+    // pgrapher/experiment/pdhd/clus.jsonnet's dvm.overall already carries, so
+    // the arithmetic closes on the clustering FV and these are NOT tunable
+    // numbers (same construction PDVD adopted in doc pdvd/35):
+    //   x: box 357.985 - 2    = 355.985 == dvm a0f0pA |FV_x| 357.985 - FV_x_margin 2
+    //   y: box [7.61,606.0]  -+ 17.5    == dvm.overall FV_y [22.61,591.0] -+ FV_y_margin 2.5
+    //   z: box [0.234,462.297] -+ 18    == dvm.overall FV_z [15.234,447.297] -+ FV_z_margin 3
+    // NOTE the one PDVD deviation dropped here: PDVD uses x margin 2.5 (SBND's
+    // value); PDHD uses 2, which is its own dvm's FV_x_margin, so the closure is
+    // exact on all three axes.
+    tgm_fv_x_margin = 2,
+    tgm_fv_y_margin = 17.5,
+    // Upstream-z (z ~ 0 face) inset, in cm (default 3 = the byte-identical
+    // legacy literal that used to be hard-coded in pr.jsonnet's margin
+    // vectors).  Broken out for doc pdvd/35.
+    tgm_fv_zmin_margin = 18,   // 15 (space charge) + 3 (dvm FV_z_margin)
+    // doc pdhd/09: the MEASURED space-charge fiducial surface.  ONE KNOB MOVES BOTH
+    // HALVES of the tagger volume, because they must move together: the fiducial goes
+    // from BoxFiducial:pdhd_pr_fv to the composite of curved_fiducial.jsonnet's two
+    // measured polygons, AND the y/z entries of fv_tolerance drop from 17.5/18 cm to
+    // the cushion (curved_fv_margin_y/z).  The 15 cm those margins carry IS the flat
+    // space-charge allowance the surface replaces -- carrying both would count it
+    // twice.  x keeps tgm_fv_x_margin = 2: no drift-direction surface was measured.
+    // PDHD PRODUCTION since 2026-09-07 (owner decision, doc pdhd/09 sec 12):
+    // the exit-gap p90 surface with a 3 cm cushion.  With curved_fv on, the four
+    // tgm_fv_*_margin TLAs above no longer set the y/z operating point -- mgn_y /
+    // mgn_zmax / mgn_zmin in pr.jsonnet take curved_fv_margin_y/z instead, so the
+    // 17.5/18 cm above applies only when curved_fv is turned back off.  x is
+    // untouched: tgm_fv_x_margin = 2 still governs, no drift-direction surface
+    // having been measured.
+    //
+    // Why p90 and why cushion 3 (doc pdhd/09 secs 7, 9.5, 9.6):
+    //   * both physics metrics rank p90 first, and they are independent -- the
+    //     offline per-exit-end miss rate (11.0 % flat -> 7.2 %, cross-validated by
+    //     holding out either run) and long-track TGM (430 -> 464).
+    //   * cushion 3 rather than PDVD's 5 because 3 -> 5 buys 5 more long tracks
+    //     for 64 more sub-10 cm tags, and those sub-10 cm tags are
+    //     TaggerCheckTGM.cxx:1066 (a two-extreme-group cluster is tagged with no
+    //     interior support and no length test), not a property of the surface.
+    //     Revisit the cushion once that defect is fixed.
+    //
+    // To recover any arm:  flat = -S curved_fv=false ; p80+3 = -A curved_fv_profile=p80 ;
+    // p90+5 = -S curved_fv_margin_y=5 -S curved_fv_margin_z=5.
+    curved_fv = true,
+    curved_fv_margin_y = 3,
+    curved_fv_margin_z = 3,
+    curved_fv_profile = 'p90',   // 'p80' | 'p90' | 'flat'
+    // Persist the per-pass STM track fits (C++ default false; key omitted
+    // when off => byte-identical): cluster PCs stm_fit/stm_pass/stm_eval, a
+    // Bee 'stm_fit' layer in mabc-pr.zip, and (when 'stm_magnify' is added
+    // to pipeline_names) tracking-stm.root for Magnify-tracking-SBND.  Also
+    // gates loading the WireCellRoot plugin.  Runner flag: -stm-fit.
+    save_stm_fit = true,   // PDVD: the STM fits ARE the product (Bee stm_fit layer + tracking-stm.root); SBND false
+
+    // doc pdhd/11 -- do_rough_path walks Dijkstra on "steiner_graph" between the two
+    // boundary vertices and never checks they share a connected component.  When they
+    // do not, boost returns the stub {src, dst, dst} rather than failing, and the fit
+    // chain interpolates a straight line between the two ends: PDHD 028084/9 cluster
+    // 126 is a 1019-point trajectory across 592 cm of empty detector, seeded by ONE
+    // detached 3-D point 60.5 cm off the track that clustering had absorbed into the
+    // main cluster.  ON re-anchors the start into the end's component.
+    // false (default) => key omitted => byte-identical compiled config and output.
+    // GRADED knob, not a production flip.
+    // doc pdhd/11, owner flip 2026-09-07.  Fail a Steiner-graph shortest-path query whose
+    // endpoints are in different connected components instead of accepting boost's
+    // {src, dst, dst} stub as a 2-node path (Graphs.cxx:19-40).  Measured FREE with
+    // unmerge_assoc on: 31/31 events byte-identical in mabc-pr members and in the
+    // T_rec_charge/T_stm_pass/T_stm_eval contents.  Kept on as a guard on the query,
+    // which must never invent a path -- doc pdhd/11 sec 10.2 / 13.
+    stm_rough_path_require_connected = true,
+    // ---- doc pr/34 §10: particle-flow (Bee mc tree) port-fidelity knobs ----
+    // **ALL FIVE ARE SBND PRODUCTION DEFAULTS ON, owner 2026-08-04** (doc
+    // pr/34 §11; C++ defaults stay false).  Display-only, MEASURED: the ON
+    // arms move ONLY mabc-pr.zip::data/0/0-mc.json (F2 5/48 evts, F3 6/48,
+    // F1/F4/F5 null) while pctree-pr, the other six mabc members and both
+    // nusel TSVs are 48/48 byte-identical (gate work-pr34-off48 vs
+    // work-pr31r2-prod48; joint work-pr34-allon48; bare==prod
+    // work-pr34-prod48).  F4's merged pi0 home = HIGHEST-ENERGY daughter's
+    // parent (owner decision 2026-08-04, deliberately not prototype
+    // first-writer-wins).  Runner env overrides: SBND_PF_* (tri-state).
+    pf_track_main_cluster_only = true,
+    // doc pr/40 round 9 B2: let the PF track BFS traverse nv-bridged
+    // clusters.  C++ default false; key omitted when off => byte-identical.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (with the bridge above).
+    pf_track_bridged_clusters = true,
+    pf_shower_vertex_barrier = true,
+    pf_shower_parent_precedence = true,
+    pf_pi0_node_per_id = true,
+    pf_pdg_name_prototype_fallback = true,
+    // doc pr/38 Round 4 pf_orphan_track_parentage: graph-faithful parentage
+    // for barrier-orphaned PF track segments (a guard-excluded muon that
+    // continues an EM arm attaches under that shower's leaf; a proton behind
+    // an orphaned pi+ chains under the pi+; SBND 18255-142421 segs
+    // 7011/7012/7018).  Display-only: moves ONLY mc.json.  C++ default
+    // false.  SBND PRODUCTION DEFAULT ON (gate work-pr44-off48 vs
+    // pr43_cleanhead_ref48b 48/48 + nusel 0-diff; on-census 1/48 nueCC48 +
+    // 4/19 ncpi0 events, every move an attributed re-parent -- doc pr/38 R4
+    // + doc pr/44).  Runner env: SBND_PF_ORPHAN_TRACK_PARENTAGE.
+    pf_orphan_track_parentage = true,
+    // doc pr/65 round 3 (rung 3) -- audit-only orphan net: a still-unclaimed
+    // segment is named in the log instead of fabricated as a root-level PF
+    // particle (owner requirement: never add an arbitrary particle to the PF
+    // root).  Display-only: moves ONLY mc.json.  SBND PRODUCTION ON -- owner
+    // flip 2026-08-11 with rung 1 above (which claims the fragments first;
+    // audit fired 0 unclaimed on all 48 nueCC gate events).  Legacy escape:
+    // -A pf_orphan_audit_only=false (or SBND_PF_ORPHAN_AUDIT_ONLY=false).
+    // C++ default stays false.
+    pf_orphan_audit_only = true,
+    // doc pr/84 round 2 (F1/F2) -- vertex-touching pseudo-parent suppression
+    // and the remote-gap anchor.  Display-only: moves ONLY mc.json (gate
+    // pr84r2_disp_gate PASS=512 FAIL=0; nusel scores 0 movers; no label
+    // flips).  SBND PRODUCTION ON 2026-08-17: F1 suppressed 32 spurious
+    // gamma/neutron carriers in 512 events (owner evts 283713 x2, 316025,
+    // 407280 + round-1's 65289/347129/169626/174752); F2 re-anchored 106
+    // remote carriers to draw their real gaps.  pf_touch_max stays null =
+    // C++ 3 cm.  Runner env: SBND_PF_DIRECT_WHEN_TOUCHING, SBND_PF_TOUCH_MAX,
+    // SBND_PF_PSEUDO_GAP_FROM_MAIN.
+    // doc 77 round 1 (2026-08-24): rung 2 (pf_touch_cross_main/_max) removed
+    // -- zero movers, F1.0 probe failure (pr/84:607/622).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
+    pf_direct_when_touching = true,
+    pf_touch_max = null,
+    pf_pseudo_gap_from_main = true,
+    // doc pr/84 round 3 (G1) -- guarantee unique jsTree node ids in mc.json.
+    // Bee keys its PF tree model by node id, so a repeated id is invalid
+    // input: on SBND 394532 a node and its own descendant both carried id
+    // 8033 and selecting it blanked the whole PF panel (owner report
+    // 2026-08-18).  Display-only: moves ONLY mc.json, and only when a
+    // collision exists.  Kept as the standing invariant even with
+    // shower_dedup_start_seg on (which removes the known source).  Runner
+    // env: SBND_PF_UNIQUE_NODE_IDS.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-08-18 (owner flip): with S1 also on it fired 0
+    // times on the 24-event gate manifest -- it is carried as the standing
+    // invariant, not as a fix.  Legacy escape: -A pf_unique_node_ids=false.
+    pf_unique_node_ids = true,
+    // doc sbnd_xin/docs/pr/92: mirror the kine-side stray-satellite drop in
+    // the Bee PF tree (inert while kine_drop_stray_satellites is off -- the
+    // dropped-id set is then empty).  C++ default false.  Runner env:
+    // SBND_PF_DROP_STRAY_SATELLITES.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92, with
+    // kine_drop_stray_satellites above).
+    pf_drop_stray_satellites = true,
+    // doc pr/93 round 4 -- see the round-4 block below.  SBND PRODUCTION ON
+    // (owner round 2026-08-18; validation in that block).
+    pf_orphan_confident_track = true,
+    pf_orphan_track_min_cm = null,  // null => C++ default 50cm
+    // doc pr/123 r2: root PF node for a pass4-guard-freed track (171572's
+    // muon). C++ default false.
+    pf_orphan_guard_freed = true,   // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; owner "should not be lost in the PF tree"; fires on exactly 171572 + 393505 in 239 events: the guard-freed muons return as root PF nodes, 304.8/268.7 MeV)
+    // doc pr/128: PF completeness pair.  Both C++ default false; keys omitted
+    // when off => byte-identical pre-fix config.
+    // SBND PRODUCTION ON 2026-08-29 (doc pr/128; owner 2026-08-29, opening the round: "the key here is that we do not want to lose "+
+    // energies (or double count energies) for the neutrino candidate ... we do not want
+    // to count energy for overclustering activitys, far away", and authorising the flip:
+    // "I assume validation will pass, then turn the knobs on by default for SBND running."
+    // Fires on exactly 2 of 239 events at the default operating point (gap 5cm,
+    // end tol 10cm, kink 30deg, min len 30cm): 392901 (+118.5 MeV, kink 4.8deg)
+    // and 55740 (+300.6 MeV, kink 13.0deg), both end-to-end at gap 0.00 cm.
+    // The continuation terms are load-bearing, not decoration: on proximity
+    // alone the same knob admitted four cosmics on 72786 and put +1151 MeV on a
+    // 701 MeV candidate.  25 deg of margin between the last accepted candidate
+    // (13.3) and the first rejected one (38.4).  C++ default false.
+    pf_orphan_near_cross_cluster = true,
+    pf_orphan_near_gap_cm = null,      // null => C++ default 5cm
+    pf_orphan_near_min_len_cm = null,  // null => C++ default 30cm
+    pf_orphan_near_end_tol_cm = null,  // null => C++ default 10cm (end-to-end touch)
+    pf_orphan_near_kink_deg = null,    // null => C++ default 30 deg (straight continuation)
+    // SBND PRODUCTION ON 2026-08-29 (doc pr/128, same owner authorisation).
+    // Fires on 6 showers in 4 events, 484.1 MeV -- material our OWN passes
+    // (pr/74 conn3_unreachable, pr/123 pass4_prune, pr/124 pass4_prune2)
+    // rescued or shed and then stamped conn-4, the label that means show
+    // nowhere and count nowhere.  105074's two pdg-13 showers (215.1 + 162.0
+    // MeV, in main cluster 23 at gap 0.07 cm) are the motivating case.  The
+    // 490 far conn-4 showers (>=50 cm, 2814 MeV) stay skipped, as required.
+    // C++ default false.
+    pf_conn4_near_candidate = true,
+    pf_conn4_near_gap_cm = null,       // null => C++ default 20cm
+    pf_track_owns_loose_vertex = true,
+    // doc pr/38: F2's ON-behavior was CORRECTED in place (owner decision
+    // 2026-08-05, no new knobs): the barrier now excludes each shower's
+    // start vertex (prototype map_vtx_segs parity, WCShower.cxx:547) so
+    // main-track junctions stay traversable, and the same knob emits
+    // BFS-unreached non-shower main-cluster segments as root-level leaves
+    // (prototype flat-loop mc_mother=0 parity).  Display-only: moves ONLY
+    // mc.json (SBND 18255-219295/489330/56243 protons + vertex proton stubs
+    // with the 3 MeV np_ke_min floor).
+    // How 'unmerge_bundle' (when named in pipeline_names) identifies the main
+    // sub-cluster of a flash-merged bundle (C++ default "real").  "real" =
+    // per-blob real_cluster_main/real_cluster_id provenance -- exact, needs a
+    // pctree saved with run_ql_evt.sh -save-rcid; a cluster without it is
+    // left UNSPLIT (warning), never proxied.  "component" = longest connected
+    // component -- a clustering decision (breaks cathode crossers), opt-in
+    // only.  Runner flags: -unmerge / -unmerge-comp (doc 45).
+    unmerge_bundle_mode = 'real',
+    // restore_demoted_mains (doc pr/20 Part I P2; C++ default false = OFF):
+    // when the OUTER (flash) un-merge splits a bundle, additionally tag each
+    // split-off part that was ITSELF a matched bundle main before the merge
+    // with flag_demoted_main -- read from the per-blob "real_cluster_was_main"
+    // array, so the Q/L stage must have run with save_bundle_main_provenance
+    // (else the visitor warns and flags nothing).  The part keeps
+    // flag_associated_cluster and does NOT get flag_main_cluster back.
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  Fails CLOSED: on a legacy Q/L
+    // tree without the array the visitor warns once per cluster and flags
+    // nothing, so the chain still runs -- but P3/P4 below are then inert and
+    // the run is NOT the production operating point.  Regenerate the Q/L tree.
+    // Set false to restore the pre-flip behaviour (runner:
+    // SBND_RESTORE_DEMOTED_MAINS=0).
+    restore_demoted_mains = true,
+    // require_provenance (doc pr/23 sec 4.2; C++ default false = the historical
+    // warn-and-skip).  SBND DEFAULT TRUE: with restore_demoted_mains on, a
+    // pctree with NO 'real_cluster_was_main' array is a LEGACY pre-pr/20 tree
+    // and the job ABORTS loudly instead of silently reproducing pre-pr/20
+    // behaviour (the mistake documented in doc pr/23 sec 4.2).  Intentional
+    // legacy-tree runs (e.g. valfast's pinned PR-tail hubs) declare it:
+    // runner SBND_REQUIRE_WASMAIN=0.
+    require_provenance = true,
+    // evaluate_demoted_mains (doc pr/20 Part I P3; C++ default false = OFF):
+    // let TaggerCheckTGM / STM / FC evaluate a cluster carrying
+    // flag_demoted_main.  Inert unless restore_demoted_mains above is on, since
+    // nothing else sets that flag.
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  On its own this produces a
+    // verdict and acts on nothing -- gated at 1000 events (doc pr/20 Part IX
+    // sec 4): 4 differing cells vs the knob-off arm, all `kine_reco_Enu` last
+    // digit, and 3 of the 4 events also differ in the A/A control with the
+    // identical value change.  Set false to restore the pre-flip behaviour
+    // (runner: SBND_EVAL_DEMOTED_MAINS=0).
+    evaluate_demoted_mains = true,
+    // skip_cosmic_companions / cosmic_companion_min_length (doc pr/20 Part I
+    // P4; C++ defaults false / 0 = OFF): drop a TGM- or STM-tagged COMPANION
+    // from the neutrino's other_clusters, so its charge cannot reach the
+    // particle-flow tree or kine_reco_Enu.  A tagged companion SHORTER than the
+    // floor (cm) stays in regardless, so a mis-tagged neutrino daughter is
+    // never silently lost.  Inert without evaluate_demoted_mains above.
+    //
+    // SBND DEFAULT ON since doc pr/20 Part X.  **This changes reconstructed
+    // physics** -- 14 of 1000 mcp1k events move (doc pr/20 Part IX sec 5-6),
+    // zero beam labels change, and the motivating event 18255/59003 goes
+    // kine_reco_Enu 1202.5 -> 841.0 MeV.  nueCC48 is untouched: 0 of its 69
+    // admitted demoted mains is convicted (gate PI-8, run at floor 0, which by
+    // the monotonicity of `L >= floor` discharges it at every floor).
+    //
+    // THE FLOOR IS NOT DERIVED FROM THE IMPACT DISTRIBUTION.  Part IX sec 6b:
+    // length does not predict impact (the four inert drops span 3.3-158.7 cm)
+    // and a floor does not stop the vertex relocations (the largest is at
+    // 39.5 cm).  15 cm is a tagger-plausibility guard -- every conviction in
+    // 1000 events came from STM, never TGM, and evt 73004's companion is an
+    // 11.9 cm "stopping muon" that stops 177 cm from the cathode.  Do not
+    // re-derive this number from a length histogram; it is not in there.
+    // Set false / null to restore the pre-flip behaviour (runner:
+    // SBND_SKIP_COSMIC_COMPANIONS=0).
+    skip_cosmic_companions = true,
+    cosmic_companion_min_length = 15,
+    // nu_fallback_demoted_mains (sbnd_xin/docs/73 sec 12, round 3; C++
+    // default false = OFF): when the primary loop selects NO candidate
+    // (every in-window main convicted or vetoed), consider DEMOTED mains
+    // (flag_demoted_main) under the same window / cosmic / bundle-veto
+    // gates.  Never runs when a main-cluster candidate exists.  Motivated
+    // by SBND data evt 65289: the cathode-rescue join legitimately became
+    // an STM and the examined, untagged 88.9 cm former main was never a
+    // candidate.  Inert unless restore_demoted_mains is on; pairs with
+    // evaluate_demoted_mains so candidates carry tagger verdicts.
+    // SBND PRODUCTION ON since 2026-08-17 (owner flip on the docs/73
+    // sec 12 validation: recovers 65289 and four census events, one
+    // accepted re-admission 398690 -- sec 12.8).  Escape:
+    // SBND_NU_FALLBACK_DEMOTED=0 omits the key (pre-round-3 baseline).
+    nu_fallback_demoted_mains = true,
+    // sp_photon_flag (doc pr/26 sec. 8.2; C++ default false = OFF): store the
+    // single-photon tagger's verdict in TaggerInfo::photon_flag, the way
+    // prototype NeutrinoID.cxx:271 does.  The port already runs
+    // singlephoton_tagger() and fills its ~90 shw_sp_* BDT features -- only the
+    // return value was discarded, leaving the uBooNE tagger ntuple's
+    // photon_flag branch a constant 0.
+    //
+    // SBND DEFAULT ON (owner 2026-08-03).  This changes ONE written output
+    // branch and nothing else: photon_flag has no readers anywhere in clus/,
+    // root/ or cfg/ -- its only other occurrence is
+    // UbooneTaggerOutputVisitor.cxx:1078's SCALAR_BR -- so no reconstruction,
+    // no selection and no other tagger field moves.  Measured on the 7-event
+    // gate (doc pr/26 sec. 9.3): 1215 of 1216 T_tagger branch-values identical,
+    // the one that moves is photon_flag 0 -> 1 on evt 172230.
+    // Set false to restore the pre-fix gap (runner: SBND_SP_PHOTON_FLAG=0).
+    sp_photon_flag = true,
+    // ---- doc sbnd_xin/docs/pr/36 sec 11 tagger-stage knobs -----------------
+    // SBND PRODUCTION DEFAULTS (owner 2026-08-04, doc pr/36 sec 11): the
+    // gate for this stage is TWO artifacts (sec 10.9): T_tagger in
+    // tracking-pr.root (leaf compare) PLUS the tagger block of
+    // calib-pr-evt<ID>.json (PR_EXTRA_STAGES=pr_display) -- match_isFC is NOT
+    // booked in T_tagger.  Gate labels: work-pr35-prod48 vs work-pr36-off48
+    // 48/48 everything; work-pr36-allon48 (env-forced) == work-pr36-prod48
+    // (bare).  Escape hatches: SBND_NEUTRINO_CONSISTENT_FV=0 etc.
+    //
+    // F1 ON: match_isFC recomputed on the same fiducial + margins the
+    // STM/TGM/FC taggers use (mirrors stm_consistent_fv above).  Measured
+    // 6/48 nueCC events flip contained->exiting (54095 74544 137238 168596
+    // 268784 360535), numu_score moves on all six, nue_score only on 137238;
+    // no nusel verdict flips.  =false restores the FiducialUtils fallback.
+    neutrino_consistent_fv = true,
+    // sbnd_xin/docs/74 G1/G2 ON (owner 2026-08-20 "please implement these
+    // fixes"): cosmic_tagger() containment on the same sbnd_pr_fv + margins
+    // as TGM/STM/FC (its inside_fv lambda + the flag-1 vertex test; the
+    // FiducialUtils fallback has no wall inset and excludes the CPA slab,
+    // leaving 5 of the 10 cosmict checks structurally near-dead on SBND).
+    // Measured (doc 74 sec 9): OFF gate 234/234 byte-identical; ON census
+    // 117 nu-MC events -> 2 false cosmic tags cleared (52085 flag_1 = the
+    // CPA-band artifact at x=-1.09 cm, 48895 flag_2), numu_score moves on
+    // 12 events, nue_score never.  =false restores the FiducialUtils
+    // fallback.
+    cosmic_consistent_fv = true,
+    // sbnd_xin/docs/75 ON (owner 2026-08-20, "things are good, turn them on
+    // for SBND production"): routes the SAME sbnd_pr_fv + margins into the
+    // nue/single-photon taggers' containment tests (angular_cut,
+    // shower_to_wall, bad_reconstruction_2/_2_sp) -- the identical
+    // zero-margin FiducialUtils inconsistency doc 74 fixed for cosmic_tagger,
+    // found in the nue/SP tagger family by the doc 75 FV audit.  OFF gate
+    // 286/286 archives + 143/143 events byte-identical; ON census 2/48 flag
+    // flips (one inert, one fix-direction) + 2/48 small nue_score moves on
+    // nueCC48, 1/19 on NCpi0 (a known F1-margin event), 0/50 on numu-50, no
+    // ADVERSE (doc 75 sec 6).  =false restores the FiducialUtils fallback.
+    nue_sp_consistent_fv = true,
+    // F3 OFF (owner 2026-08-04): single-photon SCE gate.  Vacuous today (no
+    // SBND SCE helper; clus_geom_helper is ''), proven zero-movement with
+    // the knob forced; OFF keeps kine and single-photon independently
+    // gateable when a helper lands.
+    sp_sce_correction = false,
+    // F4 ON: graph-index-ordered tagger accumulation sets (M4 house rule,
+    // prototype n/a).  48/48 byte-identical on nueCC48 -- value is run-to-run
+    // stability under a different address layout.
+    tagger_ordered_segment_sets = true,
+    // F5 ON: prototype wcpt-identity stem-endpoint rule (18 sites).  16/18
+    // sites exact-match every call; the two neither-match firings (268067,
+    // 350186, site 17) measured at 4.8-95 cm = the indirect-shower
+    // population where the prototype also picks back.  Movement: those two
+    // events, 4 shw_sp_lol_* ntuple fields each, scores untouched.
+    stem_endpoint_wcpt_parity = true,
+    // F6 ON: broken_muon_id counts distinct cluster IDs (prototype
+    // semantics).  48/48 byte-identical; id==pointer count everywhere on
+    // this sample (counter f6_id_ptr_disagree is the doc-53 tripwire).
+    broken_muon_cluster_id_count = true,
+    // F7 ON: neutrino_type verdict bitmask + its T_tagger branch (/I).
+    // Knob-on diff = exactly the one new branch on 47/47 PR events.
+    neutrino_type_bitmask = true,
+    // doc pr/94 Phase 6 -- per-bundle identity + per-activity cosmic-flag
+    // T_tagger/T_kine rows: ONE ROW PER IN-BEAM-WINDOW FLASH BUNDLE instead of
+    // one per event, so a cosmic-convicted activity can no longer take a
+    // co-bundled neutrino candidate down with it (SBND 18255/395148).
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip after the
+    // round-3 Bee scan, bee/pr94r3 -- doc sec 9.13).**  Consumers that read
+    // one number per event must go through scripts/pr94_rows.py
+    // primary_index(); row 0 is the longest selected activity, i.e. the
+    // candidate the pre-pr/94 chain would itself have chosen.  Known open
+    // issue carried into production, owner-accepted: an activity can be
+    // REPORTED under a bundle it was not matched to, because
+    // ClusteringExamineBundles' 80 ns flash-t0 merge overwrites its
+    // matched_flash_gid (doc sec 9.8/9.9, mcp2k evt 73038).  Pre-flip arm:
+    // SBND_NU_PER_BUNDLE=0.
+    nu_per_bundle = true,
+    // doc pr/94 Phase 5b round 2 -- the dot guard.  Length floor (cm) for a
+    // per-bundle candidate, exempting the legacy event-wide winner (so the
+    // row the legacy chain reports can never be floored away).  Without it,
+    // per-bundle mode promoted sub-cm blobs: on 1000 mcp1k events round 1
+    // added 143 candidates, ALL with a seed under 5 cm and 87 reconstructing
+    // to 100-149 MeV -- a dot fitted as a muon at rest; round 2 (this
+    // exemption) took that to 0.  KNOWN OPEN ISSUE at this value (doc pr/94
+    // sec 9.8, unrelated to the floor): a per-bundle candidate can inherit
+    // a bright cosmic-mate's flash gid via ClusteringExamineBundles' flash-t0
+    // merge (80 ns window, no spatial check) despite being independently
+    // matched to a DIFFERENT, weaker flash of its own -- confirmed on mcp2k
+    // evt 73038.  STILL NOT FIXED, and knowingly carried into production by
+    // the 2026-08-19 flip (owner decision after the round-3 Bee scan: the
+    // display half was fixed, the bookkeeping half was declined -- doc sec
+    // 9.9/9.13).  null => C++ default 0 = no floor.
+    nu_per_bundle_min_length = 15,
+    // ---- pdvd doc 25 sec 13.10 -- the STM-only working mode ------------- //
+    // Run the per-bundle neutrino PR ONLY on bundles whose selected activity
+    // carries Flags::STM.  This is the PDVD campaign's current working mode
+    // (owner, 2026-09-02): the object being reconstructed IS the stopping
+    // muon (sec 2.3), so every other bundle in the event is fit, tagged and
+    // thrown away.  Measured on the stm3 arm: TaggerCheckNeutrino is 97.5 s
+    // of a 125 s pass on 039252/0 and 538 bundles reach the PR over 20
+    // events, 96 of them with an STM-tagged selection.
+    //
+    // It does NOT touch ClusteringProtectBundle, the other cost term (27 min
+    // of the 28.6 min tagger-only pass on 039252/8) -- see sec 13.10 for the
+    // separate lever there.
+    //
+    // C++ default false = every bundle (the pr/94 behavior), so the key is
+    // omitted when off => byte-identical pre-knob config.  Set false to
+    // reproduce the stm1/stm2/stm3 arms, which all predate this flip.
+    // Mutually exclusive with nu_skip_cosmic (its exact inverse; both on
+    // selects nothing and the C++ warns) -- PDVD keeps nu_skip_cosmic false.
+    nu_per_bundle_stm_only = true,
+    // doc 80: MCS muon momentum.  This ONE flag derives both the
+    // TaggerCheckNeutrino computation key (mcs_enable) and the
+    // UbooneTaggerOutputVisitor T_kine branch key (mcs_output) inside pr(),
+    // so the computation gate and the schema gate can never disagree.  The
+    // sub-knobs below ride the tcn_knobs bag and are ALL suppressed unless
+    // mcs_enable, so the OFF compiled config is byte-identical pre-MCS.
+    // C++ default false.
+    mcs_enable = true,               // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1, owner pre-authorization; books the five kine_mcs_* T_kine branches)
+    mcs_muon_source = 'long_muon_else_pf',  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P4: chain when one exists, else the pf muon; pf_muon | long_muon | longest_segment | long_muon_else_pf)
+    mcs_point_source = 'muon_segments',  // muon_segments | whole_event (validation only, doc 80 sec 7.3)
+    mcs_cathode_xcut = 5,                // cm half-band excised around cathode_x (doc 80 sec 7.5);
+                                         // C++ default 0 = off => the SBND value lives HERE only
+    // doc 84 round 1 (P5).  Log-only chain-range comparator sentinel beside
+    // the mcs: line; no output bytes move either way.  C++ default false.
+    mcs_range_comparator_chain = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P5, log-only)
+    // doc 84 round 3.  Feed the cathode-bridge absorbed member set into the
+    // MCS fit so a cathode-split muon is fit on its full track.  Moves ONLY
+    // kine_mcs_* (T_kine) + log sentinels; segments_in_long_muon and every
+    // tagger/nusel input stay untouched.  C++ default false; key suppressed
+    // when off => byte-identical compiled config.
+    mcs_bridged_members = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 3, owner pre-authorization; moves T_kine kine_mcs_* only)
+    // doc pr/94 round 3.  Give the SELECTED neutrino candidate the
+    // main-cluster PR treatment for the duration of its own pass, even when it
+    // is a demoted main.  The PR chain reads main-ness from Flags::main_cluster
+    // (NeutrinoPatternBase.cxx:2797, NeutrinoVertexFinder.cxx:3450,
+    // NeutrinoTrackShowerSep.cxx:2013), which ClusteringUnmergeBundle clears on
+    // a demoted main -- so today a fallback-selected or per-bundle candidate
+    // silently loses examine_vertices_3, improve_vertex +
+    // fix_maps_shower_in_track_out, main_cluster_initial_pair_vertices,
+    // break_two_end_dqdx and the main-branch endpoint ordering.  NOT gated on
+    // nu_per_bundle -- the legacy fallback path has the same defect.
+    // **SBND PRODUCTION DEFAULT ON since 2026-08-19 (owner flip, doc sec
+    // 9.13).**  C++ default false.  Pre-flip arm: SBND_NU_SELECTED_AS_MAIN=0.
+    nu_selected_as_main = true,
+    // sbnd_xin/docs/75 ON (owner 2026-08-20, "things are good, turn them on
+    // for SBND production"): closes a gap in nu_selected_as_main's own
+    // guard -- the DL/SCN vertex path can move Flags::main_cluster onto a
+    // DIFFERENT cluster in the candidate's bundle mid-pass, which the
+    // narrow guard's restore does not undo.  Snapshots/restores the whole
+    // {main_cluster} u other_clusters set instead.  OFF gate byte-identical.
+    // A flip-equivalence check (doc sec 9) found this fires much more often
+    // than the original per-round census sampled: 16/143 standard-sample
+    // events + 2/26 enriched-manifest events, NOT confined to promoted
+    // candidates as first assumed.  Of those 16, 15 correct only the
+    // persisted main-cluster flag (zero vertex/score change); one (evt
+    // 37112) moves nue_score by 0.03 on an already-nonselecting score, a
+    // known chronically boundary-sensitive event.  No ADVERSE (doc 75 sec
+    // 9.3).  =false restores the narrow-guard-only path.
+    nu_selected_as_main_snapshot_all = true,
+    // ---- doc sbnd_xin/docs/pr/33 sec 11 EM-shower-clustering knobs, ALL ON
+    // (owner 2026-08-05; see the sbnd clus.jsonnet clus_pr arg comments).
+    // Gate labels: work-pr33-base48 (clean-HEAD binary) vs work-pr33-off48
+    // 48/48 everything; per-knob arms vs off48; work-pr33-allon48
+    // (env-forced 8) == work-pr33-prod48 (bare).  NOTE: baselines predating
+    // 2026-08-05 (work-pr35/36-*) are NOT comparable -- they were produced
+    // by a stale-object binary (doc pr/33 sec 11.2).  Escape hatches:
+    // SBND_DAUGHTER_COUNT_PROTO_MAIN_VERTEX=0 etc (run_pr_chain_batch.sh).
+    //
+    // F1a/F1b ON: prototype calculate_num_daughter_tracks callee at both
+    // sites.  Measured NULL 48/48 (main-vertex site: 3 calls, 2 events
+    // value-differ, proton-skip verdict flips 0; examine site: 40 calls,
+    // 2 value-differ, no cut crossed).
+    daughter_count_proto_main_vertex = true,
+    daughter_count_proto_examine_showers = true,
+    // F2a/F2b/F2c ON: read the PDG off the prototype's object (4 sites
+    // start-segment, 1 inverted site shower-type, 2 sites exact ==13).
+    // Each measured NULL 48/48; all counter disagreements live in evt
+    // 137238 (sites :170 x1, :525 x5, :1247 x1) and never cross a decision.
+    shower_pdg_from_start_segment = true,
+    shower_pdg_from_shower_type = true,
+    shower_pdg_exact_muon_test = true,
+    // F3 ON: shared pi0-id allocation stream across the two finders.
+    // Measured NULL 48/48 (finders fire 10-with/1-without, overlap 0;
+    // ssmsp_* branches stable = the sec 10.10 scoping holds).
+    pi0_id_shared_allocator = true,
+    // F4 ON: is_shower gains the prototype's abs(pdg)==11 disjunct at the
+    // center-point site (147 firings / 35 events).  Moves 17/48 events in
+    // shower-derived channels only (T_kine pio block, shw_sp_*/mgo_*/sig_*,
+    // nue_score on 4 events, Bee mc.json + shower_track); NO nusel verdict
+    // flips; pctree + steiner + proj stable 48/48.
+    shower_flag_pdg_electron = true,
+    // F5 ON: shower_less same-index tie-break by stable shower id (house
+    // rule, prototype n/a).  The fallback IS reachable (2 hits, evt 235435,
+    // the one id_pi0_without_vertex event) but knob-on is byte-identical
+    // 48/48 -- the counter stays as the doc-53-style tripwire.
+    shower_less_id_tiebreak = true,
+    // doc pr/39: exclude a shower's own start vertex from the end_point
+    // farthest-vertex search (prototype map_vtx_segs parity).  SBND
+    // production default since 2026-08-06 (owner: "turn it on for SBND"
+    // after reviewing the recovery numbers, 32/83 -> 0/83 reversed showers
+    // across the 9-event NCpi0 gate) -- exactly the v3_extension_guard
+    // idiom (doc pr/24 sec 19.1).  No C++ change --
+    // m_shower_endpoint_exclude_start_vertex{false} is still the library
+    // default; only the SBND operating point flips it on.
+    shower_endpoint_exclude_start_vertex = true,
+    // doc pr/91 round 1 F1: the same end_point search must also skip a
+    // node NO member segment of the shower touches.  set_start_vertex()
+    // calls add_vertex(), so a conn-2/3 shower's view carries a foreign
+    // cluster's vertex; the exclusion above hides it only while that
+    // shower owns it, and Shower::add_shower imports it into an absorber
+    // where it then wins the farthest-vertex search.  Measured on
+    // 169626/174752/347129/394532 with shower_dedup_start_seg ON: 6 orphan
+    // imports, 5 wrong end points (394532's 30 MeV and 66 MeV showers end
+    // on each other).  C++ default false.
+    //
+    // SBND PRODUCTION ON since 2026-08-18 -- owner flip after scanning the
+    // pr/91 sec 2b Bee pair ("This is good, you can flip is on this for SBND
+    // production for now").  before e81dfbf9-3801-46a4-ad61-31b5511127f1 /
+    // after 04107fda-6306-44e0-aa8c-12a352e32235.  Gates on the 24-event
+    // pr/84 r3 manifest: knob-off vs shipped production PASS=48/48; knob-on
+    // moves 5 events and ONLY their mabc-pr.zip member data/0/0-mc.json --
+    // every pctree tarball byte-identical, nusel tsv byte-identical (zero
+    // score/label movers), kine_reco_Enu and kine_energy_particle unchanged.
+    // Six showers move and `end` is the only field that changes on any of
+    // them.  No C++ change -- m_shower_endpoint_skip_orphan_vtx{false} is
+    // still the library default; only the SBND operating point flips it on.
+    //
+    // Footprint caveat kept on the record: the 24 events were chosen for this
+    // defect, and nueCC 168596 -- the ONE mover we did not hand-pick, with
+    // zero shower_dedup_start_seg firings, its orphan left behind by
+    // id_pi0_with_vertex's pi0 re-seat -- shows the population is not the
+    // dedup's.  1/20 non-hand-picked events moved; that is a footprint signal,
+    // not a rate.  A standard-manifest gate is still owed.
+    shower_endpoint_skip_orphan_vtx = true,
+    // doc sbnd_xin/docs/pr/91 round 3: Shower::complete_structure_with_
+    // start_segment's flood-fill frontier test switches from view MEMBERSHIP
+    // (!has_node) to VISITED (Shower::m_walked_nodes, the prototype's
+    // map_vtx_segs equivalent).  Fixes the mechanism behind SBND nueCC
+    // 168596's spurious pi0: the 2039 MeV electron's former start vertex
+    // 14027 walls off a 4.74 cm proton stub and, past it, a 7.7 cm electron
+    // stub 96% inside this shower's own point cloud, left as a separate
+    // shower that pairs into a fake pi0.  C++ default false.
+    //
+    // SBND PRODUCTION ON since 2026-08-18 -- owner-authorized round-3 flip
+    // after the validation gate: 67-event manifest (nueCC48 + NCpi0 19),
+    // fresh binary, knob-off vs knob-on.  V1 (knob off vs a genuine
+    // pre-change build, git-stashed and rebuilt) PASS on evt 168596 +
+    // 2 spot events, 6/6 archives byte-identical.  V2 (knob-on vs knob-off,
+    // all 67 events): nuecc48 PASS=95/96 -- the ONE mover is 168596's
+    // mabc-pr.zip, nothing else; ncpi0 (the pi0-veto sample) PASS=38/38,
+    // zero movers -- no genuine two-gamma pi0 was disturbed. Both samples'
+    // merged nusel-table.tsv are byte-identical (zero score/label movers,
+    // zero nu-candidate status changes) and every pctree tarball matches.
+    // 168596 mechanism, confirmed by probe (SHOWER_WALK_DEBUG): the ONLY
+    // re-expansion across all 67 events is shower_id=2 re-walking vertex
+    // 14027 via segment 14093 -- exactly the round-2 diagnosis.  Shower
+    // count 17->16 (the 7.7cm electron stub is absorbed, not orphaned);
+    // pio_mass 114.06 -> no pi0 pairs (all -1.0 sentinel); kine_reco_Enu
+    // 2331.29 -> 2324.26 MeV (-0.3%, the borrowed-charge correction).
+    // See sbnd_xin/docs/pr/91_em-shower-clustering-round1.md sec 11.
+    shower_walk_visited_parity = true,
+    // doc sbnd_xin/docs/pr/40 sec 17 (2026-08-06): track (proton/pion/muon)
+    // mis-identified as electron.  F1 restores prototype-faithful PID
+    // persistence (segment_determine_dir_track); F2/F3 spare a segment
+    // whose own median dQ/dx is decisively proton- or muon-like from an
+    // unconditional track-to-electron reclassification, at the wholesale-
+    // conversion sites (F2) and the shower-topology test (F3).  C++
+    // defaults all false.  SBND PRODUCTION DEFAULT since 2026-08-06 (owner:
+    // "Flip to SBND ON if gates pass" -- gates G1-G7 all passed): gate
+    // work-pr40-off48 vs work-pr40-base48 (clean-source reference) 48/48
+    // byte-identical; work-pr40-on48 fixes 8 of the 9 owner-reported cases
+    // to a hadron pdg (388->13, 74544/267597/269774/423981/489330->2212/
+    // 211, 433451->13), the 9th (evt 256587) correctly left untouched
+    // because its own median dQ/dx (1.26x MIP) sits in the deliberately
+    // conservative gap between the muon and proton thresholds, not a bug;
+    // population moves 3/48 events beyond the 9, all confined to the
+    // nusel-table stmfit field, zero label (verdict) flips; wcdoctest-clus
+    // 97/97.
+    track_pid_persist_dqdx = true,
+    shower_reclass_dqdx_guard = true,
+    shower_topo_dqdx_guard = true,
+    // doc sbnd_xin/docs/pr/40 round 2: two follow-on defects measured on the Bee
+    // display of the pr/40 fix above.  F4 track_pid_persist_4mom: the
+    // non-free-end persistence branch stored a rest-mass-only 4-momentum
+    // (E=mass, zero momentum), so Aux::ParticleInfo::kinetic_energy()
+    // (=E-mass) read exactly ZERO for every segment it rescued (SBND evt
+    // 174637 seg 9050, Bee PF node "mu- 0 MeV"); segment_cal_4mom has no
+    // free-end dependence, so it is now called unconditionally instead.
+    // SBND PRODUCTION DEFAULT ON: G1 48/48 byte-identical, G2a fixes the
+    // reported case (0 -> 86 MeV), G4 census 1 -> 0 zero-energy PF nodes.
+    // F6 reclass_never_computed_ke_floor: a related reclass_pinfo
+    // negative-KE construction (KE = -mass on the never-computed path),
+    // fixed alongside.  SBND PRODUCTION DEFAULT ON: verified by direct unit
+    // test (the negative-KE precondition was not observed on the 48-event
+    // census either arm, so this flip rests on the doctest, not population
+    // evidence -- see doc pr/40 round 2).
+    // F5 shower_proton_daughter_pion: an electron cannot father a proton --
+    // set_default_shower_particle_info relabels pion (211) instead of
+    // electron when the candidate segment emanates from the neutrino
+    // vertex and its far end is a PID'd, charge-confirmed proton (SBND evt
+    // 256587 seg 11079, daughter segment 11080 at 3.72x MIP).  Round 2 found
+    // the override was reverted end-to-end by a downstream writer
+    // (Shower::update_particle_type, PRShower.cxx); round 3 closed that with
+    // a matching guard threaded into update_particle_type itself.  SBND
+    // PRODUCTION DEFAULT ON (doc pr/40 round 3): G1 48/48 byte-identical,
+    // evt 256587 seg 11079 now 211 end-to-end, population census 2/2209
+    // segments move, zero nusel-table.tsv verdict diff.  See
+    // porting_dictionary.md and doc pr/40 round 3.
+    track_pid_persist_4mom = true,
+    shower_proton_daughter_pion = true,
+    reclass_never_computed_ke_floor = true,
+    // doc sbnd_xin/docs/pr/40 round 4 -- two follow-on defects measured on the
+    // Bee display of round 2/3's F5 fix.  F7 shower_proton_daughter_pion_dissolve:
+    // F5 relabelled the pdg but left the shower flags set, so the pion was
+    // still wrapped as a Shower (its proton daughter was pre-claimed into
+    // the shower's segment set and never got its own particle-flow node;
+    // the pi+ Bee node's displayed endpoint was the shower's, not the
+    // segment's own).  F8 muon_multi_proton_pion: a muon segment whose far
+    // (non-neutrino-vertex) end is a multi-proton (>=2, charge-confirmed)
+    // hadronic vertex is relabelled pion; no propagation across a degree-2
+    // kink to the sibling muon segment further from the vertex.
+    // SBND PRODUCTION DEFAULT ON (doc pr/40 round 4): G1 48/48 events byte-
+    // identical (96/96 archives) vs a git-stash clean-HEAD reference; G2a/G2b
+    // both owner-reported cases fixed exactly as specified; G3 nusel-table.tsv
+    // diff 0 lines across the 48-event manifest; G4 census exactly 5 segments
+    // move, all attributed; G5 wcdoctest-clus 99/99 test cases.
+    shower_proton_daughter_pion_dissolve = true,
+    muon_multi_proton_pion = true,
+    // doc sbnd_xin/docs/pr/40 round 5 -- muon mis-identified as electron,
+    // three owner-reported Bee cases (84229, 54341, 55715), three
+    // independent mechanisms.  F9 track_pid_persist_dqdx_electron_guard:
+    // narrows F1 so it no longer rescues an undirected (no free end)
+    // electron guess that would otherwise poison a NEIGHBORING segment's
+    // flag_shower_in test.  F10 shower_connect_main_vertex_straight_guard:
+    // the main-vertex EM-shower selection heuristic excludes a candidate
+    // whose own start segment is long and straight.  F11
+    // shower_traj_straight_guard: segment_is_shower_trajectory gets the
+    // same straightness veto F3 already gave segment_is_shower_topology's
+    // dQ/dx.
+    // SBND PRODUCTION DEFAULT ON (doc pr/40 round 6, together with F12/F14
+    // below): round 5 measured these three alone do NOT reach the displayed
+    // outcome (G2 failed, F11 regressed evt 55715 seg 15005); round 6's
+    // boundary-level F12/F14 close that gap, and the round-6 gates cover the
+    // five as a set -- G1 48/48 events (96/96 archives) byte-identical off,
+    // G2 all three owner cases fixed, G3 nusel-table.tsv 0-line diff, G4
+    // census attributed (26/48 events restructure, 42 pdg moves dominated by
+    // the intended 11->13 recoveries, long-muon reassembly intact 2==2).
+    track_pid_persist_dqdx_electron_guard = true,
+    shower_connect_main_vertex_straight_guard = true,
+    shower_traj_straight_guard = true,
+    // doc sbnd_xin/docs/pr/40 round 6 -- the boundary-level fixes round 5's
+    // G2 measurement demanded.  F12 shower_absorb_track_guard: the shower
+    // flood-fill no longer absorbs a confidently PID'd straight non-electron
+    // track (long-muon pseudo-showers exempt).  F14
+    // michel_stem_muon_rescue: the Michel stopping-muon rescue reaches a
+    // confident-direction proton-called stem at a multi-prong stopping
+    // vertex.  SBND PRODUCTION DEFAULT ON (same gate set as above).
+    shower_absorb_track_guard = true,
+    // doc 77 round 1 (2026-08-24): F13 shower_connect_protected_pion_guard
+    // removed -- measured dead, never flipped (pr/40:1459).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
+    michel_stem_muon_rescue = true,
+    // doc sbnd_xin/docs/pr/74 round 2 P1: examine_direction's
+    // flag_shower_in cascade relabels a downstream |pdg|==13/pdg==0 segment
+    // electron with no length ceiling and no charge test (prototype has the
+    // identical unconditional branch, NeutrinoID_track_shower.h:2004).
+    // When on, refuse the relabel for a segment BOTH long
+    // (> shower_in_max_len, C++ 40 cm) AND MIP-like (median dQ/dx <
+    // shower_in_mip_hi x MIP median, C++ 1.3).  C++ default false.  Key
+    // omitted when off => byte-identical pre-pr/74 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (doc pr/74 round 2:
+    // off-gate 0/117, on-census 7/117 movers all attributed, nusel 0/117).
+    shower_in_cascade_guard = true,
+    shower_in_max_len = null,
+    shower_in_mip_hi = null,
+    // doc sbnd_xin/docs/pr/40 round 9 -- the rounds-7+8 straight-track PID
+    // guard family + the B2 cross-cluster bridge (SBND 286906/409546 +
+    // 54629/320865 classes; must-not-touch 521075).  Five guards decline an
+    // unconditional pdg-11 write on a straight long track
+    // (segment_is_straight_long_track, continuation-aware at the two
+    // shower-connect sites); the bridge replaces the cross-cluster conn-2
+    // electron fabrication with a real 2-point graph bridge when the
+    // steiner-cloud gap is < shower_nv_bridge_max_gap (C++ 1.8 cm).
+    // C++ defaults ALL false (scalars 25 deg / 1.8 cm live in C++).  Keys
+    // omitted when off/null => byte-identical pre-round-9 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/40 round 9:
+    // V1 pre-change-binary gate PASS 6/6 archives; V2 OFF-vs-ON over
+    // 45-Bee + nueCC48 + NCpi0-19 (100 events): 30 mabc-only movers, 0
+    // pctree movers, nusel tables byte-identical 3/3 samples; census
+    // straight-long e- 63 -> 42; bridges fired on 286906/409546/407280
+    // only, 521075 untouched; V3 bare-run composition gate PASS).
+    shower_connect_from_vertices_straight_guard = true,
+    shower_connect_start_seg_straight_guard = true,
+    examine_direction_dirsign_shower_in_guard = true,
+    daughter_shower_angle_reclass_straight_guard = true,
+    shower_topo_reexam_straight_guard = true,
+    sfv_kink_max = null,
+    shower_nv_bridge_track = true,
+    shower_nv_bridge_max_gap = null,
+    // doc sbnd_xin/docs/pr/97 D1 -- deterministic main_pi sentinel.  OFF
+    // pending an owner flip: turning it on changes which vertex an
+    // other-cluster shower attaches to on every event where the overall main
+    // vertex lives outside main_cluster.  SBND_MAIN_PI_INIT=true flips it.
+    shower_nv_main_pi_init = false,
+    // doc sbnd_xin/docs/pr/92 -- drop stray satellite showers (overclustered
+    // cosmics / second neutrinos) from kine_reco_Enu and (via
+    // pf_drop_stray_satellites below) the Bee PF tree.  Candidates: conn-2/3
+    // showers in NON-main clusters above 20 MeV, not pi0-paired, not within
+    // 8 cm of a main-cluster attachment; dropped when the fresh shower axis
+    // is > 60 deg off the attachment vertex (Arm A), the attachment is
+    // > 90 cm away or outside the main cluster AND the axis is >= 45 deg
+    // off the main vertex (Arm B), or the start segment is the collinear
+    // continuation of an out-of-shower straight long track (Arm C).
+    // C++ defaults false (scalars 20 MeV / 8 cm / 60 deg / 45 deg / 90 cm /
+    // 30 cm / 25 deg live in C++).  Keys omitted when off/null =>
+    // byte-identical pre-pr/92 config.  Runner env:
+    // SBND_KINE_DROP_STRAY_SATELLITES + SBND_KINE_SAT_* scalars.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-18 (doc pr/92: V1 pre/post
+    // binary gate PASS 8/8 archives; probe round over mcp1k-33 + nueCC48 +
+    // NCpi0-19 (100 events, 1202 satellite candidates): 51 drops in 30
+    // events, all 8 target offenders dropped, every must-keep sentinel
+    // retained; V2 OFF-vs-ON: movers = exactly those 30 events, mabc-only,
+    // nusel selections byte-identical 3/3 samples; 350935 -449 MeV cosmic
+    // gamma gone, 321371 -98 MeV cosmic neutron/mu gone, 389538 -1362 MeV
+    // second neutrino incl. the 955 MeV neutron->proton gone).
+    kine_drop_stray_satellites = true,
+    kine_sat_min_energy = null,
+    kine_sat_prox_max = null,
+    kine_sat_angle_bad = null,
+    kine_sat_angle_main = null,
+    kine_sat_far_dis = null,
+    kine_sat_axis_dis_cut = null,
+    kine_sat_cont_kink = null,
+    // pr/92 round 2 (owner retune): direction arms restricted to TRACK-like
+    // satellites; EM-shower-like satellites drop only when > em_far_dis
+    // from the main vertex with a folded main-vertex angle failure.
+    // C++ defaults 3 / 150 cm.
+    kine_sat_track_max_nseg = null,
+    kine_sat_em_far_dis = null,
+    // doc sbnd_xin/docs/pr/74 round 2 P2: the F14 Michel rescue accepts ANY
+    // shower-like sibling at the stem's far vertex; on a nueCC event that
+    // sibling is the EM shower trunk and the rescue paints a muon at the
+    // neutrino vertex (18255-90055).  When on, additionally require the
+    // graph beyond the far vertex to be Michel-sized (total track length <
+    // michel_stem_max_far_len, C++ 40 cm).  C++ default false.  Key omitted
+    // when off => byte-identical pre-pr/74 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set).
+    michel_stem_michel_check = true,
+    michel_stem_max_far_len = null,
+    // doc sbnd_xin/docs/pr/74 round 2 K4: shower formation walks outward
+    // from the main vertex and starts a shower at the first shower-like
+    // segment; the track stem it walked PAST is structurally excluded
+    // (18255-90055 trunk 11045; 18255-469665 chain 15003/15001; both
+    // prototype-shared gaps).  When on, a post-pass absorbs the chain from
+    // each substantial EM shower's attach vertex back toward the main
+    // vertex while segments are short (< stem_backfill_max_len, C++ 30 cm)
+    // and not charge-hot (median dQ/dx < stem_backfill_mip_hi x MIP, C++
+    // 3.5 -- a Bragg proton stops the walk).  C++ defaults false/30/3.5/40
+    // (+ stem_backfill_mip_lo 0.75 and a both-endpoint junction guard, the
+    // round-2 iteration that closed the stranded-PF-orphan class).
+    // Keys omitted when off/null => byte-identical pre-pr/74 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set).
+    shower_stem_backfill = true,
+    stem_backfill_max_len = null,
+    stem_backfill_mip_lo = null,
+    stem_backfill_mip_hi = null,
+    stem_backfill_min_shower_len = null,
+    // doc sbnd_xin/docs/pr/74 round 2 K5 = pr/65's deferred rung 2: promote
+    // a graph-unreachable, unclaimed main-cluster segment (18306-142421 seg
+    // 7013, 41.9 cm / 266 MeV, PF-invisible today) through the prototype's
+    // own connection_type=3 pseudo-gamma path.  C++ defaults false/10 cm.
+    // Keys omitted when off/null => byte-identical pre-pr/74 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (same gate set; closes
+    // pr/65's "0 unclaimed" gap on NC-pi0).
+    shower_conn3_unreachable = true,
+    conn3_unreachable_min_len = null,
+    // doc pr/84 round 2 (F3) -- bridge disconnected main-cluster components
+    // whose closest approach to the reachable side is within this radius (cm)
+    // BEFORE clustering_points, so they classify conn-1 naturally;
+    // shower_conn3_unreachable above stays the backstop for wider gaps.
+    // SBND PRODUCTION ON at 1 (cm) 2026-08-17: 10 fires / 512 events, all
+    // sub-cm-family, 9 score movers all target-family (283713 enu 1513->2034
+    // = the stranded 567 MeV muon rejoins; 66272 rescues an invisible
+    // pi+ -> proton branch; nueCC 168596 consolidates its 1929 MeV primary,
+    // 30->17 nodes), ZERO nu-candidate label flips, ncpi0 untouched.
+    // Deliberately NOT the swept 3 cm: at 1-3 cm the bridges turn
+    // speculative -- nueCC 38856's two 2.5-2.9 cm bridges fragmented its
+    // 1244 MeV electron and flipped nue 3.25 -> -3.45 (recorded in doc
+    // pr/84 sec 13 as the tuning evidence).  Runner env:
+    // SBND_CONN3_STITCH_MAX.
+    conn3_stitch_max = 1,
+    // doc pr/84 round 3 (S1) -- one shower per start segment.  Two
+    // PR::Showers can be built on the SAME start segment (attributed with
+    // WCT_SHOWER_CREATE_DEBUG: shower_clustering_in_other_clusters picks a
+    // start segment with no claim check at all, and the K5 conn3_unreachable
+    // branch reads a map_segment_in_shower that update_shower_maps only
+    // refreshes at the end of the function).  The twin renders a duplicate PF
+    // node AND is counted twice in kine_energy_particle -- SBND 394532
+    // kine_reco_Enu 352.2 MeV vs 255.5 de-duplicated.  Changes physics
+    // output, so it is a knob: the group collapses onto its most directly
+    // connected member, which absorbs the others' segments, and only that
+    // shower's kinematics are recomputed.  Runner env:
+    // SBND_SHOWER_DEDUP_START_SEG.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-08-18 (owner flip: "this is a clear bug ...
+    // aim to fix the underlying issue").  Gate manifest = the 24 round-2 Bee
+    // events: knob-off byte-identical to production (pr83r3_hash_gate
+    // PASS=48/48), knob-on moves EXACTLY the 4 twin events and inside them
+    // only mabc-pr.zip::data/0/0-mc.json plus the kine/tagger blocks -- every
+    // pctree tarball, every other event and every nusel label byte-identical.
+    // 6 absorptions: 169626 (Enu 825.4->737.3), 174752 (188.7->176.0),
+    // 347129 (700.8->571.9), 394532 (352.2->248.2); no nu-candidate flips.
+    // The 492-event round-2 census is what bounds the population: exactly
+    // these 4 events carry twins.  Legacy escape:
+    // -A shower_dedup_start_seg=false.
+    shower_dedup_start_seg = true,
+    // doc sbnd_xin/docs/pr/74 round 4 K6 shower_traj_michel_stem: a stopping
+    // muon that emits a Michel electron at the neutrino vertex is
+    // reconstructed as ONE EM shower, because track/shower separation flags
+    // the muon kShowerTrajectory on its wiggliness and the ordinary track PID
+    // is never consulted (and, measured, ABSTAINS when it is).  18255-506746
+    // seg 21048: 20.4 cm at 1.57x MIP, far vertex degree 2, 17.5 cm terminal
+    // downstream, 93 deg kink -> reported by the owner as "107 MeV electron
+    // is muon + Michel".  When on, that one segment is demoted to a stopping
+    // muon so the Michel becomes its own shower.  C++ defaults
+    // false/15cm/45cm/1.3x/40cm/40deg.  Keys omitted when off/null =>
+    // byte-identical pre-round-4 config.
+    // SBND PRODUCTION DEFAULT ON since 2026-08-13 (doc pr/74 round 4 gates:
+    // off-gate 0/117 archives + 0/117 pctree member hashes; knob footprint
+    // 1/117 events, 506746 only, 0-mc.json + the paint layer; nusel 0/117;
+    // dangling PF roots gained 0/117; nu-vertex 0/117; flip and escape gates
+    // byte-exact both ways).
+    shower_traj_michel_stem = true,
+    michel_stem_traj_min_len = null,
+    michel_stem_traj_max_len = null,
+    michel_stem_traj_mip_lo = null,
+    michel_stem_traj_max_far_len = null,
+    michel_stem_traj_min_kink_deg = null,
+    // doc pr/44 shower_long_muon_keep_type: a MULTI-segment long-muon
+    // pseudo-shower (cached type 13 at the in_main_cluster seed) keeps its
+    // muon start segment -- the update_particle_type majority vote there is
+    // a toolkit-only addition (18f09178) absent from the prototype, and it
+    // relabels a pure muon chain's start segment 13 -> 11 (SBND
+    // 18255-142421: fake "e- 163 MeV" paired into the pi0).  C++ default
+    // false.  SBND PRODUCTION DEFAULT ON (same gate set as
+    // pf_orphan_track_parentage above; fires on NO nueCC48 event, on ncpi0
+    // only 142421 where it restores the owner-truth three-prong vertex --
+    // doc pr/44).  Runner env: SBND_SHOWER_LONG_MUON_KEEP_TYPE.
+    shower_long_muon_keep_type = true,
+
+    // doc pr/40 round 10 shower_bragg_protect_start_segment: spares a
+    // segment from examine_all_showers' cluster-wide "every non-shower
+    // segment here becomes electron" reclassification
+    // (NeutrinoTrackShowerSep.cxx) when it is longer than 20 cm, carries a
+    // confident (<1.0) Bragg/dE-dx-template PID score -- the population
+    // segment_dqdx_spares_electron_reclass's flat median-dQ/dx ratio test
+    // (F2, doc pr/40) cannot reach (ratio in [1.2,1.75], the gap between
+    // its "clean MIP" and "proton-like" spares) -- AND sits in the MAIN
+    // interaction cluster.  C++ default false.  SBND PRODUCTION DEFAULT ON
+    // (2026-08-18): SBND 18255-314507 seg 17002 (32.3 cm, xMIP 1.57x)
+    // restored to muon (was mislabelled e- 151 MeV).  The is_main_cluster
+    // restriction was added same-day after owner Bee review of the
+    // initial fix's second mover (18255-259542) identified it as a
+    // genuine photon by topology -- its spared segment sat in a separate
+    // SATELLITE cluster (124, disjoint from the main interaction), where a
+    // good Bragg score is not reliable evidence (a photon's early
+    // conversion stem can score well against the muon template before the
+    // cascade visibly multiplies); satellite clusters already have their
+    // own dedicated classifier (kine_drop_stray_satellites, doc pr/92)
+    // that correctly kept 259542 as EM.  Population census (nueCC48 48/48
+    // + ncpi0 19/19 + 31-event mcp1k electron-misID subset), post-
+    // restriction: ZERO nueCC48 movers, ZERO ncpi0 movers, ONE mcp1k mover
+    // (314507, the motivating case).  Runner env:
+    // SBND_SHOWER_BRAGG_PROTECT_START_SEGMENT.
+    shower_bragg_protect_start_segment = true,
+
+    // doc pr/93 round 3 -- four knobs for the "electron is really tracks /
+    // hadronic-pi0 shower" family (SBND 18255-55595/348471/69314/292643/
+    // 315167).  C++ defaults false; key-suppressed when off => compiled
+    // config byte-identical.  SBND PRODUCTION ON (owner round 2026-08-18):
+    // rescues 4/5 owner events (55595 fake 458 MeV e- gone; 348471 ->
+    // p 719 MeV; 292643 -> pi 162 MeV; 315167 1046.7 -> 164.3 MeV EM stub
+    // with the 150.7cm score-0.10 proton kept separate and kept proton;
+    // 69314 named residual -- its pion stamp carries the unscored-100
+    // sentinel at 38.4cm, below any floor that does not regress real
+    // electrons).  100-event validation (mcp1k-33 + nueCC48 + NCpi0):
+    // nueCC48 movers 2/48, BOTH documented-defect/adjudicated (137238
+    // pr/74 shape-B pencil excluded; 46363 13.5cm conn-2 satellite);
+    // NCpi0 movers 1/19 (285567, pr/74 shape-A fake e- -> proton, fix
+    // direction); mcp1k movers 8/33, ALL in the pr/40 mis-ID census, all
+    // rescue-direction.  Manifest straight-long pdg-11 census rows
+    // 41 -> 35.  The shared 50cm floor (shower_pid_guard_min_len, C++
+    // default) is REQUIRED: un-floored attribution arms regressed 9+17/48
+    // nueCC48 events (real 22-47cm electron stems carry confident
+    // 0.11-0.64 proton/muon template scores).  Runner envs
+    // SBND_SHOWER_RECLASS_CASE_B_DQDX_GUARD / SBND_SHOWER_ACCEPT_PID_GUARD
+    // / SBND_SHOWER_VOTE_TRACK_PID_COUNTS / SBND_SHOWER_CONE_ABSORB_GUARD
+    // / SBND_SHOWER_PID_GUARD_MIN_LEN.
+    shower_reclass_case_b_dqdx_guard = true,
+    shower_accept_pid_guard = true,
+    shower_pid_guard_min_len = null,  // null => C++ default 50cm
+    shower_vote_track_pid_counts = true,
+    shower_cone_absorb_guard = true,
+
+    // doc pr/93 round 4 -- PF-hierarchy fine-tunes + 137238 cross-cluster
+    // muon.  C++ defaults false/null; key-suppressed when off => compiled
+    // config byte-identical.  SBND PRODUCTION ON (owner round 2026-08-18):
+    //   shower_detach_track_stem: peel the main-cluster track prefix off a
+    //     track-headed shower and re-root the EM remainder at the prefix's
+    //     far vertex, conn 2 (348471: "proton 308 -> pi0 113 (g355+g20) +
+    //     g74 + g11", Enu 2075.7 -> 1090.8 = the round-3 proton-mass-on-
+    //     charge-aggregate regression repaired; 292643: "pi+ 88 -> mu- 58 ->
+    //     4 gammas", Enu 950.4 -> 1073.6).
+    //   kine_count_orphan_tracks + pf_orphan_confident_track (below):
+    //     count/emit confident straight-long main-cluster orphan tracks
+    //     freed by shower_cone_absorb_guard (315167: PF gains root
+    //     "proton 595 MeV", Enu 722.1 -> 1326.0 = +595.3 KE +8.6 binding).
+    //   straight_cont_cross_cluster + sccc_bridge_body: demote a main-vertex
+    //     shower-trajectory stem that is the cross-cluster continuation of a
+    //     straight long track across a pr/57 W-gap split, and bridge the
+    //     body into the PF/kine chain (137238: "e- 152 MeV" -> "mu- 60 ->
+    //     bridge -> mu- 211 + mu- 65" with delta rays as small EM leaves,
+    //     Enu 1087.1 -> 1101.4).  Owner's angle-conditioned tiers; base
+    //     retuned 5->6cm / 15->18deg (137238's body measures g=5.68cm
+    //     K=17.0deg in the fitted tangents); aligned tier 12cm/7.5deg at
+    //     C++ defaults.  The demoted stem + bridged cluster are shielded
+    //     from pass-2 seeding, from_vertices Step-3 analysis, and the
+    //     examine_showers retarget (all sccc-scoped sets).
+    //   pf_track_owns_loose_vertex: a vertex the track BFS walked a real
+    //     segment to is not claimable by a root shower whose only tie is
+    //     the loose fill_sets view (69314: the muon's 67 MeV e- + 18 MeV
+    //     gamma chain re-parent from the 595 MeV shower to the muon;
+    //     render-only, Enu byte-unchanged).
+    // Validation 2026-08-18 (work-pr93r4-{off2,on2}-{mcp1k,nuecc48,ncpi0} +
+    // ctrl pair): OFF gate PASS 200/200 vs round-3 production; movers
+    // exactly the 4 targets + 447477 (carrier renumber, nil) + 137238;
+    // NCpi0 0/19 touched; pr/57 negative controls (61579/55715 byte-
+    // identical; 21073/84229/122660 untouched) clean; runtime/RSS
+    // unchanged.  Runner envs SBND_SHOWER_DETACH_TRACK_STEM /
+    // SBND_KINE_COUNT_ORPHAN_TRACKS / SBND_STRAIGHT_CONT_CROSS_CLUSTER /
+    // SBND_SCCC_BRIDGE_BODY / SBND_PF_ORPHAN_CONFIDENT_TRACK /
+    // SBND_PF_TRACK_OWNS_LOOSE_VERTEX (+ SBND_SCCC_* numerics).
+    shower_detach_track_stem = true,
+    // doc pr/99 round 2 -- projective-ghost member drop inside shower
+    // membership (395148).  C++ defaults false/0.7/0.25/10cm = legacy.
+    shower_ghost_member_drop = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 2)
+    shower_ghost_overlap_frac = null,
+    shower_ghost_dqdx_ratio = null,
+    shower_ghost_min_len = null,
+    // doc pr/117 round 1 -- EM clustering, sized from the pr/115 hand-scan
+    // absorb census: pass-4 best-owner arbitration (48% of wrongly-held
+    // charge), late fragment consolidation (the 20-event merge class).  C++
+    // defaults false / 6cm / 15deg / 5cm = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/117 config.  Runner envs
+    // SBND_SHOWER_PASS4_BEST_OWNER / SBND_SHOWER_MERGE_RELAX (+_DIS,
+    // _ANGLE, _MIN_LEN).  The round's third knob, shower_flank_absorb
+    // (+_MAX_DIS, _MAX_LEN), was retired in doc 77 round 3 -- no targets in
+    // the marked set; see sbnd_xin/docs/77_knob-ledger.tsv.
+    shower_pass4_best_owner = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; owner pre-authorized "if validation passed"; 0 nusel diffs, no negative marked delta)
+    shower_merge_relax = true,       // SBND PRODUCTION ON 2026-08-28 (doc pr/117 r1; evt168596 0.852->1.000, EM<->EM directional only)
+    shower_merge_relax_dis = null,       // cm; C++ default 6
+    shower_merge_relax_angle = null,     // deg; C++ default 15
+    shower_merge_relax_min_len = null,   // cm; C++ default 5 (fragment length floor)
+    // doc pr/118 round 1 -- the two-tier axis+charge merge path, thresholds
+    // MEASURED on the 98-event pair census (doc pr/118 sec 4: 4 true / 0
+    // false admitted).  C++ defaults false / 1.0 / 8cm / 5000 / 7.5deg /
+    // 120cm / 1cm / 30deg = legacy.  Key omitted when off => byte-identical
+    // pre-pr/118 config.  Runner envs SBND_SHOWER_MERGE_RELAX_CONTINUITY
+    // (+_CONT_FRAC, _CONT_GAP, _CONT_QMED, _CONT_AXIS, _CONT_DMAX,
+    // _CONT_T1_GAP, _CONT_T1_FOLD).  The round's pr/91 P2 admission knob,
+    // shower_ex1_conn3_body_dis, was retired in doc 77 round 3 -- measured
+    // ZERO yield; see sbnd_xin/docs/77_knob-ledger.tsv.
+    shower_merge_relax_continuity = true,    // SBND PRODUCTION ON 2026-08-28 (doc pr/118 r1; owner pre-authorized "turn them on if validation pass"; 4 measured merges, +0.250/+0.035/+0.012, 0 negatives, 0 control churn, nusel 98/98 identical)
+    shower_merge_relax_cont_frac = null,     // fraction; C++ default 1.0
+    shower_merge_relax_cont_gap = null,      // cm; C++ default 8
+    shower_merge_relax_cont_qmed = null,     // charge units; C++ default 5000
+    shower_merge_relax_cont_axis = null,     // deg; C++ default 7.5
+    shower_merge_relax_cont_dmax = null,     // cm; C++ default 120
+    shower_merge_relax_cont_t1_gap = null,   // cm; C++ default 1
+    shower_merge_relax_cont_t1_fold = null,  // deg; C++ default 30
+    // doc pr/120 round 1 -- backward-stem admission guard, firing set
+    // MEASURED on the 98-event emscan manifest (doc pr/120 sec 3: fires on
+    // exactly the two scanner-condemned backward absorbs 47212/281567).
+    // C++ defaults false / 110deg = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/120 config.  Runner env
+    // SBND_STEM_BACKFILL_BACK_GUARD (+_BACK_ANG).  The round's second knob,
+    // shower_ex1_walk_em_track_guard (+_LEN), was retired in doc 77 round 3
+    // -- measured ZERO yield; see sbnd_xin/docs/77_knob-ledger.tsv.
+    stem_backfill_back_guard = true,         // SBND PRODUCTION ON 2026-08-28 (doc pr/120 r1; owner "same validation as previous rounds"; fires on exactly the 2 scanner-condemned backward absorbs: 47212 qF1 0.965->1.000, 281567 scan-note stem released; 96/98 events byte-identical, nusel 98/98 identical, 0 movers)
+    stem_backfill_back_ang = null,           // deg; C++ default 110
+    // doc pr/121 round 1 -- the examine_shower_1 accept-branch dedup erases a
+    // pre-existing same-start-segment (main_vertex, conn-1) shower without
+    // checking its size; SBND 17394-348471 (doc pr/115 sec 17.7) lost a
+    // 13-member 352.6 MeV shower to it (12 EM segments orphaned from PF).
+    // When on, a MULTI-segment victim is re-homed into the accepted shower
+    // (add_shower) before the erase.  C++ default false = legacy drop.
+    // Key omitted when off => byte-identical pre-pr/121 config.  Runner env
+    // SBND_SHOWER_EX1_DEDUP_REHOME.
+    shower_ex1_dedup_rehome = true,          // SBND PRODUCTION ON 2026-08-28 (doc pr/121 r1; owner "consistent with previous round"; fires on exactly 1 event in 239 across both scan manifests: 348471 qF1 0.205->0.895, 12 orphaned EM segments reclaimed, leading shower 92.0->427.8 MeV; 98-set 196/196 + 141-set 281/282 byte-identical, nusel identical, 0 losses)
+    // doc pr/123 r1 -- pass4_angle over-reach, the owner's over-reach line
+    // (2026-08-28: detached-from-the-body OR track-like-beyond-it).
+    shower_pass4_prune_detached = true,      // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner G=40 + re-seed disposition; 141-set marked showers: med qF1 0.887->0.935, sum q_extra 4.86e7->2.69e7 (-45%), 8 showers to 1.000; zero orphans, 0 vertices moved, nusel identical; adjudication rows Bee idx 13/14)
+    shower_pass4_prune_gap = 40,             // cm; C++ default 40. Emitted only when non-default AND prune on => byte-identical.
+    shower_pass4_track_guard_len = 50,       // cm; SBND PRODUCTION ON 2026-08-28 (doc pr/123 r1; owner len>50; exactly 3 declines in 239 events: 171572 125cm mu qF1 0.096->1.000, 393505 108cm mu 0.273->1.000, 105074 83cm; zero labeled-good collateral)
+    // doc pr/130 item 1b -- the two absorbers that overrule an existing guard.
+    // C++ default 0 for both.  Key omitted when 0 => byte-identical pre-fix config.
+    shower_pass4_prox_guard_len = 50,        // cm; SBND PRODUCTION ON 2026-08-29 (owner flip on the bee/pr130r3 A/B: "I think these two are OK").  Threshold is pr/123's own value at the sibling pass4_angle seat, not a refit.  pass4_proximity had no track guard at all; census: 4 segments already declined by pr/93's cone_absorb_guard were re-admitted here (100222 seg 14003 = 110cm mu -> EM shower 2523->2203 MeV and a standalone mu- 271 appears; 176502 segs 20008/20013/109141).  C++ default 0 = off.
+    shower_pass3_backfill_guard_len = 15,    // cm; SBND PRODUCTION ON 2026-08-29 (same flip).  Threshold is pr/124's own value at the sibling pass3_cone seat.  The pass3 sibling backfill honoured pr/93's predicate but not pr/124's, re-adopting a declined track-pdg segment into the SAME shower and force-relabelling it pdg 11; census: 6 segments in 5 events (137238, 175896, 176502, 396222 x2, 415278).  C++ default 0 = off.
+    // doc pr/130 item B -- the back guard's two owner-ruled errors.  The
+    // guard's reachable population is CLOSED at 8 events (`if (!ok) break;`
+    // precedes it), all of them adjudicated, so this cannot touch an
+    // unadjudicated candidate.  C++ default 0.  Key omitted when 0 =>
+    // byte-identical pre-fix config.
+    // doc pr/132 -- the pi0-finder knobs (owner pi0 round 2026-08-29).  C++
+    // defaults are the legacy hard-coded constants (offset 10 MeV, assoc 30
+    // deg, guard 0 = off, type2 false, prongs 2); every key is omitted at
+    // its default => byte-identical pre-round config.
+    pi0_mass_offset = null,                  // MeV; null => C++ default 10 (the finders' "+10" window offset)
+    pi0_assoc_angle_deg = null,              // deg; null => C++ default 30 (disconnected<->vertex association)
+    pi0_attached_partner_min_mev = 29,       // MeV; SBND PRODUCTION 28 -> 29 2026-08-30 doc pr/133 iter 3 (owner: "K3 28-29 is good").  The closed interval (28.7, 29.6): kills the last real fake-topology accept 176502 (partner 28.7) and NOTHING else in 239 events (census 0 rows moved, ledger flat, movers 0x4); 30 would veto 76346's true NC pair (partner 29.6).  Earlier: PRODUCTION 20 -> 28 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 ... together with a K3 bump to 28-30").  28 = the safe end: kills the K7-regenerated fake 116962 (partner 27.0 MeV) and the three round-2 fake-topology survivors 54095/76350/268784 (26.1/20.5/22.0) while keeping 76346's partial-group partner (29.6) and 176502 (28.7).  Round-3 measurement (doc pr/132 sec 10, r3flip vs r2off): fakes 5 -> 2, ZERO hand-pi0 downgrades, 0 movers.  History: flipped at 20 2026-08-30 round 2 (owner: "Let's proceed to 1").  Rejects a with-vertex pairing whose conn-1 member sits AT THE MAIN VERTEX and whose detached partner is below 20 MeV -- the owner's nueCC fake mode (primary electron + tiny gamma).  Round-1 measurement (doc pr/132 sec 6.2, onguard vs onfudge, all 6 samples): fake topologies 10 -> 5, ZERO change on the hand pi0, 0 ADVERSE movers.  The 5 survivors have partners 20.5-29.6 MeV; 25-30 stays an owner Bee-adjudication item.  C++ default 0 = no guard.
+    pi0_nv_max_prongs = null,                // null => C++ default 2 (without-vertex GATE1 prong cap)
+    // doc pr/132 round 2 -- the rescue family + the path-2 quality gate.
+    // C++ defaults all off; every key omitted at its default =>
+    // byte-identical pre-round-2 config.
+    pi0_readmit_retyped = true,              // SBND PRODUCTION ON 2026-08-30 round 3 (owner: "Let's execute according to your recommendations" on "flip K7+K8 (the track-gamma rescue)").  Readmits A5-retyped showers into pi0 pairing and re-stamps accepted members EM.  With K8+K3=28 (r3flip vs r2off): exact 26 -> 31, partial 13 -> 16, ZERO downgrades, 0 movers, fakes 5 -> 2.  C++ default false.
+    pi0_admit_type3 = true,                  // SBND PRODUCTION ON 2026-08-30 round 3 (owner flip, same order as pi0_readmit_retyped above; specimen 47212 g2 none -> exact).  Admits conn_type-3 showers into the with-vertex disconnected pool.  C++ default false.
+    pi0_crumb_assoc_mev = null,              // MeV; null => C++ default 0 (crumbs keep the association-angle test)
+    pi0_nv_max_vtx_shift_cm = null,          // cm; null => C++ default 0 (no without-vertex decay-point shift cap)
+    pi0_nv_mass_window_mev = null,           // MeV; null => C++ default 60 (legacy without-vertex acceptance half-window)
+    pi0_collinear_merge_deg = null,          // deg; null => C++ default 0 (no virtual collinear merge of detached fragments at pairing time)
+    pi0_nv_partner_min_mev = null,           // MeV; null => C++ default 0 (no path-2 partner floor)
+    // doc 77 round 4 (2026-09-01): pr/132's K4 (pi0_nv_allow_type2), K14
+    // (pi0_nv_retry_paired) and K15 (pi0_reseat_start_assoc) removed -- the
+    // path-2 revival family measured ZERO NC rescues across pr/132 rounds 4
+    // and 8, and K15's 22 fires moved neither census nor any hand pi0.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    shower_em_collinear_deg = 10,            // deg; SBND PRODUCTION ON 2026-08-30 doc pr/133 K16@120 (owner Bee scan bee/pr133k16, verdict: "K16 looks OK").  Build-time EM collinear-fragment merge.  Measured (doc pr/132 sec 12.3, r5cmw): 54332 partial->exact (+1), 54341 g1 charge 0.68->0.82; cost 99838/165157/347824 gammas go OVER 1.36-1.51 of label.  C++ default 0 = off.
+    shower_em_collinear_dis_cm = 120,        // cm; SBND PRODUCTION 2026-08-30 with the deg flip above (the K16@120 point -- 60 was measured inert on target, doc pr/132 sec 12.3).  C++ default 60.
+    shower_em_collinear_host_mev = null,     // MeV; null => C++ default 20 (inert while deg off)
+    shower_em_backext_perp_cm = null,        // cm; null => C++ default 0 (no EM start back-extension)
+    shower_em_backext_len_cm = null,         // cm; null => C++ default 40 (inert while perp off)
+    // doc pr/132 round 7 (K18): acceptance-aware fragment merge inside
+    // id_pi0_with_vertex -- a below-window pair may absorb one nearby
+    // detached fragment iff the augmented mass lands in the window.
+    // C++ default 0 = off.  Key omitted when null => byte-identical.
+    pi0_accept_merge_dis_cm = null,          // cm; null => C++ default 0 (no acceptance merge)
+    // doc pr/132 round 9 (K19): gamma-ray back-projection NC vertex
+    // proposer (fires only when the main vertex sits inside a shower).
+    // C++ default 0 = off.  Key omitted when null => byte-identical.
+    pi0_bp_vertex_miss_cm = 8,               // cm; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner: "Things looks good, you can go ahead update the default the production chain").  The NC-signature chain's miss bound; fires on 2 of 239 events (76346 60.2 cm, 116962 83.5 cm upstream).  C++ default 0 = off.
+    // doc pr/133 K20: admit shower-topology mu-typed (pdg +-13) objects that
+    // are NOT part of the long muon into the pi0 pools; accepted members are
+    // re-stamped EM (the K7/K8 precedent; specimens SBND 18255-348691 sh
+    // 51080 79.8 MeV, -166870 g2 38.6 MeV -- 3 of the 132 hand gammas).
+    // C++ default false.  Key omitted when false => byte-identical.
+    pi0_admit_muon_showers = true,           // SBND PRODUCTION ON 2026-08-30 doc pr/133 (owner: "K20 is good").  Admits shower-ish mu-typed (pdg +-13) objects into the pi0 pools (not-in-long-muon AND (flag_shower OR len<40cm+dir-weak)); accepted members re-stamped EM.  Measured: 166870 true pair m=109.1 accepted, zero collateral (census/ledger/movers flat elsewhere).  C++ default false.
+    // doc 77 round 4 (2026-09-01): pr/141's M1 (pi0_mu_shower_hypothesis,
+    // re-pricing a mu-typed pi0 candidate under the SHOWER recombination+fudge),
+    // M2 (pi0_mu_shower_max_len, K20's 40 cm "shower-ish muon" bound) and M3
+    // (pi0_mu_shower_hyp_min_len, the floor on M1) removed -- M1 was a
+    // REGRESSION (census 35 -> 34, breaking 166870, K20's own justifying
+    // event), M2 measured INERT (seg_dir_weak, not length, is the gate) and M3
+    // moot without M1.  K20's bound is back to the file's 40 cm literal.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    // doc pr/133 K21: owner NC-pi0 signature (2026-08-30) for the
+    // back-projection vertex proposer (needs pi0_bp_vertex_miss_cm > 0):
+    // main vertex inside an EM shower (ALL prongs in showers, none in the
+    // long muon) + a second major EM object misaligned by more than this
+    // many degrees; the pair is then assumed 2-gamma/1-pi0.
+    // C++ default 0 = the r9 v3 gate.  Key omitted when null => byte-identical.
+    pi0_nc_sig_angle_deg = 15,               // deg; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip, see pi0_bp_vertex_miss_cm).  The owner's NC-pi0 signature angle.  C++ default 0 = the r9 v3 gate.
+    // doc pr/133 K21 v2: signature-mode pairing-partner floor (MeV).  The
+    // 76346 lesson: the true gamma2 is 5.0 MeV, below the legacy 20 MeV
+    // candidate floor.  Majorness (gate b) still requires one >= 20 MeV
+    // non-host object.  C++ default 0 = legacy 20.  Key omitted when null
+    // => byte-identical.
+    pi0_nc_floor_mev = 5,                    // MeV; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip).  76346's true gamma2 is 5.0 MeV.  C++ default 0 = legacy 20.
+    // doc pr/133 K21 v2.2: post-fire Particle-Flow update cone (deg) --
+    // owner 2026-08-30: "once the vertex is changed, the electron
+    // connecting to the original vertex should be updated, or included in
+    // the EM shower ... The other low-energy gammas can be associated with
+    // the pi0 gammas".  Co-started objects absorb into their pair gamma;
+    // < 35 MeV satellites within this cone of a gamma ray absorb too.
+    // NC-signature fires only.  C++ default 0 = off.  Key omitted when
+    // null => byte-identical.
+    pi0_nc_pf_assoc_deg = 20,                // deg; SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip).  The owner's post-fire Particle-Flow update cone, NC-signature fires only.  C++ default 0 = off.
+    // doc pr/134 K22: NC-signature back-projection pairing at MERGED-COMPLEX
+    // level -- owner 2026-08-30: 116962 "is still not good, the nu vertex is
+    // not at the right place".  The host complex (all co-seated main-vertex
+    // shower fragments) and the merged non-host cloud pair as complexes:
+    // merged-cloud rays, merged charges.  On 116962 this kills the false
+    // in-window fragment pair (125.8 -> 166.1, out) and admits the true
+    // crossing 44 cm upstream (33.1 -> 146.4, in).  C++ default false.
+    // Key omitted when false => byte-identical pre-fix config.
+    pi0_nc_frag_merge = true,                // SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner flip; owner grouping verdict "cluster = 58035 --> should be part of cluster = 21072" delivered: 116962 lands 83.5 cm upstream, event = two showers 595.0+167.3 MeV).  C++ default false.
+    // doc pr/134 K23: the with-vertex-finder port of the v2.2 PF update
+    // (owner: "The other low-energy gammas can be associated with the pi0
+    // gammas").  After the P1 selection loop, accepted pair gammas absorb
+    // detached < 35 MeV satellites within this cone (deg) of the gamma
+    // axis (the gamma-ledger sibling criterion); registered mass rescales
+    // by the charge ratio.  C++ default 0 = off.  Key omitted when null
+    // => byte-identical.
+    pi0_pf_assoc_deg = null,
+    // doc pr/134 K24: the P1 nu-vertex preference -- owner 2026-08-30:
+    // "the pi0 should be at the neutrino vertex ... if there is a direction
+    // ambiguity ... the preference should give to neutrino vertex".  At the
+    // main vertex disconnected showers are admitted without the 30-deg dir
+    // test (the internal dir is deficit-biased; the conversion displacement
+    // is the gamma direction), and in-window main-vertex pairs rank first.
+    // C++ default false.  Key omitted when false => byte-identical.
+    pi0_prefer_main_vertex = true,           // SBND PRODUCTION ON 2026-08-31 doc pr/134 round 2 (owner: "if there is a direction ambiguities ... the preferance should give to neutrino vertex").  v8 rules: ambiguity-gated relaxed admission at main + legacy-anchor (two relax-only members cannot pair) + three-tier main-first ranking.  Census 32->33 exact (50.0%), ledger 90.9% flat, ADVERSE 0.  C++ default false.
+    stem_backfill_back_dvtx = 45,            // cm; SBND PRODUCTION ON 2026-08-29 (owner flip: "For B, flip on for SBND production").  Suppress the backward-stem decline when the SHOWER START is further than this from the nu vertex.  The guard's reachable population is CLOSED at 8 events (`if (!ok) break;` precedes it) and all 8 are owner-adjudicated: absorb-wanted 46.84 (292643) and 88.11 (179369), every decline-ok <= 44.34, so 45 sits in an empty interval and the flip changes exactly those 2 of 239 events.  On both, the resulting PF tree is IDENTICAL to the guard-OFF shape the owner reviewed in bee/pr130r2 and preferred.  C++ default 0 = off.
+    // doc pr/124 front A -- 25-40 cm gap-band tier-2 prune (qualifier pair
+    // ang>40deg OR mdqdx>2.5 MIP measured zero-labeled-collateral on both
+    // label sets).  C++ defaults: gap2 0 (off), ang 40, mdqdx 2.5.
+    shower_pass4_prune_gap2 = 25,            // cm; SBND PRODUCTION ON 2026-08-28 night (doc pr/124 A; 141-set med qF1 0.935->0.949, sum q_extra 2.69e7->2.41e7, 406125 qF1 0.097->1.000, 168432 0.924->0.946, 386442->1.000; 98-set 76346 evt 0.596->0.817, 54332 0.616->0.730; q_miss delta only 423981 -0.008 (unmarked 3.56-MIP blob, Bee adjudication row); 0 vertices moved, nusel identical, owned net +0)
+    shower_pass4_prune2_ang = 40,            // deg; C++ default 40. Emitted only when non-default AND gap2 on.
+    shower_pass4_prune2_mdqdx = 2.5,         // x MIP; C++ default 2.5. Emitted only when non-default AND gap2 on.
+    // doc pr/124 front C -- pass3_cone track-pdg decline (post-flip census:
+    // 9 surviving labeled-OUT cone absorbs all track-pdg, IN track members
+    // top out at 14.1 cm).  C++ default 0 = off.
+    shower_pass3_cone_guard_len = 15,        // cm; SBND PRODUCTION ON 2026-08-29 (doc pr/125; resolves doc pr/124 sec C.3 as option 1 -- owner: the four fake electrons "should not be ided as electron, but track object", and on the dQ/dx-non-separator measurement, "Flip anyway").  94392 305->45 MeV e + released mu, 52693 183->153 + mu, 77328 180->38 + p, 173819 302->10 + p; adjudicated cost 415278 (0.959->0.884 / 0.976->0.910 reshuffle between its two labeled showers).  C++ default 0 = off.
+    // doc pr/125 -- same-vertex track-typed fragment absorb (owner
+    // 2026-08-29, SBND 18259-37112: the pdg-2212 half of a gamma conversion
+    // re-merges into the 549 MeV gamma at their shared non-main vertex).
+    // C++ defaults false / 6 cm / 50 cm.
+    shower_samevtx_track_absorb = true,      // SBND PRODUCTION ON 2026-08-29 (doc pr/125; owner: 37112's gamma 549 + proton 469 "should be one EM shower... they are connected" -- "one shower, everything").  Fires on exactly 2 fragments across both manifests, both in 37112 (proton stem gap 0.00 + prune-re-seeded comp gap 3.81, shared non-main vertex 84104) => one 797.3 MeV shower.  0 movers, owned net +0, nusel identical.  C++ default false.
+    shower_samevtx_absorb_gap = 6,           // cm; C++ default 6. Emitted only when non-default AND pass on.
+    shower_samevtx_absorb_max_len = 50,      // cm; C++ default 50. Emitted only when non-default AND pass on.
+    shower_samevtx_absorb_min_len = 5,       // cm; C++ default 5. Emitted only when non-default AND pass on.
+    // doc pr/125 -- vertex-connected satellite absorb (owner 2026-08-29,
+    // SBND 18255-69314: sub-10-MeV pdg-11 crumb showers whose start vertex
+    // is a vertex of a bigger EM shower's own chain fold back into it).
+    // C++ defaults false / 10 MeV / 20 MeV.
+    shower_satellite_absorb = true,          // SBND PRODUCTION ON 2026-08-29 (doc pr/125 K5; owner verdict on the K5 decision Bee pair b169a068/defaa224: "item 3, flip on is fine" -- the scanned operating point, max_mev 10 / host_mev 20, NOT the cap-3 variant).  69314: 25->18 showers, the 7 vertex-connected crumbs fold into the primary e- (68.9->74.7 MeV, keeps pdg 11), PF electron entries 38->30.  1105 fires / 208 events; physics checks clean (0 movers, owned +0, nusel identical, 0 pdg flips >15 MeV, no genuine pi0 touched); the accepted cost is unlabeled crumb charge booked as impurity (141-set med qF1 0.949->0.910, sum q_extra 2.41e7->3.12e7).  C++ default false.
+    shower_satellite_absorb_max_mev = 10,    // MeV; C++ default 10. Emitted only when non-default AND pass on.
+    shower_satellite_absorb_host_mev = 20,   // MeV; C++ default 20. Emitted only when non-default AND pass on.
+    // doc sbnd_xin/docs/pr/138 Phase B -- the EM SHOWER SPLITTER, the only pass
+    // in the chain that cuts.  Runs LAST among the shower-structure passes and
+    // BEFORE the pi0 finders (a gamma pair over-clustered into one shower can
+    // only be PAIRED after it is cut apart).  Every number below is a Phase A
+    // measurement against 172 owner hand labels, not a tuning choice:
+    //   trigger  a second angular maximum with a charge valley <= 0.95 between
+    //            it and the first.  eff 0.791 / pur 0.791 on the 164 labelled
+    //            EM objects (doc sec A5.4 + B3), against doc pr/137 sec 4's
+    //            27-36% ceiling.  The 0.95 is the fit-half knee and its holdout
+    //            has been opened once -- do not re-tune it here.
+    //   kernel   max_parts 2 is the setting whose boundary was measured EXACT
+    //            (median charge agreement with the owner 1.000, mean 0.974 over
+    //            27 fired two-way splits).  max_parts >= 3 is the k>=3
+    //            experiment (mean 0.573 -> 0.772, doc sec B3's >= 0.85 target
+    //            MISSED) and is not production-eligible yet.
+    // C++ defaults false / 0.95 / 0.03 / 2 / 1e6 / 3 / 4 cm / 0.80.
+    // SBND PRODUCTION ON 2026-08-31 (doc pr/138 sec 3; owner: "lets use
+    // 'onV1c90 + splitter' as the new baseline for SBND production").  It is
+    // the COMPOSITION that was validated, not the splitter alone: on its own at
+    // the pre-escape production point it moves no pi0 and costs 3 kinematically
+    // impossible pairs, while together with the escape above it returns q_extra
+    // to the floor and lifts the pi0 census to 35/66.  max_parts stays 2 -- the
+    // only setting whose boundary was measured exact against the 172 owner
+    // labels (median agreement 1.000, 21 of 27 exactly right, doc sec B3).
+    // C++ default false.
+    shower_split = true,
+    shower_split_max_valley = 0.95,          // C++ default 0.95. Emitted only when non-default AND pass on.
+    shower_split_min_frac = 0.03,            // C++ default 0.03. Emitted only when non-default AND pass on.
+    shower_split_max_parts = 2,              // C++ default 2. Emitted only when non-default AND pass on.
+    shower_split_min_charge = 1e6,           // raw Fit::dQ; C++ default 1e6. Emitted only when non-default AND pass on.
+    shower_split_min_nseg = 3,               // C++ default 3. Emitted only when non-default AND pass on.
+    shower_split_bundle_gap = 4,             // cm; C++ default 4. Emitted only when non-default AND pass on.
+    shower_split_snap = 0.80,                // C++ default 0.80, k>=3 only. Emitted only when non-default AND pass on.
+
+    // doc pr/139 phase 1 -- four independent follow-ups to the shipped splitter,
+    // each measured ALONE before any combination (doc pr/139 sec 1, standing bar).
+    // Every default below is the shipped behaviour, so the compiled JSON is
+    // byte-identical to the pre-pr/139 config while they stay at these values.
+    shower_split_skip_shared = false,        // P1.1 refuse a peel of segments another shower also owns.
+                                             // C++ default false. Key omitted when off => byte-identical.
+    // doc pr/139 sec 15.  When shower_split_skip_shared refuses a component and
+    // EVERY member of it is also owned by another shower, honour the owner's cut
+    // by detaching the component from this parent and building NO daughter --
+    // the charge already has a home in the co-owner.  Only the all-shared case:
+    // the partial case is measured to make a false fire on evt165157 (KEEP).
+    // C++ default false.  Key omitted when off => byte-identical pre-fix config.
+    // Inert unless shower_split_skip_shared is also on.
+    shower_split_shed_shared = false,        // sec 15 shed an ENTIRELY co-owned refused component.
+    // doc pr/139 sec 17.  Cap on the angular maxima the split kernel seeds on.
+    // C++ default 4 = shipped; it BINDS on 76% of fired candidates and on every
+    // object the owner cut into k>=3 (k = 3,3,5,7), so it -- not
+    // shower_split_max_parts -- is what stops k>=3 being expressible.
+    // Key omitted when 4 => byte-identical pre-fix config.
+    shower_split_max_seeds = 4,              // sec 17 angular-maxima cap.
+    // doc pr/139 sec 25, the owner's track-vs-shower rule (2026-09-03): "If there
+    // is a track like MIP muon is a descent candidate.  But if it is an EM
+    // shower, electron would be the right choice."  Below ~1.2 cm the separator
+    // has no resolving power -- flag_shower fires on 0.1% of segments under
+    // 0.8 cm and 0.6% from 0.8-1.2 cm, vs 14.7% at 1.2-2.0 and 46.7% at 2-4 --
+    // so "track-like" there is an absence of evidence, not evidence.  A daughter
+    // shorter than this, with no EM member, peeled off an EM parent, is typed 11.
+    // cm; C++ default 0 = OFF.  Key omitted when 0 => byte-identical pre-fix config.
+    shower_split_em_type_max_len = 0,        // sec 25 cm; 0 = off.  1.2 is the measured knee.
+    shower_split_max_impact = 0,             // P1.2 cm; fire only when the object's own axis misses the
+                                             // reference vertex by <= this.  C++ default 0 = no bound.
+                                             // Key omitted when 0 => byte-identical.
+    // SBND PRODUCTION ON (owner flip 2026-08-31): "flip shower_split_em_start now
+    // as you said."  doc pr/139 P1.3.  The pr/138 B3 daughter seed took no
+    // account of PDG and SBND runs shower_pdg_from_start_segment, so 11 of 50
+    // peeled daughters came out MUONS -- four with an EM-majority segment
+    // composition, one at 476 MeV.  A mu-typed shower is invisible to the pi0
+    // finder AND its kine_charge divides by the TRACK recom*fudge pair
+    // (0.87*0.95) instead of the shower pair (0.58*0.86), i.e. LOW BY A FACTOR
+    // 1.657.  Arm work-pr139r1-onemst-*: mu-typed daughters 11 -> 2, 461 MeV of
+    // EM energy restored, 51 peels with ZERO backwards fwd (mean 0.945 vs the
+    // shipped rule's 0.940 on the same events), and every other instrument --
+    // census exact 35, q_miss 16.7 %, q_extra 6.7 %, median q_f1 0.922 --
+    // unchanged to the digit.  0 ADVERSE movers.
+    shower_split_em_start = true,            // P1.3 seed the daughter on its nearest EM-typed member.
+                                             // C++ default false; this is a deliberate production override.
+    shower_split_rehome = false,             // P1.4 re-home an orphan daughter into the nearest larger EM
+                                             // shower that is not its parent.  C++ default false.
+                                             // Key omitted when off => byte-identical.
+    shower_split_rehome_gap = 4,             // P1.4 cm; C++ default 4. Emitted only when non-default AND
+                                             // the re-home pass is on.
+    // doc pr/136 round 2 -- shower_pass4_prefilter_v1_escape.  The pass-4
+    // cross-cluster loop's cheap `angle_v2 > 30` pre-filter is stricter than the
+    // acceptance disjunction it guards: two of that disjunction's four clauses
+    // test angle_v1 against pair_dis and never mention angle_v2.  ON re-tests
+    // exactly those two clauses (on the pair_dis halves only -- the
+    // close_shower_dis halves need the KD-tree call the filter exists to avoid).
+    // Measured target: 10 segments = 17.3% of the hand-scan q_miss, including
+    // SBND 142421 seg 7010 (9% of the whole deficit).  Faithful to the
+    // prototype, so this is an improvement, not a parity fix.
+    // C++ default false.  Key omitted when off => byte-identical pre-fix config.
+    // SBND PRODUCTION ON 2026-08-31 (doc pr/138 sec 3; owner: "lets use
+    // 'onV1c90 + splitter' as the new baseline for SBND production").  NOT
+    // shippable alone -- round 2 measured the escape paying q_extra 7.0 ->
+    // 12.0% for a q_miss fall of 15.1 -> 11.6%.  It ships WITH shower_split
+    // below, which hands the q_extra back: the pair measures q_extra 6.7%
+    // (production floor 6.9%), q_miss 16.7% raw of which +4.85 pt is the
+    // sec 3.3 label-epoch artefact, and the pi0 census 32 -> 35 of 66, the
+    // best of the campaign.  0 vertex movers, 0 ADVERSE, 239 events x 4 samples.
+    shower_pass4_prefilter_v1_escape = true,
+    // deg; ceiling on angle_v2 for the escape above.  0 = no ceiling.  57% of
+    // the escape's population sits above 90 deg (BEHIND the shower) and carries
+    // only 3 of the 10 target segments, so 90 selects the forward half without
+    // inheriting K17 back-extension's two deaths.  C++ default 0.
+    // Emitted only when non-zero AND the escape is on.
+    // SBND PRODUCTION 90 2026-08-31 -- the validated onV1c90 operating point
+    // (doc pr/136 sec 11; doc pr/138 sec 3 measured the composition).
+    shower_pass4_prefilter_v1_max_v2 = 90,
+    // cm; proximity bound on the escape above.  0 = none.  Round 2 measured the
+    // unbraked knob failing the hand-scan trade (q_extra 7.0 -> 12.2% against a
+    // q_miss fall of 14.0 -> 11.3%), with half the rise reached through the
+    // chain rather than a direct admission.  Every clean recovery sits below
+    // 21 cm; the runaway events fire at 26-61 cm.  25 takes the escape from
+    // 350 fires / 92 events to 33 / 22 and keeps all three clean winners.
+    // C++ default 0.  Emitted only when non-zero AND the escape is on.
+    shower_pass4_prefilter_v1_max_dis = 0,
+    // doc pr/99 round 3 -- C1 kine-charge cell-ownership dedup + C1b
+    // prototype cloud-rebuild parity (168596 Enu double count) + A5
+    // hadronic-shower re-type (315167/395148 labels).  C++ defaults
+    // false/null = legacy.  Key omitted when off => byte-identical
+    // pre-round-3 config.
+    kine_charge_dedup = true,    // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; owner-adjudicated full winner-take-all)
+    kine_charge_rebuild = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3; prototype cloud-rebuild parity)
+    // doc pr/101 -- Enu accounting round: K1 shower<->track cell ownership
+    // (37112), K2 paper mass/binding rules (proton shower +938 MeV), K3
+    // hadronic-shower KE = sum dE/dx, K4 long-muon range (0 dQdx / 1 range /
+    // 2 range with dead-end + ratio fallback), K5 main-vertex member guard.
+    // C++ defaults false/0/null = legacy.  Key omitted when off =>
+    // byte-identical pre-pr/101 config.
+    kine_charge_track_ctx = true,    // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K1; gate 234 PASS, 0 nue/numu flips from this knob)
+    kine_mass_rules = true,          // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K2; latent on the 117-evt manifest)
+    kine_hadronic_dqdx = true,       // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K3; owner: object-level)
+    kine_long_muon_mode = 2,         // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K4; range w/ dead-end + ratio fallback)
+    kine_long_muon_ratio_lo = null,  // C++ default 0.3
+    kine_long_muon_ratio_hi = null,  // C++ default 0.5
+    // doc 84 round 1 (P1).  A muon-typed pseudo-shower whose segments never
+    // entered segments_in_long_muon reports kine_range = 0 and mode 2
+    // silently falls back (28/242 SBND showers, worst 332.8 cm).  true =
+    // sum the muon-typed members when the chain contributed nothing.
+    // C++ default false.  Key omitted when off => byte-identical.
+    long_muon_range_empty_chain_fallback = true,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P1, owner pre-authorization)
+    // doc 84 round 2 -- the owner's Bee-scan findings on the round-1 sets.
+    // members_geometry: chain-truncated muons (313847 arrow at 38%, chain
+    // 98.5 vs 260.9 cm of muon members; 281595 130.0 vs 351.0; census 6/54
+    // muon showers) take length/endpoint/end_degree from ALL muon-typed
+    // members.  cathode_bridge: a cathode-split muon absorbs its facing far
+    // half (53793 shower pair 367+528 MeV; 177536/77978 bare far track);
+    // guards are geometric (ends within xcut of the cathode, far ends on
+    // opposite drift sides, gap, double angle-continuity), value knobs in
+    // cm/deg.  C++ defaults false/0.0/6.0/20.0/25.0.  Keys omitted when
+    // off/null => byte-identical.
+    long_muon_members_geometry = true,   // SBND PRODUCTION ON 2026-08-28 (doc 84 round 2, owner-directed post Bee scan: "other than [77978] the rest looks good"; 313847 547.5->602.2, 281595 750.1->808.5 MeV)
+    long_muon_cathode_bridge = true,     // SBND PRODUCTION ON 2026-08-28 (doc 84 round 2, owner-directed; ships WITH the round-2.1 main-vertex BFS guard + re-seat fix for 77978/177536)
+    long_muon_cathode_bridge_x = null,        // cm; C++ default 0.0 (SBND seam)
+    long_muon_cathode_bridge_xcut = null,     // cm; C++ default 6.0
+    long_muon_cathode_bridge_gap = null,      // cm; C++ default 20.0
+    long_muon_cathode_bridge_angle = null,    // deg; C++ default 25.0
+    // doc 84 round 4 -- the three admission misses the owner named from the
+    // round-3 Bee scan of the unclaimed Pop-B pairs.  All null => C++ legacy
+    // defaults => key omitted => byte-identical compiled config.
+    long_muon_cathode_bridge_lever = 15,            // SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G1, owner pre-authorization; C++ default 5.0 = the round-2 hardcode).  172794: 5cm reject, 10cm reject, 15cm bridges
+    long_muon_cathode_bridge_track_partner = true,  // SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G2, owner pre-authorization; C++ default false).  347890; EM (11/22) stays excluded by design
+    long_muon_cathode_bridge_short_gap = 8,         // cm; SBND PRODUCTION ON 2026-08-29 (doc 84 r4 G3, owner pre-authorization; C++ default 0.0 = off).  67026
+    long_muon_cathode_bridge_short_gap_angle = null, // deg; C++ default 10.0; inert while short_gap 0
+    long_muon_cathode_bridge_short_gap_len = null,  // cm; C++ default 50.0; inert while short_gap 0
+    kine_mainvtx_used_guard = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/101 K5; latent on the manifest)
+    shower_hadronic_tag = true,  // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 3, A5)
+    shower_hadronic_min_len = null,   // cm; C++ default 10
+    shower_hadronic_scan_len = null,  // cm; C++ default 30
+    shower_hadronic_bin = null,       // cm; C++ default 3
+    shower_hadronic_r_cyl = null,     // cm; C++ default 8
+    shower_hadronic_r_core = null,    // cm; C++ default 1.2
+    shower_hadronic_growth_max = 0.7,    // calibrated (109-shower roster; protected primaries min 2.32)
+    shower_hadronic_growth_bragg = null, // C++ default 1.2
+    shower_hadronic_bragg_ratio = null,  // C++ default 3.0
+    shower_hadronic_stem_ratio = 2.8,    // calibrated (reaches 395148 at C++ stem 2.98; gammas ~2)
+    kine_count_orphan_tracks = true,
+    kine_orphan_track_min = null,  // null => C++ default 50cm
+    // doc pr/123 r2: kine twin of pf_orphan_guard_freed. C++ default false.
+    kine_count_guard_freed = true,  // SBND PRODUCTION ON 2026-08-28 (doc pr/123 r2; pr/93 principle: PF and kine describe the same particle set; restores 304.7/268.7 MeV muon KE to kine_reco_Enu on the same 2 events; nusel identical)
+    // doc pr/129: the guard-freed pool is the only pool with NO geometric
+    // admission test, which is how it counted 268.70 MeV of an
+    // owner-adjudicated cosmic into kine_reco_Enu (SBND 18255-393505).
+    // Owner 2026-08-29: "if the direction of the track is point to the main
+    // vertex, it is more likely to be part of neutrino.  For overclustering
+    // they are generally not point to neutrino vertex."
+    // C++ default 0 = no test.  0 => keys omitted => byte-identical.
+    // SBND PRODUCTION ON 2026-08-29 (owner flip: "this is good, can flip on as
+    // default, also push then").  Verdicts this reproduces exactly, from the
+    // bee/pr129gf A/B: 171572 keeps its 304.75 MeV ("784.9 MeV should be the
+    // right energy"), 393505 drops 268.70 ("should be the lower energy"),
+    // 94392 unchanged ("is OK").  Measured margin on the pool's ENTIRE
+    // population of 3 objects: impact 4.16 / 6.59 cm kept vs 68.67 dropped.
+    // Footprint: 478/478 archives byte-identical, exactly ONE event's
+    // kine_reco_Enu moves (393505, -374.4 MeV), and the PR tree is unchanged.
+    kine_guard_freed_impact = 20,   // cm; perpendicular miss of the track's line at the nu vertex
+    kine_guard_freed_miss_deg = 30, // deg; 0 = runs straight out of the vertex, >90 = vertex is in FRONT
+    // doc pr/128: kine twins of the PF completeness pair.  These move
+    // kine_reco_Enu, so they are separate knobs, approved separately.
+    // C++ defaults false; keys omitted when off => byte-identical.
+    // Both SBND PRODUCTION ON 2026-08-29 (doc pr/128, same owner authorisation).
+    // These are the knobs that actually move kine_reco_Enu: +1114.4 MeV over
+    // 6 of 239 events, every one of it recovery.  Verified per event by
+    // multiset diff of the kine particle list -- nothing REMOVED anywhere, so
+    // no charge is counted twice; the +105.7 MeV add_energy on the two class-A
+    // events is the muon rest-mass term every counted muon gets.  The pr/93 r4
+    // principle: PF and kine must describe the same particle set.
+    kine_count_near_cross_cluster = true,
+    kine_near_gap_cm = null,           // null => C++ default 5cm
+    kine_near_min_len_cm = null,       // null => C++ default 30cm
+    kine_near_end_tol_cm = null,       // null => C++ default 10cm
+    kine_near_kink_deg = null,         // null => C++ default 30 deg
+    kine_count_conn4_near = true,
+    kine_conn4_near_gap_cm = null,     // null => C++ default 20cm
+    straight_cont_cross_cluster = true,
+    sccc_bridge_body = true,
+    // doc pr/127 (owner 2026-08-29: "137238, the electron 89 MeV should
+    // connect to some thing, which is missing from the PF tree").  The pr/93
+    // r4 fix for THIS event died silently when the Q/L era moved cb0805 ->
+    // grp0825: its muon-body candidate, measured g=5.68cm K=17.0deg in
+    // 2026-08-18 (which is why the base tier was cut at 6cm), now measures
+    // g=8.00cm K=14.0deg -- 2.3cm further out, 3deg straighter, i.e. in the
+    // notch between the base tier's gap and the aligned tier's kink.  Zero
+    // sccc demotes fired anywhere in 239 events at 6cm.  Census over the same
+    // 239 events (docs/pr/pr127-sccc-census.tsv, 107 cross-cluster candidates
+    // in the g<=12cm window): 137238's body at K=14.0 is the ONLY candidate
+    // below K=28.6, so ANY gap up to the aligned ceiling admits it and
+    // nothing else.  10cm = 2x the measured 8.00cm margin while the two-tier
+    // structure stays meaningful; 12cm was equally collateral-free and is the
+    // fallback if the geometry drifts again.
+    sccc_max_gap = 10,         // cm; base tier (C++ default 5; SBND 6 since doc pr/93 r4, 10 since doc pr/127; 137238 g=8.00)
+    sccc_kink_max = 18,        // deg; base tier (C++ default 15; 137238 K=14.0, was 17.0 in doc pr/93 r4)
+    sccc_gap_aligned = null,   // null => C++ default 12cm (aligned tier)
+    sccc_kink_tight = null,    // null => C++ default 7.5deg (aligned tier)
+
+    // doc pr/43 round 2 -- three PID-consistency knobs for the remaining
+    // owner cases (18255: 54351 / 56463 / 57661).  K1
+    // single_muon_proton_chain_veto: the vertex muon selection's proton veto
+    // walks the bounded degree-2 continuation chain (a muon cannot end in a
+    // proton), demoting the chain to pion and re-picking.  K2
+    // single_muon_long_muon_claim: a long-muon accumulation chain claims the
+    // vertex muon slot so a second pdg-13 arm demotes to pion.  K3
+    // pid_flag_reconcile: late reconciliation pass (post shower clustering,
+    // pre taggers) -- forced-electron terminal rescue behind a main-vertex
+    // proton chain + stale shower-flag/wrapper cleanup on confirmed tracks.
+    // C++ defaults false.  SBND PRODUCTION ON (2026-08-07): flipped per the
+    // owner's "flip if clean" policy after the round-2 gates -- G1 48/48
+    // byte-identical off, G2 3/3 owner shapes, G3 zero movement on all four
+    // nueCC48 on-arms (K1/K2/K3/all 0/48, nusel 0-diff) and a single fully
+    // attributed K2 move on ncpi0-19 (142421 stub 7023 mu- 4 -> pi+ 4 MeV).
+    // Gate arms: work-pr43r2-{off48,onK1-48,onK2-48,onK3-48,onall-48,
+    // cleanref48,off19n,onall19n}.
+    single_muon_proton_chain_veto = true,
+    single_muon_long_muon_claim = true,
+    pid_flag_reconcile = true,
+    // doc pr/45 (18255-56463 follow-ups).  other_seg_empty_2d_guard: in
+    // find_other_segments a segment with zero fit points on the queried face
+    // returns the -1.0 empty-2D-tree sentinel, which counts as "distance
+    // zero" and lets ONE far-TPC segment tag the entire near face as
+    // explained -- the 30 cm isochronous tail beyond segment 14006 could
+    // never seed a residual component.  pseudo_shower_track_paint: the Bee
+    // shower_track layer painted the 411 cm cathode-crossing muon red
+    // because paint reads shower MEMBERSHIP while the PF tree reads the
+    // shower's cached type (mu-); muon-typed (+-13) pseudo-showers now paint
+    // as track.  C++ defaults false.  SBND PRODUCTION ON (2026-08-07):
+    // flipped per the owner's standing "flip if clean" policy -- G1 96/96 +
+    // 38/38 byte-identical off; guard: nueCC48 0/48 (archive-level),
+    // mcp1k-200 3/200 all attributed (cathode-crossing clusters, new/
+    // re-formed segments: 276836, 404684, 407280), nusel 0-diff; paint:
+    // display-only, 0 PF movers, 2/48 nueCC48 shower_track q flips
+    // (137238, 400474), nusel 0-diff.  Gate arms work-pr45-{off48,onA48,
+    // onB48,off19n,m200on,m200onA,m200off}.  Doc pr/45.
+    other_seg_empty_2d_guard = true,
+    pseudo_shower_track_paint = true,
+    // doc pr/46 (18255-55595).  long_muon_stub_bridge: the long-muon chain
+    // walk's 15 deg junction-angle test fails on a short (< 6 cm) vertex
+    // stub's noisy fitted direction, so a broken long muon behind such a
+    // stub never enters the long-muon category (55595: 2.4 cm stub at
+    // 30.5-35.4 deg vs its 192.9 cm MIP continuation; the muon-slot logic
+    // then crowns a 2.7 cm sibling "mu- 48 MeV" and demotes the gateway
+    // stub to pi+).  When on, a < 6 cm incoming segment bridges to a
+    // > 35 cm MIP (< 1.3) continuation up to 45 deg unless the junction
+    // has another track-like arm > 10 cm (multiple substantial outgoing
+    // tracks = genuine hadronic vertex; delta rays/fragments do not veto).
+    // C++ default false.  SBND PRODUCTION ON (2026-08-07): flipped per the
+    // owner's standing "flip if clean" policy -- G1 off byte-identical
+    // 96/96 + 38/38 vs clean-source base arms; knob-on ARCHIVE-identical on
+    // nueCC48 (96/96) and ncpi0 (38/38); full-1k census 3/1000 movers, all
+    // the designed stub-bridge assembly (55595 2.4cm+181.5cm -> mu- 455;
+    // 73004 4.4cm+88.8cm -> mu- 226; 349945 3.1cm+172.8cm -> mu- 464,
+    // chain traces nsegs=2 all), nusel 0-diff everywhere; must-not-merge
+    // controls hold (66118 angle 70-82 > 45 cap; 61461 multiplicity veto;
+    // 284145 hadronic vertex).  Gate arms work-pr46-{base48,base19n,off48,
+    // off19n,on48,on19n,oncase,m1koffb,m1konb}.  Doc pr/46.
+    long_muon_stub_bridge = true,
+    // doc 84 round 1 (P3).  The stub-bridge 'incoming < 6 cm' precondition as
+    // a length [cm] (evt 66366 misses the bridge by 0.81 cm).  C++ default
+    // 6.0 = the legacy literal.  Key omitted when null => byte-identical.
+    long_muon_stub_bridge_len = 7.5,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P3, owner-directed post Bee scan; 66366 stub 6.81 cm bridges, chain 126->301 cm, best -> range 692 MeV)
+    // doc 84 round 1 (P2).  Long-MIP continuation angle relax: a candidate
+    // > 50 cm passing the unchanged dQ/dx MIP test may continue the chain up
+    // to long_muon_angle_relax_deg (C++ default 16.0) with the stub-bridge
+    // junction veto (doc 84 sec 4.2: 25 rejections, median 15.6 deg; evt
+    // 313847 at 10.99).  C++ default false.  Keys omitted when off/null =>
+    // byte-identical.
+    long_muon_angle_relax_long = true,  // SBND PRODUCTION ON 2026-08-28 (doc 84 round 1 P2, owner-directed; latent on the 98-evt gate manifest AND the 31-evt case list -- formation-time census owns the follow-up, doc 84 R1.5)
+    long_muon_angle_relax_deg = null,
+    // doc pr/48 (18255-51513/56211/57903/59335/57485) -- back-to-back track
+    // fixes.  two_end_break: the two-end residual-range break pass (nu
+    // vertex mid-segment on a single unbroken track, dQ/dx rising at BOTH
+    // ends -- two stopping ends imply a junction at the interior dip; a
+    // simple-topology + both-ends-in-FV gated break at the dip / turn-max
+    // index, template-score accepted).  kink_walk_dqdx_stop +
+    // kink_break_protect: the 59335 fixes (a correct C4 kink accept walks
+    // past its own evidence, then examine_vertices_4's unconditional < 2 cm
+    // floor erases the break).  C++ defaults false.  SBND DEFAULT ON (owner
+    // round, doc pr/48 sec 9): off-gates work-pr48-base48 vs -off48c 48/48 +
+    // -base19n vs -off19nc 19/19 member-identical, nusel byte-identical;
+    // 1k footprint 69/1000 movers, 0/1000 nusel diffs, every mover classified
+    // and every new TEB break examined (sec 9.6).  Pass -A two_end_break=false
+    // etc. (or the SBND_TWO_END_BREAK / SBND_KINK_WALK_DQDX_STOP /
+    // SBND_KINK_BREAK_PROTECT runner envs) to restore the legacy path.
+    // teb_* operating point rides the C++ defaults.
+    two_end_break = true,
+    // doc pr/90 round 2 -- two refinements of the two_end_break pass, both
+    // C++ default 0 = legacy.  teb_turn_min_arm_frac: route R2's turn argmax
+    // PREFERS an index whose PCA arms can each span this fraction of
+    // teb_turn_baseline when one clears teb_turn_angle on its own; the
+    // legacy argmax (starved near-end candidates included) is the fallback
+    // (320865: a starved 4-pt/1.9 cm near-end arm outscored the true 33 deg
+    // corner by 5 deg of PCA jitter; genuine corners at 4-5 cm from an end
+    // keep their legacy break -- pr/90 sec 8.6).  null = key suppressed =>
+    // byte-identical pre-fix config.  Escape: SBND_TEB_TURN_MIN_ARM_FRAC
+    // runner env (or -A).  doc 77 round 1 (2026-08-24): teb_second_max
+    // removed -- negative on its own motivating events (pr/90 sec 8.5).
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    //
+    // teb_turn_min_arm_frac SBND PRODUCTION ON 2026-08-17 (owner request,
+    // pr/90 sec 8.8-8.9 gates: knobs-off 1067/1067 byte-identical vs the
+    // harv3 production arms on the shipping binary (work-*-pr90off2);
+    // knob-on live A/B 1066/1067 identical, the single mover IS the target
+    // event 320865, toward, 37.29 -> 1.22 cm from the hand-scan click, zero
+    // ADVERSE (pr90_movers.py vs TAGS_HARV3); nueCC48 48/48 + NCpi0 19/19
+    // untouched.  0.4 (not the sec-6 illustrative 0.7) per the sec-8.3
+    // census: excludes every starved arm (<= 6.1 cm) with >2x margin while
+    // keeping the genuine 18.4 cm-arm break of evt 172942.
+    teb_turn_min_arm_frac = 0.4,
+    // doc pr/90 round 4 (sec 9.5 D4) -- teb_bragg_veto_turn (deg): veto an
+    // accepted R2 break below this turn when its short-arm end is not
+    // Bragg-consistent (peak >= 2x MIP AND hot extent <= peak cm/MIP; sec
+    // 9.4b owner calibration: kills 26.5-27.4 deg vs keeps >= 32.5).  C++
+    // default 0 = legacy; null = key suppressed => byte-identical.
+    // Escape: SBND_TEB_BRAGG_VETO_TURN runner env (or -A).
+    //
+    // doc 77 round 4 (2026-09-01): teb_chain_topology and teb_r3_turn /
+    // teb_r3_hot removed, along with route R3 itself -- the D1+D3 live A/B
+    // was net NEGATIVE (pr/90 sec 10.6: 19 ADVERSE vs 6 toward on harv3
+    // labels, two cosmict flips); no local scalar separates a true interior
+    // junction from an energetic delta ray.  D4 (teb_bragg_veto_turn) below
+    // is unaffected.  See sbnd_xin/docs/77_knob-ledger.tsv.
+    //
+    // teb_bragg_veto_turn SBND PRODUCTION ON 2026-08-17 (owner request,
+    // pr/90 sec 10.8-10.9 gates: knobs-off 1000/1000 byte-identical vs
+    // production work-mcp1k-pr90on2, nueCC48/NCpi0 48/48+19/19; D4-only
+    // A/B movers EXACTLY the five vetoed near-end breaks; labels: 291064
+    // 159.36 -> 0.00 toward, 64503 sanctioned sec 9.0; 349461/278420
+    // mid-track breaks byte-identical under the 15 cm near-end scope).
+    teb_bragg_veto_turn = 30.0,
+    kink_walk_dqdx_stop = true,
+    kink_break_protect = true,
+    // doc pr/49 (18255-57441) -- cross-cluster projection-ghost deweighting
+    // in the trajectory fit's 2D charge association (V-plane ghost: an
+    // unrelated cluster's real charge aliases with the fitted track in one
+    // view only and detours the fit; a live candidate cell outside the
+    // fitted cluster's OWN blob coverage that sits INSIDE an OUT-OF-SCOPE
+    // cluster's -- round 3: one with no segment in the current fit -- keeps
+    // its measurement at x0.1 weight; cells covered by nobody keep full
+    // weight, so dead-channel single-view charge stays usable by design).
+    // **SBND PRODUCTION DEFAULT ON since the owner flip 2026-08-08** (doc
+    // pr/49 round 3: off-gates off48d/off50d 48/48+50/50, census 42/48+28/50
+    // all sentinel-gated, nusel-events 0/98; known open item: 172230-class
+    // near-vertex robustness, doc pr/49).  C++ default -1 = off; value =
+    // wire/slice tolerance in cells (0 = strict, the validated operating
+    // point).  Companion numerics (ghost_dis 0 = scope-only, weight 0.1)
+    // ride the C++ defaults.  Pass -A fit_blob_coverage=-1 (or the
+    // SBND_FIT_BLOB_COVERAGE=-1 runner env) to restore the legacy path for
+    // an A/B.
+    fit_blob_coverage = 0,
+    // doc pr/50 -- suspend the deweighting above during find_proto_vertex
+    // (partition stage) so the recursive break partition forms on legacy
+    // fits; all later fitting stages (main-vertex determination,
+    // improve_vertex, final trajectory + dQ/dx) keep the ghost protection.
+    // C++ default false = pr/49 behavior; false omits the key =>
+    // byte-identical.  Validation: -A fit_blob_coverage_defer=true (or the
+    // SBND_FIT_BLOB_COVERAGE_DEFER=true runner env).
+    fit_blob_coverage_defer = false,
+    // doc pr/50 -- main-vertex kink-consistency snap (172230-class
+    // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
+    // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
+    // sample-wide firings all scanned; the defer knob stays OFF).  Numerics
+    // (vks_* null) ride the C++ defaults.  Pass -A vertex_kink_snap=false
+    // (or the SBND_VERTEX_KINK_SNAP=false runner env) to restore the
+    // legacy path for an A/B.
+    vertex_kink_snap = true,
+    vks_radius = null,
+    vks_min_dis = null,
+    vks_angle = null,
+    vks_margin = null,
+    vks_collinear = null,
+    vks_skirt = null,
+    vks_baseline = null,
+    vks_min_arm = null,
+    vks_fit_miss = null,
+    vks_hot_ratio = null,
+    // doc pr/85 -- carry the old vertex's arms through the snap residual
+    // when the snap arc is below this (cm): the residual edge old-vertex ->
+    // corner IS the pr/85 "interposed stub" (mode 1a-VIA), left behind by
+    // the snap above.  C++ default 0 = off.  DEFAULT OFF pending the pr/85
+    // implementation-round gates.  Validation: -A vks_carry_prong=<cm> (or
+    // the SBND_VKS_CARRY_PRONG runner env).  null/0 omits the key =>
+    // byte-identical.
+    vks_carry_prong = null,
+    // doc pr/104 -- main-vertex junction snap: re-point the main vertex to
+    // a nearby multi-prong track junction when the selected vertex has no
+    // track prong of its own, or the joint line fit of both vertices' prongs
+    // lands on the junction (18255-405707/65289/66712/282072/345633).
+    // C++ default false.  SBND PRODUCTION ON 2026-08-21 (doc pr/104 sec 6:
+    // OFF gates PASS 30/38/96/2000, zero ADVERSE movers on mcp1k/NCpi0,
+    // nueCC48 nue-selected 39->40, owner pre-authorized "same as before").
+    // Numerics (vjs_* null) ride the C++ defaults (5 cm / 3 cm / 2 / 150 deg /
+    // 0.5 cm / 1.0 cm / min_move 1.0 cm).  Rollback: -A vertex_junction_snap=false
+    // (or the SBND_VERTEX_JUNCTION_SNAP=false runner env).
+    vertex_junction_snap = true,
+    vjs_radius = null,
+    vjs_min_arm = null,
+    vjs_min_prongs = null,
+    vjs_collinear = null,
+    vjs_fit_margin = null,
+    vjs_fit_rms = null,
+    // doc pr/104: also arbitrate a main vertex that vertex_kink_snap itself
+    // created (405707/65289/345633 are kink-snap products); C++ default false.
+    // SBND PRODUCTION ON 2026-08-21 (doc pr/104 sec 6, validated together with
+    // vertex_junction_snap; 5 of the 13 final fires are kink-snap products).
+    vjs_override_kink_snap = true,
+    vjs_min_move = null,          // C++ default 1.0 cm
+    // esva_ignore_empty_2d (sbnd_xin/docs/73 sec 12, round 3; C++ default
+    // false = legacy): eliminate_short_vertex_activities case 5 treats the
+    // empty-2D-index sentinel (-1: the pre-existing segment has no points in
+    // the query point's APA -- possible only on a cathode-crossing cluster)
+    // as "no information" instead of "covered within 0.45 cm".  Legacy
+    // vacuously deletes the cross-cathode junction segment the rescue
+    // creates (SBND data evt 78242: 132.5 cm fitted muon segment removed,
+    // 71 cm track_fit hole, far half then absorbed into an EM shower via
+    // absorb_unreachable_main).  Single-APA clusters are unreachable by this
+    // knob.  SBND PRODUCTION ON since 2026-08-17 (owner flip on the
+    // docs/73 sec 12 validation).  Escape: SBND_ESVA_IGNORE_EMPTY_2D=0
+    // omits the key (pre-round-3 baseline).
+    esva_ignore_empty_2d = true,
+    // doc pr/51 -- main-vertex graph audit (near-vertex graph-shape repair:
+    // duplicate-corridor merge / charge-less-bridge removal / micro-stub
+    // absorb + re-seat / one refit; 131357 / 268067 / 360535 / 142421 /
+    // 285567).  SBND PRODUCTION ON 2026-08-15 (doc pr/85 sec 10 gates:
+    // knob-off 1022/1022 byte-identical; 57-label census stubs 95->42,
+    // interposed prongs 26->17, zero new; every >1 cm mover adjudicated
+    // against the owner's hand labels lands toward-or-on the click; nueCC48
+    // recovers 2 nue events, loses none; runtime/RSS neutral).  Owner
+    // pre-authorized the flip conditional on those gates.  Escape for A/B:
+    // -A main_vertex_graph_audit=false (or SBND_MAIN_VERTEX_GRAPH_AUDIT).
+    // Operating point (doc pr/85 sec 10.4-10.6):
+    //   mvga_reseat_angle = 0  -- re-seat DISABLED: both label-set re-seat
+    //     firings moved the vertex OFF the owner's click (280017 1.64 cm,
+    //     314838 0.60 cm);
+    //   mvga_stub = 2.5        -- fitted by the sec 10.5 sweep;
+    //   mvga_dup_frac = 0.8, mvga_stub_pts = 3 -- close the marginal-overlap
+    //     absorb class (nfit=4 overlap=0.75), the whole of the adverse-mover
+    //     population in sec 10.6.
+    main_vertex_graph_audit = true,
+    mvga_radius = null,
+    mvga_dup_tol = null,
+    mvga_dup_frac = 0.8,
+    mvga_dup_angle = null,
+    mvga_bridge_mip = null,
+    mvga_reconnect = null,
+    mvga_stub = 2.5,
+    mvga_stub_pts = 3,
+    mvga_reseat_angle = 0,
+    // doc pr/51 round 3 -- op3 satellite-anchor radius (cm): reaches
+    // terminal micro-stubs at satellite vertices near, not just at, the
+    // main vertex (142421's 7082/7023, 285567's residual).  SBND PRODUCTION
+    // ON 2026-08-15 with the audit flip above (doc pr/85 sec 10).
+    mvga_satellite = 3.0,
+    // doc pr/85 -- op3 interposed-stub absorb at the main-vertex anchor:
+    // opens op3's terminal-only degree(far)==1 line to INTERPOSED stubs
+    // (far vertex carries the real prongs, degree >= 2 -- the whole of the
+    // pr/85 mode-1a-VIA class, 21/462 events), splicing the far prongs
+    // through the stub onto the main vertex.  Inert unless
+    // main_vertex_graph_audit.  SBND PRODUCTION ON 2026-08-15 (doc pr/85
+    // sec 10 gates; 15 firings across the three samples, every adjudicated
+    // one <= 0.46 cm vertex motion).  Escape: -A mvga_interposed=false (or
+    // SBND_MVGA_INTERPOSED); angle rides the C++ default 150 deg.
+    mvga_interposed = true,
+    // doc pr/86 -- the straight track that misses the vertex (the owner's
+    // named priority): an interposed segment of 2.5-10 cm carries two
+    // thirds of the Class-B defect, above the mvga_stub=2.5 splice ceiling.
+    // SBND PRODUCTION ON 2026-08-15 (doc pr/86 implementation round gates:
+    // knob-off 2134/2134 archives byte-identical vs the pr/85 flip arms;
+    // full-sample Class-B cases 90->48 and orphans 118->82 with ZERO events
+    // worse; every mover <= 0.28 cm, zero adverse vs the hand labels; the
+    // four pr/85 sec 10.6 adverse-mover events at exactly 0.00; nueCC48 +4
+    // nue recoveries (163543, 268784, 400474, 423981) vs 1 named loss
+    // (122660 -- a Class-B repair at a vertex 4.95 cm off the owner's
+    // click, i.e. a pre-existing mis-pick the splice entrenched; owner
+    // hand-check); runtime/RSS neutral).  Owner pre-authorized the flip
+    // conditional on validation.  Escapes: SBND_MVGA_INTERPOSED_LEN,
+    // SBND_MVGA_INTERPOSED_ANGLE, SBND_MVGA_INTERPOSED_DEG1,
+    // SBND_MVGA_SAT_DUP_FRAC (or the -A TLAs).
+    // P1 -- interposed-splice candidate ceiling, cm.  Widens ONLY the
+    // splice; the terminal absorb keeps mvga_stub=2.5.  10 = the measured
+    // edge of the interposed-segment length distribution (sec 10.3).
+    mvga_interposed_len = 10,
+    // P2 -- far-end collinearity gate, deg (C++ default 150).  The Class-A
+    // pile-up sits at 120-150 deg and both live declines were 139.8/130.1;
+    // 130 fitted by the corner sweep (l10a130: orphans 102->68 vs 92 at
+    // 150, zero adverse movers).
+    mvga_interposed_angle = 130,
+    // P4 -- satellite-anchor op3 overlap threshold.  All four pr/85
+    // sec 10.6 adverse absorbs were main-anchor d=0.00; 0.7 restores the
+    // pre-pr/85 threshold at satellites only (evt30504's wanted absorb).
+    mvga_sat_dup_frac = 0.7,
+    // P1b -- interposed splice at degree-1 main anchors (26 of the 86
+    // Class-B cases sit there; fixes 349945 and 168432).  The terminal
+    // absorb still requires degree >= 2.
+    mvga_interposed_deg1 = true,
+    // doc pr/86 sec 15 (round 2) -- the round-1 splice repaired the graph
+    // but not the picture: carry_prong_execute concatenates wcpt chains and
+    // the op4 refit seeds from wcpts, so the rendered trajectory never
+    // moved (owner: 349945's direct track still missing, 38856's turn
+    // still there).  Round 2 makes the repair visible: R1 re-derives the
+    // spliced near-anchor stretch straight (es2 recipe: 0.6 cm samples,
+    // is_good_point charge veto, Steiner snap), R2 late-collapses degree-2
+    // zigzag junctions near the main vertex, with op3<->op3.5 interleave +
+    // created-stub charge-gated splice (the 349945 chain: collapse, then
+    // splice the op1-created elbow, then straighten).  SBND PRODUCTION ON
+    // 2026-08-16 (sec 15 gates: knobs-off 2134/2134 byte-identical on the
+    // shipping binary; kink>=60 near-vertex band 60->43 full-sample
+    // [pre-round-1 was 39]; zigzag ratio>=1.5 12->6; 349945 approach 3
+    // hops/ratio 2.42 -> 1 hop/1.16; ZERO adverse movers 3 samples; zero
+    // nue-score sign changes; pr/85 four adverse events untouched;
+    // runtime/RSS neutral).  Escapes: SBND_MVGA_SPLICE_STRAIGHTEN,
+    // SBND_MVGA_APPROACH_COLLAPSE, SBND_MVGA_STRAIGHTEN_RADIUS (or -A).
+    // R1 -- straighten reach (cm) past the dissolved junction.
+    mvga_splice_straighten = 5,
+    // R2 -- op3.5 junction-collapse radius (cm) around the main vertex.
+    mvga_approach_collapse = 15,
+    // R1/R2 charge-veto radius (cm; C++ default 0 = prototype 0.2, which
+    // vetoes every long-stub straighten -- the charge ridge deviates
+    // ~1.6 cm from the straight chord; 1.0 is grid-validated, uniquely
+    // required by 349945 + 122660, zero adverse anywhere).
+    mvga_straighten_radius = 1.0,
+    // doc pr/83 r3 -- the duplicate-corridor round, SBND PRODUCTION ON
+    // (owner flip 2026-08-17): op1 unscoped (-1), op1 threshold 0.7 for
+    // >=10cm pairs (C++ length gate; 390842 guard), post-op3 dup pass
+    // (class A), abandoned-cluster dup audit (Mechanism C + losing-candidate
+    // orphans, 350935/359980).  Gates: knob-off 1022/1022 byte-identical;
+    // census 17->0 (511-evt) and 14->0 (mcp2k), zero new findings.
+    // Escapes: SBND_MVGA_OP1_RADIUS, SBND_MVGA_OP1_DUP_FRAC,
+    // SBND_MVGA_OP1_POST, SBND_SWAP_ORPHAN_DUP_AUDIT
+    // (or -A).  null/false omit the keys => byte-identical legacy path.
+    // doc 77 round 1 (2026-08-24): mvga_carry_max removed -- not needed,
+    // class A cleared 8/8 with it OFF (pr/83 r3 sec 8.5).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
+    mvga_op1_radius = -1,
+    mvga_op1_dup_frac = 0.7,
+    mvga_op1_post = true,
+    swap_orphan_dup_audit = true,
+    // doc pr/83 r4 -- projective duplicate collapse at the main vertex,
+    // SBND PRODUCTION ON (owner flip 2026-08-18, 4-event Bee scan
+    // approved): a 1-track-1-shower stem split into two 3D tracks that
+    // overlap in >= 2 of 3 wire views; the charge-starved member reads
+    // stem dQ/dx ratio 0.08-0.28 final, 0.33-0.48 at mvga time -- hence
+    // ratio 0.55, margin over the measured 0.47/0.48 and far from
+    // MIP-parity two-prongs (geometry gates alone: zero false pairs in
+    // 559 events).  Gates: knob-off 1024/1024 byte-identical; projective
+    // census 4->0 (511) + 2->0 (mcp2k), zero new; r3 census stays 0;
+    // pr/86 census identical; movers = exactly the census events.
+    // Escapes: SBND_MVGA_PROJ_DUP_FRAC, SBND_MVGA_PROJ_DQDX_RATIO
+    // (or -A).  null omits the keys => byte-identical legacy.
+    mvga_proj_dup_frac = 0.7,
+    mvga_proj_dqdx_ratio = 0.55,
+    // doc pr/83 r4b (284206): op1-proj's own angle ceiling, SBND
+    // PRODUCTION ON (owner request 2026-08-18): the residual stem pair
+    // reads 22 deg -- just over op1's shared 20 -- and its ratio 0.52
+    // already passes 0.55, so the angle was the only blocker.  Small-set
+    // check: 284206 stem 3 -> 1 track (duplicate 161 MeV electron gone);
+    // all 7 other knob-affected events byte-identical at 25.
+    // Escape: SBND_MVGA_PROJ_ANGLE (or -A).  null omits => byte-identical.
+    mvga_proj_angle = 25,
+    // doc pr/99 round 2 -- op3.5 approach-collapse guards + op1-post charge
+    // second-opinion.  C++ defaults 0/false = legacy.  null/false => key
+    // omitted => byte-identical pre-fix config.
+    // SBND PRODUCTION ON 2026-08-20 (doc pr/99 round 2; owner pre-authorized
+    // flip on validation PASS).  Ghost thresholds ride the C++ defaults
+    // (overlap 0.7 / dqdx 0.25 / min_len 10 cm).
+    // doc 77 round 4 (2026-09-01): mvga_ac_veto_radius removed -- 0.2 cm
+    // measured ADVERSE (kills the 349945 design case, re-confirming pr/86
+    // Stage A's deliberate 1.0 cm relax).  The collapse chord uses the R1
+    // straighten-radius rule, which is what production always ran.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    mvga_ac_chord_max = 30,
+    mvga_ac_no_cascade = true,
+    // doc pr/103 (SBND 18255-405707) -- mvga op0 pass-through split: a prong of
+    // a junction J near the main vertex whose fitted interior passes through the
+    // main vertex is split there (the J-M piece becomes the connecting stub,
+    // so op1 no longer deletes the connector as a "duplicate" and op3 can
+    // re-anchor J's other prong onto the vertex).  C++ default 0 = off;
+    // passthru_tol C++ default 1.0 cm.  null => key omitted => byte-identical.
+    // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 7; owner pre-authorized the
+    // flip on validation PASS: OFF gate 2000/2000+96/96+38/38+30/30, zero ADVERSE
+    // movers, no nueCC48 nue change).  passthru_tol rides the C++ default 1.0 cm.
+    mvga_passthru = 4,
+    mvga_passthru_tol = null,
+    // doc pr/103 -- op3 interposed splice: when the far-angle gate declines at
+    // the main anchor (the 3-track vertex split in two by a 0.6-4 cm stub:
+    // 65289/345633/400856/287517), try the per-prong charge-verified straighten
+    // splice instead.  C++ default false; false => key omitted => byte-identical.
+    mvga_interposed_fallback = true,   // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 7)
+    // doc pr/103 sec 6: measured-far_angle floor for the fallback (deg).  C++
+    // default 0 = only "measured"; validated production value 45 (hairpins /
+    // back-folds below it only shorten tracks).  null => key omitted.
+    mvga_interposed_fallback_min_angle = 45,   // SBND PRODUCTION ON 2026-08-21 (doc pr/103 sec 6 ledger)
+    mvga_dup_starved_asym = 0.55,
+    mvga_dup_starved_mip = 0.8,
+    mvga_dup_starved_span = 0.5,
+    // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed -- live A/B
+    // -36/1014, rider closed (pr/89 round 5; pr/100:113).  See
+    // sbnd_xin/docs/77_knob-ledger.tsv.
+    // doc pr/106 sec 10 -- exclusion-free charge cloud for the DL vertex net:
+    // with fit_exclusion on, the cells equidistant from two prongs are dropped
+    // from both and the net's vertex voxel is starved (nueCC DL-alone 34 -> 42
+    // /47 with exclusion off).  This refits each cluster once without
+    // exclusion, feeds that cloud to the net, and restores the exclusion fit.
+    // C++ default false => key omitted => byte-identical.  Validation:
+    // --tla-code dl_vtx_cloud_no_exclusion=true (or SBND_DL_VTX_CLOUD_NO_EXCLUSION).
+    dl_vtx_cloud_no_exclusion = false,
+    // doc pr/112 sec 11 -- the DUAL CHAIN: a second, exclusion-free PR pass
+    // suggests the neutrino vertex and the production (exclusion-ON) pass
+    // decides.  dl_vtx_dual_chain C++ default false => key omitted =>
+    // byte-identical (also the retrain-era off switch).  dual_chain_mode
+    // "snap" (OFF final vertex snapped to the nearest production candidate,
+    // accepted iff d <= dual_chain_transfer_max cm) | "voxels" (OFF top-K
+    // replaces the ON inference in the rerank) | "union" (pooled top-K, plus
+    // dual_chain_vtx_weight * max(0, 1-d/D) proximity term).
+    // dual_chain_transfer=false is the PROBE (pass runs, agreement flag
+    // recorded, nothing moves); NOT transfer_max=0, which transfers.
+    // Runner env: SBND_DL_VTX_DUAL_CHAIN / SBND_DUAL_CHAIN_{MODE,TRANSFER,
+    // TRANSFER_MAX,ALLOW_CLUSTER_SWAP,VTX_WEIGHT}.
+    //
+    // SBND PRODUCTION ON, owner flip 2026-08-23: "Can you make snapD2 as the
+    // default for SBND production for now?"  Operating point = mode "snap",
+    // transfer on, D = 2.0 cm (doc pr/112 sec 11.6).  Measured on the owner's
+    // per-arm-target metric (target = each arm's own candidate vertex nearest
+    // the hand-scan click), 1011 scannable labels (pr/88 sec 8 filter):
+    //   production 777 | uniW0 784 (+7) | snapD2 805 (+28) | snapD3 804 (+27)
+    //   exclusion-free chain alone 812 (+35) -- snapD2 captures 28 of the 35.
+    // Cost 1.58x TCN visit; 1 cm ruler 44 rescued / 18 ADVERSE.  This is NOT
+    // byte-identical -- it is a deliberate production change.  Revert with
+    // --tla-code dl_vtx_dual_chain=false (or SBND_DL_VTX_DUAL_CHAIN=''), which
+    // is also the retrain-era off switch the owner asked for.
+    // mode/transfer_max are pinned explicitly so the operating point is visible
+    // in the compiled config rather than inherited from a C++ default.
+    // PDVD 2026-09-04, owner: "Right now PDVD does not need the dual chain
+    // process" -- OFF (key omitted).  It was copied from SBND production and,
+    // with dl_weights '' until today, its OFF pass ran on every candidate and
+    // was never read (doc pdvd/28 sec 21-22, 33% of the PR arm).  The mode /
+    // transfer_max values below are inert while this is false.
+    dl_vtx_dual_chain = false,
+    dual_chain_mode = 'snap',
+    dual_chain_transfer = true,
+    dual_chain_transfer_max = 2.0,
+    dual_chain_allow_cluster_swap = null,
+    dual_chain_vtx_weight = null,
+    // doc pr/107 -- dQ/dx fit keeps every trajectory point (prototype
+    // parity).  do_multi_tracking's toolkit-only third form_map_graph pass
+    // (before dQ_dx_multi_fit) re-applies the zero-quantity drop to the final
+    // trajectory; with fit_exclusion on that deletes the junction-adjacent
+    // points whose cells update_association stripped (442 points over 47
+    // nueCC48 events vs 86 with exclusion off), which starves the DL vertex
+    // net's input cloud.  The prototype fits dQ/dx on every trajectory point.
+    // C++ default false => key omitted => byte-identical.  Validation:
+    // --tla-code dqdx_fit_keep_all_points=true (or SBND_DQDX_FIT_KEEP_ALL_POINTS).
+    dqdx_fit_keep_all_points = false,
+    // doc pdvd/45 sec 3 (mechanism) / doc pdhd/03 (PDHD adoption): TrackFitting's
+    // update_association rebuilds each 2-D cell's 3-D point with the geometric
+    // (time - offset_t)/slope_t -- the RAW drift frame -- while the per-segment
+    // "fit"/"main" clouds it queries are t0-CORRECTED, so every distance is off by
+    // v_drift * cluster_t0 (metres on a PDHD cosmic): the segment whose cloud
+    // reaches farthest in x wins every cell and the others lose all charge.
+    // Measured on PDHD 029107 d03nu1 (doc pdhd/03 sec 4): the PR fit kept 0.1-0.6
+    // of the STM tagger's fit points on the same clusters (PDVD after the fix:
+    // ~1.1).  true => the cell is shifted by dirx * cluster_t0 * v_drift before
+    // the cloud query (the prototype's own-point offset_t, restored).  C++ default
+    // false => key omitted => the pre-doc-03 tail.  Consumed by tagger_check_neutrino
+    // and check_stm_michel only (via tcn_knobs), NEITHER in the production
+    // pipeline => the -stm compiled config is byte-identical.  PDHD -nu ON since
+    // doc pdhd/03; -S excl_t0_frame=false restores the old tournament.
+    excl_t0_frame = true,
+    // doc pdvd/30 round 2 (039252/2 evt 298595, cluster 86): organize_segments_path_3rd
+    // reads its input path from segment->fits() whenever that is merely non-empty, so a
+    // segment whose fits() has collapsed to its two endpoint vertices (measured here:
+    // trajectory-round-1 exclusion contention right after a do_rough_path graph edit adds
+    // an overlapping segment) is resampled as a STRAIGHT chord and the bent 128-point
+    // wcpts() path in the same object is never consulted again.  Rendered result: a 64 cm
+    // doc 77 round 1 (2026-08-24): dl_vtx_topo_weight/_center (pr/89 Arm C2
+    // rule-1 outgoing-prong topology term) removed -- live A/B -8/1014.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
+    // swap decision instead of silently discarding it (a latent bug: the
+    // decision fires today but never reaches the caller).  DEFAULT OFF
+    // pending owner review.  Validation: -A main_vertex_swap_apply=true (or
+    // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
+    // byte-identical.
+    main_vertex_swap_apply = false,
+    // doc pr/51 round 4 -- diagnostic-only rough-path probe for the
+    // near-vertex short-cut investigation (path-COST, not graph-shape).
+    // No graph/fit/segment content is ever changed; every line is TRACE.
+    // Validation: -A rough_path_probe=true (or the SBND_ROUGH_PATH_PROBE
+    // runner env).  false omits the key => byte-identical.
+    rough_path_probe = false,
+    // doc pr/51 round 5 -- steiner gap penalty, the H1 short-cut fix the
+    // round-4 probe validated: when scale > 0, do_rough_path routes on a
+    // per-cluster "steiner_graph_gap" flavor whose edges are re-weighted
+    // w' = w * (1 + scale * unsupported_fraction), so a gap-spanning chord
+    // no longer beats following the charge around a corner.  C++ defaults:
+    // scale 0 (OFF), dead_alpha 0.25, min_edge 0.5 cm, sample_step 0.3 cm,
+    // point_radius 0.2 cm.  SBND PRODUCTION ON at scale 2.0 (2026-08-12,
+    // owner pre-authorized on clean validation): off-gates 0/117
+    // byte-identical, on-census 101/117 display-level movers with nusel
+    // 0/117, wall/RSS deltas negligible; targets 131357/234638/268067/
+    // 506746 fixed (work-pr51r5-* arms, doc pr/51 round 5).  Legacy escape
+    // for A/B: -A steiner_gap_penalty=0 (or SBND_STEINER_GAP_PENALTY=0)
+    // restores the pre-flip production bare, byte-exact (C++ gate is
+    // scale <= 0; flip/escape gates 0/117 both directions).
+    steiner_gap_penalty = 2.0,
+    sgp_dead_alpha = null,
+    sgp_min_edge = null,
+    sgp_sample_step = null,
+    sgp_point_radius = null,
+    // doc pdvd/32 round 3 -- per-plane pitch floor for the PR pattern code's
+    // strict good-point tests (the 18 is_good_point(..., 0.2/0.3 cm, 0, 0)
+    // sites in NeutrinoStructureExaminer / NeutrinoOtherSegments /
+    // NeutrinoShowerClustering), as a fraction of the wire pitch.  Applied as
+    // max(radius, frac*pitch) per plane, so it can only loosen.  C++ default
+    // 0; key suppressed when null => byte-identical config.  0.6 is the
+    // largest round value that leaves SBND/uBooNE untouched.  A value > 0
+    // CHANGES OUTPUT: this is the PR half of the doc-32 fix and, unlike the
+    // TrackFitting half, it has no measurement of its own yet.
+    good_point_pitch_frac = null,
+    // doc pdvd/36 -- the lattice-normalised (anisotropic) ctpc metric.  Every
+    // ctpc radius query in this PR job (the trajectory end trim's and the
+    // pattern code's strict good-point tests, test_good_point in the
+    // connectors protect_bundle / steiner run here, the TGM candidate check,
+    // get_ave_charge in the vertex finder) scales the pitch axis by
+    // s = min(1, drift_step/pitch) per plane, so "within r" means the same
+    // number of lattice cells on PDVD (U/V s = 0.387, W 0.581) as on SBND,
+    // where s clamps to 1 and nothing changes.  The k-d tree and the pctree
+    // are untouched: the ellipse is answered exactly by a circumscribe-and-
+    // filter two-level query (clus/inc/WireCellClus/CtpcAnisoMetric.h).
+    // C++ default false; key suppressed when false => byte-identical config.
+    // **PDVD PRODUCTION ON, owner decision 2026-09-04** (doc pdvd/36 sec 11).
+    // This line -- not the toolkit -- IS the PDVD operating point: pr.jsonnet's
+    // arg default stays false and the C++ default stays false, so SBND, PDHD
+    // and uBooNE are untouched structurally, not by convention.  SBND is
+    // deliberately staying isotropic at the owner's instruction.
+    //
+    // WHAT IT COSTS, measured on this manifest (doc 36 sec 10.3): trajectory
+    // coverage 70.3 -> 71.1 % of each cluster's own 3-D charge, unsupported
+    // trajectory 10.2 -> 12.6 % of fit points more than 2 cm from any charge,
+    // and 657 STM-tagged clusters against 688 (-31 of 688).  The exchange rate
+    // is worse than the 0.35 floor's (0.33 points of coverage per point of
+    // ghost, against 1.05) and that is NOT the metric's fault: doc 36 sec 10.1
+    // shows the end trim is a TIP-ONLY test that used to walk unsupported
+    // chords back by accident, on the isotropic test's 82 % false-fail rate on
+    // real charge.  The retune is doc pdvd/38's gap-aware trim
+    // (TrackFitting end_trim_gap_len), and the owner's sequencing is explicit:
+    // fix the fundamental first, retune what is built on it step by step.
+    //
+    // Retired in the same change: good_point_pitch_frac in
+    // pdvd_track_fitting.json, 0.35 -> 0.  The metric subsumes the floor and
+    // they must not stack (doc 34 sec 8, measured in doc 36 sec 6).
+    // Pre-flip arm: -S ctpc_aniso_metric=false
+    //               -A trackfitting_config=<the 0.35 file, git show 730bc794:...>
+    ctpc_aniso_metric = true,
+    // doc pr/51 round 6 -- weak-charge deficit term on the same gap flavor
+    // (residuals 18259-131357 3-track V, 18255-506746 branch turn: chords
+    // that are image-supported but charge-poor, invisible to the
+    // unsupported-fraction penalty at any scale).  C++ defaults:
+    // weak_scale 0 (OFF), weak_qref 2000 (calc_charge_wcp charge units).
+    // SBND PRODUCTION ON at (5.0, 6000) (2026-08-12): off-gates 0/117
+    // byte-identical; nusel/nusel-table 0/117 at both grid scales; both
+    // round-6 targets fixed (131357 clean 2-track V, MV 0.94 cm from the
+    // true corner; 506746 long track reaches the vertex).  DISCLOSED COST
+    // (doc pr/51 round 6 census): nu-vertex moves >10 cm on 25/115 and
+    // kine_reco_Enu by >100 MeV on ~44/115 -- same footprint class as the
+    // accepted round-5 flip measured identically (17 and 30), majority the
+    // same bistable events; every >10cm mover is in the pr51r6 Bee sets.
+    // Escape for A/B: SBND_SGP_WEAK_SCALE=0 (or -A sgp_weak_scale=0)
+    // restores round-5 production byte-exact; note steiner_gap_penalty=0
+    // kills BOTH terms (pre-round-5 legacy).
+    sgp_weak_scale = 5.0,
+    sgp_weak_qref = 6000.0,
+
+    // doc pr/73 -- per-edge DEBUG sentinel for the steiner_graph_gap scan
+    // (endpoints, midpoint, w, bad, both recovered vertex charges,
+    // deficit).  Log-only diagnostic; answers "where are the penalized
+    // edges" rather than "how many".  C++ default false = legacy; false
+    // omits the key => byte-identical compiled config.
+    // Validation: -A sgp_edge_probe=true (or SBND_SGP_EDGE_PROBE=true).
+    sgp_edge_probe = false,
+    // doc sbnd_xin/docs/pr/73 round 2, fix F3a -- bound what the round-6
+    // penalty may do to the ROUTE.  When >= 0 and the gap flavor is in use,
+    // do_rough_path also routes on the untouched base flavor and keeps the
+    // BASE route whenever the penalized one strays further than this many cm
+    // from it.  C++ default -1 = off (unbounded, today's behaviour); null
+    // omits the key => byte-identical compiled config.
+    // NB 0 is a meaningful cap, so the off-test is `< 0`, not `<= 0`.
+    // SBND PRODUCTION ON at 3 cm -- owner flip 2026-08-13, doc pr/73 sec 9.
+    // Fixes the ISO case 18255-57903: the corridor returns from two segments
+    // (path/chord 1.326 & 1.252, bow 2.52 & 2.94 cm, a 69 deg hairpin) to one
+    // 47.4 cm segment at 1.026 / 1.86 cm / jitter 0.081 -- the pre-round-5
+    // answer to three decimals, charge coverage included.
+    // The owner's stated criterion for this round was "keep the round 5/6
+    // improvements, fix the ISO case", and both halves are PROVEN: 18259-131357
+    // and 18255-506746, the two events round 6 was built to fix, are
+    // byte-identical with the guard on.
+    // Footprint 46/117 events, nusel 0/117 flips; the nu-vertex movers are
+    // under hand scan (docs/pr/pr73f3a-movers.index.txt).  Open item: +2
+    // dangling PF roots on 18255-285567.
+    // Escape for A/B: -A sgp_max_sep=-1 (or SBND_SGP_MAX_SEP=-1).
+    sgp_max_sep = 3.0,
+    // doc sbnd_xin/docs/pr/83 -- orient break_segment() splits to the wcpt
+    // path (find_vertices) instead of boost source/target.  On a reversed
+    // graph edge (routinely produced by the examine_vertices re-routes) the
+    // legacy slice hands each child the WRONG half of the parent's
+    // wcpts/fits: vertex fit points land 67-118 cm from their wcpts, both
+    // children's fitted trajectories stack onto one arm, and the fit-vs-wcpt
+    // divergence seeds runaway vertex-activity bridges (mcp1k
+    // 283040/59899/72586 -- "many overlapping tracks on one long track").
+    // Prototype parity: WCP resolves start/end by wcpt-index equality tested
+    // in both orientations (NeutrinoID_proto_vertex.h:595-601) and cannot
+    // cross.  C++ default false.
+    // Escape for A/B: -A break_seg_orient=false (or SBND_BREAK_SEG_ORIENT=false).
+    // SBND PRODUCTION ON 2026-08-15 (doc pr/83 gates: knob-off 1022/1022
+    // byte-identical; on-arm footprint 25->12 findings, 0 new; both >1cm
+    // vertex movers land on the owner's hand labels).  Owner pre-authorized
+    // the flip conditional on those gates.
+    break_seg_orient = true,
+    // doc sbnd_xin/docs/pr/75 -- record, per event, HOW the neutrino vertex
+    // was chosen: compare_main_vertices' additive score per candidate, the DL
+    // top-K voxels, the seven rerank composite terms, and the accept route
+    // (doc pr/52 sec 1).  PrDisplayDump emits it as "vertex_scoreboard" so a
+    // hand scan can rank candidates and become acceptance-tuning input.
+    // Pure recording -- no decision reads it.  C++ default false = legacy;
+    // false omits the key => byte-identical compiled config.
+    // Validation: -A vertex_scoreboard=true (or SBND_VERTEX_SCOREBOARD=true;
+    // the driver turns it on automatically for PR_EXTRA_STAGES=pr_display).
+    vertex_scoreboard = false,
+    // doc sbnd_xin/docs/pr/79 sec 10 -- live-feature harvest for DL-vertex
+    // training: the exact live SCN input cloud (pre-voxelization) + the
+    // traditional-path per-candidate features (proton topology, z prior,
+    // degree, FV, conflicts, fit chi2, global-scorer rows).  Recording only;
+    // REQUIRES vertex_scoreboard (the runner auto-enables it).  C++ default
+    // false = legacy; false omits the key => byte-identical compiled config.
+    // Validation: -A dl_vtx_harvest=true (or SBND_DL_VTX_HARVEST=true).
+    dl_vtx_harvest = false,
+    // doc pr/51 round 7 -- robust vertex fit (dynamic per-leg re-seat-free
+    // direction windows for MyFCN, disagreement-gated, relaxed prior on
+    // substituted 2-leg vertices).  C++ defaults: robust false, main_only
+    // true, min_len 10, rin_margin 2, rout_frac 0.5, rout_min 9,
+    // rout_max 18, angle 20, min_pts 5, min_aniso 3, prior_range 1
+    // (lengths cm, angle deg); satellites below ride the C++ defaults.
+    // SBND PRODUCTION ON (2026-08-12), owner instruction "if the validation
+    // pass, turn on the knob for SBND" after the 117-evt validation: off-gate
+    // 0/117 byte-identical, nusel 0/117 at ON, TOTAL knob footprint 3/117
+    // events -- 18255-57903 (self-confirmed hairpin vertex, census legs
+    // 74/44 deg, moves 4.62 cm onto the muon line), 18255-56982 (35 deg leg,
+    // 2.23 cm), 423981 (0.08 cm micro-adjust, >=3-leg tight prior) -- zero
+    // nu-vtx movers >10 cm, zero |dEnu| > 100 MeV, wall/RSS at noise.
+    // Escape for A/B: SBND_MVFIT_ROBUST=false (or -A mvfit_robust=false)
+    // restores round-6 production byte-exact (escape gate 0/117).
+    mvfit_robust = true,
+    mvfit_main_only = null,
+    mvfit_min_len = null,
+    mvfit_rin_margin = null,
+    mvfit_rout_frac = null,
+    mvfit_rout_min = null,
+    mvfit_rout_max = null,
+    mvfit_angle = null,
+    mvfit_min_pts = null,
+    mvfit_min_aniso = null,
+    mvfit_prior_range = null,
+    // doc pr/54 -- keep well-supported isolated residual segments in
+    // find_other_segments (18255-142421 "missing gammas": a separated EM
+    // shower of the main cluster is fit and then silently discarded because
+    // neither endpoint touches the existing graph).  SBND PRODUCTION ON --
+    // owner flip 2026-08-09 after the Bee before/after hand-scan of 142421
+    // ("this was a bug"): bare production now IS the validated
+    // work-pr54-on142421 arm config.  Legacy escape for A/B: -A
+    // other_seg_keep_isolated=false (or SBND_OTHER_SEG_KEEP_ISOLATED=false)
+    // restores the pre-flip production bare, byte-exact (doc pr/54 SS12
+    // flip proofs).  C++ floors 25 points / 3 cm ride as defaults (null
+    // omits their keys); C++ knob default itself stays false.
+    other_seg_keep_isolated = true,
+    other_seg_keep_isolated_min_points = null,
+    other_seg_keep_isolated_min_length = null,
+    // doc pr/102 P1 -- OR-disjuncts on the pr/54 keep above: min_nnf admits
+    // a candidate below the 25-terminal floor when its number_not_faked is
+    // at least this (pr/67 sec 10.3 S1; 18255-70084 read nnf 10/12 vs pr/54
+    // noise at 0); len_admit (cm) admits any candidate at least this long
+    // (pr/102 sec 4 B1: 67-145 cm candidates dropped at 16-23 terminals).
+    // C++ defaults 0 = off; null omits the keys => byte-identical.
+    //
+    // len_admit: SBND PRODUCTION ON at 30 -- owner authorization 2026-08-20
+    // ("implement P1 ... if validation pass, turn them on by default"),
+    // validation doc pr/102 sec 8: nuecc48 sweep 2/48 changed ZERO nue
+    // flips, mcp1k 6/1000 changed zero ADVERSE movers, census fixes the
+    // 145.5/67.1 cm dropped tracks (18255-292384/387850).  Named
+    // hand-check item: 18255-284794 numu 2.12 -> -1.28 (its real 71.4 cm
+    // second track is recovered; vertex unmoved).  Legacy escape:
+    // -A other_seg_keep_isolated_len_admit=0 (or SBND_OSEG_LEN_ADMIT=0...
+    // any empty env leaves this default) -- C++ knob default stays 0.
+    //
+    // doc 77 round 4 (2026-09-01): other_seg_keep_isolated_min_nnf removed --
+    // its validation FAILED at 4 (nueCC48 nue ledger -4/+1) and it carried a
+    // named nue loss at 8 (389538 4.3 -> -15 vs 30504 gain); doc pr/102 sec
+    // 8.3.  The len_admit disjunct below is unaffected and stays PRODUCTION
+    // ON at 30.  See sbnd_xin/docs/77_knob-ledger.tsv.
+    other_seg_keep_isolated_len_admit = 30.0,
+    // doc 77 round 1 (2026-08-24): other_seg_uncover_3d (pr/102 P2, 3-D
+    // uncovered-charge radius) removed -- 23 ADVERSE movers, stays OFF.
+    // See sbnd_xin/docs/77_knob-ledger.tsv.
+    // doc pr/67 round 3 (S2) -- isochronous-snap size gate in cm, the first
+    // clause of the guard at NeutrinoOtherSegments.cxx:721.  The machinery
+    // behind it (modify_vertex/segment_isochronous) is the only thing that
+    // ATTACHES an isochronously displaced branch to its parent, and at the
+    // legacy 10 cm it never saw the doc pr/67 branches (dir_mag 4.70 / 4.38 /
+    // 4.34 cm on 18264-137238, 18259-42280, 18345-21073).
+    //
+    // SBND PRODUCTION ON at 4.0 -- owner flip 2026-08-12 after the Bee
+    // before/after hand-scan of the three targets plus all eight collateral
+    // neutrino-vertex movers ("based on my scan, the overall is positive").
+    // Bare production now IS the validated work-pr67f-on{48,19,50} arm config.
+    // Legacy escape for A/B: -A iso_snap_min_dir_mag=10.0 (or
+    // SBND_ISO_SNAP_MIN_DIR_MAG=10.0) restores the pre-flip production bare,
+    // byte-exact (doc pr/67 sec 11.12 flip proof).  C++ knob default itself
+    // stays 10.0.
+    //
+    // Owner-accepted cost, doc pr/67 sec 11.7: this moves the reconstructed
+    // neutrino vertex on 30 of 117 census events, 9 by more than 10 cm (max
+    // 82.4 cm).  Do NOT read a vertex mover here as a regression without
+    // re-reading that section first.
+    iso_snap_min_dir_mag = 4.0,
+    // doc pr/65 round 3 -- offer graph-unreachable main-cluster segments
+    // (the disconnected components other_seg_keep_isolated above creates) to
+    // the shower absorbers by relaxing the cluster()==main_cluster guards to
+    // a main_vertex-reachability test.  SBND PRODUCTION ON -- owner flip
+    // 2026-08-11 (doc pr/65 round 3): bare production IS the validated
+    // work-pr65-on48 arm config.  Gate work-pr65-base48 vs work-pr65-off48
+    // 0/48 archives + 0/48 pctree + nusel 0/48; on-census 21/48 movers, all
+    // sentinel-attributed, 0 unclaimed left for the orphan net (evt 54095:
+    // 12/12 fragments absorbed, shower 2334 -> 2633 MeV, 9 -> 3 root nodes).
+    // Legacy escape for A/B: -A shower_absorb_unreachable_main=false (or
+    // SBND_SHOWER_ABSORB_UNREACHABLE_MAIN=false).  C++ default stays false.
+    shower_absorb_unreachable_main = true,
+    // doc pr/59 round 2 -- per-cluster orphaned-associate_points rescue
+    // (18255-142421 seg 20; 116944-71372 segs 19052/19053/136199).  SBND
+    // PRODUCTION ON -- owner flip 2026-08-10 after the work-pr59r2-on19 gate
+    // (12/12 known orphans rescued, zero manufactured-orphan regressions,
+    // nusel-table.tsv byte-identical across the 19-event manifest) and the
+    // Bee before/after hand-scan of 71372/142421: bare production now IS the
+    // validated work-pr59r2-on19 arm config.  Legacy escape for A/B: -A
+    // assoc_full_recluster=false (or SBND_ASSOC_FULL_RECLUSTER=false)
+    // restores the pre-flip production bare, byte-exact (doc pr/59 sec 9
+    // gate proofs).  C++ knob default itself stays false.
+    assoc_full_recluster = true,
+    // doc pr/64 round 7 -- reassign, instead of drop, an association point
+    // that loses (or never enters) clustering_points_segments' Stage-C ghost
+    // removal to a segment in the SAME cluster that actually wins the global
+    // 2D projection contest.  SBND PRODUCTION ON 2026-08-11, per owner
+    // pre-authorization ("if validation passed, turn this on") conditioned on
+    // the 48-event nueCC off-gate/mover census (doc pr/64 round 7):
+    // nusel-table.tsv byte-identical 48/48 (selection untouched); mabc-pr.zip
+    // moves on 47/48 (the 48th has no PF reconstruction at all); every moved
+    // event's kine_reco_Enu goes UP (mean +10.7 MeV, max +51.9 MeV on this
+    // sample) -- monotonic and one-directional by construction (the rescue
+    // only ever adds a previously-silently-dropped point, never removes one),
+    // consistent with correcting a systematic under-count, not a random
+    // perturbation.  NOTE: this does NOT resolve the owner's originally
+    // reported 18259-18625 blob at (142.1,78.3,176.5) -- round 7 traced that
+    // specific loss to a DIFFERENT, not-yet-fixed mechanism (a segment that
+    // legitimately won those points is later removed from the graph with no
+    // re-association pass); see doc pr/64 round 7 "still open" section.
+    // Legacy escape for A/B: -A assoc_reassign_orphans=false (or
+    // SBND_ASSOC_REASSIGN_ORPHANS=false) restores the pre-flip production
+    // bare, byte-exact.  C++ knob default itself stays false.
+    assoc_reassign_orphans = true,
+    // doc pr/64 round 8 -- clear a merge survivor's associate_points when
+    // examine_structure_final_1/_1p/_3 (called unconditionally inside
+    // determine_main_vertex) deletes a segment that had non-empty
+    // associate_points, so pr/59's reassociate_cluster_orphans any_orphan
+    // trigger correctly re-fires instead of leaving the survivor's stale
+    // cloud in place.  Root-caused the round 7 "still open" item: the
+    // 18259-18625 blob at (142.1,78.3,176.5) is exactly this -- a segment
+    // legitimately wins those points, is then absorbed into its main-vertex
+    // neighbor by examine_structure_final_1p, and its points are discarded
+    // with no re-derivation.  SBND PRODUCTION ON 2026-08-12, per owner
+    // confirmation of the round 8 validation: nusel-table.tsv byte-identical
+    // 48/48 on the nueCC48 sample (selection untouched); mabc-pr.zip moves
+    // on only 3/48 (54095/174637/389538, a much narrower footprint than
+    // round 7's Stage-C mechanism); every mover's kine_reco_Enu goes UP only
+    // (+4.377/+2.246/+0.602 MeV) -- monotonic, matching the mechanism
+    // (clearing only ever lets pr/59 add points back, never removes any);
+    // the reported evt 18625 blob itself is now resolved (0 -> 8 bbox
+    // points recovered).  wcdoctest-clus 176/176.  Legacy escape for A/B:
+    // -A assoc_clear_on_merge=false (or SBND_ASSOC_CLEAR_ON_MERGE=false)
+    // restores the pre-flip production bare, byte-exact.  C++ knob default
+    // itself stays false.
+    assoc_clear_on_merge = true,
+    // doc sbnd_xin/docs/pr/72 round 2 -- guard examine_structure_3 against
+    // merging a genuine near-vertex track stub into an unrelated
+    // shower/track trunk (18255-196649: a real 6.28cm stub, terminal at the
+    // true neutrino vertex, silently absorbed into a 33cm shower trunk).
+    // SBND PRODUCTION ON 2026-08-12, owner flip: a 480-point grid scan over
+    // the 48 nueCC + 19 NC pi0 + 50 PR data blast radius picked stub_max=7cm/
+    // len_ratio=2.0 (ang3_min=15deg/ang_ratio=1.0/require_terminal=true
+    // already correct) as the operating point that suppresses exactly ONE
+    // junction in the whole 117-event population -- 196649's own target --
+    // with an empty residual (misses) list; on-arm full-reconstruction
+    // validation confirmed 1/117 archive-level movers, 0/117 selection
+    // flips, and bundle-level TGM/STM/FC/lm byte-identical for 196649
+    // itself (evidence the main vertex determination is unperturbed).
+    // wcdoctest-clus 180/180.  Legacy escape for A/B: -A
+    // es3_stub_guard=false (or SBND_ES3_STUB_GUARD=0) restores the pre-flip
+    // production bare, byte-exact.  C++ knob default itself stays false;
+    // key suppressed in the compiled config when off => byte-identical.
+    // Numeric sub-parameters stay null (component's own C++ default, fitted
+    // from the same 117-event census -- see doc pr/72 round 2).
+    es3_stub_guard = true,
+    es3sg_stub_max = null,
+    es3sg_len_ratio = null,
+    es3sg_ang3_min = null,
+    es3sg_ang_ratio = null,
+    es3sg_require_terminal = null,
+)
+    // PDHD data params (anodes / wires); the drift speed the PR job actually
+    // uses comes from the DetectorVolumes built below, which pdhd/clus.jsonnet
+    // builds from this same params.jsonnet.
+    local params = import 'pgrapher/experiment/pdhd/params.jsonnet';
+
+    local tools_all = tools_maker(params);
+    local anodes  = [tools_all.anodes[i] for i in anode_indices];
+
+    local source = g.pnode({
+        type: 'TensorFileSource',
+        name: 'pr_pctree',
+        data: { inname: input, prefix: 'clustering_' },
+    }, nin=0, nout=1);
+
+    local pr_mod = import 'pgrapher/experiment/pdhd/pr.jsonnet';
+    local clus_maker = pr_mod(
+        output_dir=output_dir,
+        runNo=run,
+        subRunNo=subrun,
+        eventNo=event,
+        time_offset=time_offset * wc.us,
+        trigger_offset=trigger_offset_us * wc.us,
+        wrapped_channel_charge=wrapped_channel_charge,
+    );
+    // dQ/dx (e/cm, SBND 0.5 kV/cm) + range (detector-agnostic) LinterpFunctions.
+    // Resolved through WIRECELL_PATH (was a relative '../particle_dataset.jsonnet'
+    // when this job lived under sbnd_xin, which only resolved from the real,
+    // non-symlinked working dir).
+    local pds = (import 'pgrapher/experiment/pdhd/particle_dataset.jsonnet')();
+    // doc 77 round 2 -- the pattern-recognition knob bag.  Every knob whose
+    // only job is to reach TaggerCheckNeutrino as a key is emitted here, once,
+    // straight from its TLA above; the key is omitted exactly when the legacy
+    // `+ (if x then {x: ...})` clause in pgrapher/common/clus.jsonnet omitted
+    // it, so an unset knob still means "C++ default".  The TLA declarations
+    // above remain the single documented home of each knob.
+    local tcn_knobs = {
+        // (entries without an `if` are always emitted -- the job always supplies
+        //  a value, exactly as the pr() call did.)
+        // doc 80: MCS sub-knobs, whole family suppressed unless mcs_enable.
+        // mcs_cathode_x is wired straight from cathode_x -- the established
+        // SBND cathode convention stays the single source (doc 80 sec 7.5).
+        [if mcs_enable then 'mcs_muon_source']: mcs_muon_source,
+        [if mcs_enable then 'mcs_point_source']: mcs_point_source,
+        [if mcs_enable then 'mcs_cathode_x']: cathode_x,
+        [if mcs_enable then 'mcs_cathode_xcut']: mcs_cathode_xcut,
+        [if mcs_enable && mcs_range_comparator_chain then 'mcs_range_comparator_chain']: true,  // doc 84 r1 P5; C++ default false
+        [if mcs_enable && mcs_bridged_members then 'mcs_bridged_members']: true,  // doc 84 r3; C++ default false
+        [if nu_per_bundle && nu_per_bundle_stm_only then 'nu_per_bundle_stm_only']: true,  // pdvd doc 25 sec 13.10; C++ default false. Key omitted when off => byte-identical pre-knob config.
+        [if nu_skip_cosmic then 'nu_skip_cosmic']: true,
+        [if nu_skip_cosmic_bundle then 'nu_skip_cosmic_bundle']: true,
+        [if skip_cosmic_companions then 'skip_cosmic_companions']: true,
+        [if cosmic_companion_min_length != null then 'cosmic_companion_min_length']: cosmic_companion_min_length,
+        [if nu_fallback_demoted_mains then 'nu_fallback_demoted_mains']: true,
+        [if sp_photon_flag then 'sp_photon_flag']: true,
+        // Same offsets below the top face as clus.jsonnet's
+        // pr() defaults, re-anchored to pr_y_top.
+        cosmic_y_top_main: pr_y_top - 17,
+        cosmic_y_top_strict: pr_y_top - 15,
+        cosmic_y_top_loose: pr_y_top - 37,
+        cosmic_y_small_piece: pr_y_top - 67,
+        [if cathode_kink_xcut != null then 'cathode_kink_xcut']: cathode_kink_xcut,
+        [if cathode_wide_kink_angle != null then 'cathode_wide_kink_angle']: cathode_wide_kink_angle,
+        [if cathode_wide_kink_skirt != null then 'cathode_wide_kink_skirt']: cathode_wide_kink_skirt,
+        [if cathode_wide_kink_baseline != null then 'cathode_wide_kink_baseline']: cathode_wide_kink_baseline,
+        [if shower_topo_demote_len != null then 'shower_topo_demote_len']: shower_topo_demote_len,
+        [if fit_exclusion then 'fit_exclusion']: true,
+        [if graph_endpoint_tol != null then 'graph_endpoint_tol']: graph_endpoint_tol,
+        [if oov_prototype_parity then 'oov_prototype_parity']: true,
+        [if first_seg_local_pca != null then 'first_seg_local_pca']: first_seg_local_pca,
+        [if other_seg_relaxed_accept != null then 'other_seg_relaxed_accept']: other_seg_relaxed_accept,
+        [if shower_topo_proto_dir then 'shower_topo_proto_dir']: true,
+        [if vertex_dir_use_fit_point then 'vertex_dir_use_fit_point']: true,
+        [if shower_traj_recheck_parity then 'shower_traj_recheck_parity']: true,
+        [if main_vertex_require_descriptor then 'main_vertex_require_descriptor']: true,
+        [if main_vertex_candidate_flag then 'main_vertex_candidate_flag']: true,
+        [if cont_muon_dir3_30cm then 'cont_muon_dir3_30cm']: true,
+        [if track_comp_empty_abstain then 'track_comp_empty_abstain']: true,
+        [if shower_topo_reset then 'shower_topo_reset']: true,
+        [if reclass_preserve_4mom then 'reclass_preserve_4mom']: true,
+        [if dir_track_median_local then 'dir_track_median_local']: true,
+        [if examine_showers_vertex_by_index then 'examine_showers_vertex_by_index']: true,
+        [if iso_endpoint then 'iso_endpoint']: true,
+        [if iso_endpoint_min_length != null then 'iso_endpoint_min_length']: iso_endpoint_min_length,
+        [if iso_endpoint_max_xext != null then 'iso_endpoint_max_xext']: iso_endpoint_max_xext,
+        [if iso_endpoint_xext_frac != null then 'iso_endpoint_xext_frac']: iso_endpoint_xext_frac,
+        [if iso_endpoint_xext_quantile != null then 'iso_endpoint_xext_quantile']: iso_endpoint_xext_quantile,
+        [if iso_endpoint_tube_radius != null then 'iso_endpoint_tube_radius']: iso_endpoint_tube_radius,
+        [if iso_endpoint_min_aspect != null then 'iso_endpoint_min_aspect']: iso_endpoint_min_aspect,
+        [if v3_extension_guard then 'v3_extension_guard']: true,
+        [if traj_cover_probe then 'traj_cover_probe']: true,
+        [if pr_find_other_rounds != null then 'pr_find_other_rounds']: pr_find_other_rounds,
+        [if v3_extension_min_gain != null then 'v3_extension_min_gain']: v3_extension_min_gain,
+        [if vertex_z_prior_scale != null then 'vertex_z_prior_scale']: vertex_z_prior_scale,
+        [if ssm_target_dir != null then 'ssm_target_dir']: ssm_target_dir,
+        [if ssm_absorber_dir != null then 'ssm_absorber_dir']: ssm_absorber_dir,
+        [if kine_fudge_factor != null then 'kine_fudge_factor']: kine_fudge_factor,
+        [if kine_recom_factor != null then 'kine_recom_factor']: kine_recom_factor,
+        [if kine_shower_fudge_factor != null then 'kine_shower_fudge_factor']: kine_shower_fudge_factor,
+        [if kine_shower_recom_factor != null then 'kine_shower_recom_factor']: kine_shower_recom_factor,
+        [if kine_proton_recom_factor != null then 'kine_proton_recom_factor']: kine_proton_recom_factor,
+        [if kine_plane_weights != null then 'kine_plane_weights']: kine_plane_weights,
+        [if kine_plane_asym_switch != null then 'kine_plane_asym_switch']: kine_plane_asym_switch,
+        [if kine_w_value != null then 'kine_w_value']: kine_w_value,
+        [if kine_shower_pdg_live then 'kine_shower_pdg_live']: true,
+        [if sp_sce_correction then 'sp_sce_correction']: true,
+        [if tagger_ordered_segment_sets then 'tagger_ordered_segment_sets']: true,
+        [if stem_endpoint_wcpt_parity then 'stem_endpoint_wcpt_parity']: true,
+        [if broken_muon_cluster_id_count then 'broken_muon_cluster_id_count']: true,
+        [if nu_selected_as_main then 'nu_selected_as_main']: true,
+        [if nu_selected_as_main_snapshot_all then 'nu_selected_as_main_snapshot_all']: true,
+        [if daughter_count_proto_main_vertex then 'daughter_count_proto_main_vertex']: true,
+        [if daughter_count_proto_examine_showers then 'daughter_count_proto_examine_showers']: true,
+        [if shower_pdg_from_start_segment then 'shower_pdg_from_start_segment']: true,
+        [if shower_pdg_from_shower_type then 'shower_pdg_from_shower_type']: true,
+        [if shower_pdg_exact_muon_test then 'shower_pdg_exact_muon_test']: true,
+        [if pi0_id_shared_allocator then 'pi0_id_shared_allocator']: true,
+        [if shower_flag_pdg_electron then 'shower_flag_pdg_electron']: true,
+        [if shower_less_id_tiebreak then 'shower_less_id_tiebreak']: true,
+        [if shower_endpoint_exclude_start_vertex then 'shower_endpoint_exclude_start_vertex']: true,
+        [if shower_endpoint_skip_orphan_vtx then 'shower_endpoint_skip_orphan_vtx']: true,
+        [if shower_walk_visited_parity then 'shower_walk_visited_parity']: true,
+        [if track_pid_persist_dqdx then 'track_pid_persist_dqdx']: true,
+        [if shower_reclass_dqdx_guard then 'shower_reclass_dqdx_guard']: true,
+        [if shower_topo_dqdx_guard then 'shower_topo_dqdx_guard']: true,
+        [if track_pid_persist_4mom then 'track_pid_persist_4mom']: true,
+        [if shower_proton_daughter_pion then 'shower_proton_daughter_pion']: true,
+        [if shower_proton_daughter_pion_dissolve then 'shower_proton_daughter_pion_dissolve']: true,
+        [if muon_multi_proton_pion then 'muon_multi_proton_pion']: true,
+        [if track_pid_persist_dqdx_electron_guard then 'track_pid_persist_dqdx_electron_guard']: true,
+        [if shower_connect_main_vertex_straight_guard then 'shower_connect_main_vertex_straight_guard']: true,
+        [if shower_traj_straight_guard then 'shower_traj_straight_guard']: true,
+        [if shower_absorb_track_guard then 'shower_absorb_track_guard']: true,
+        [if michel_stem_muon_rescue then 'michel_stem_muon_rescue']: true,
+        [if shower_in_cascade_guard then 'shower_in_cascade_guard']: true,
+        [if shower_in_max_len != null then 'shower_in_max_len']: shower_in_max_len,
+        [if shower_in_mip_hi != null then 'shower_in_mip_hi']: shower_in_mip_hi,
+        [if shower_connect_from_vertices_straight_guard then 'shower_connect_from_vertices_straight_guard']: true,
+        [if shower_connect_start_seg_straight_guard then 'shower_connect_start_seg_straight_guard']: true,
+        [if examine_direction_dirsign_shower_in_guard then 'examine_direction_dirsign_shower_in_guard']: true,
+        [if daughter_shower_angle_reclass_straight_guard then 'daughter_shower_angle_reclass_straight_guard']: true,
+        [if shower_topo_reexam_straight_guard then 'shower_topo_reexam_straight_guard']: true,
+        [if sfv_kink_max != null then 'sfv_kink_max']: sfv_kink_max,
+        [if shower_nv_bridge_track then 'shower_nv_bridge_track']: true,
+        [if shower_nv_main_pi_init then 'shower_nv_main_pi_init']: true,
+        [if shower_nv_bridge_max_gap != null then 'shower_nv_bridge_max_gap']: shower_nv_bridge_max_gap,
+        [if kine_drop_stray_satellites then 'kine_drop_stray_satellites']: true,
+        [if kine_sat_min_energy != null then 'kine_sat_min_energy']: kine_sat_min_energy,
+        [if kine_sat_prox_max != null then 'kine_sat_prox_max']: kine_sat_prox_max,
+        [if kine_sat_angle_bad != null then 'kine_sat_angle_bad']: kine_sat_angle_bad,
+        [if kine_sat_angle_main != null then 'kine_sat_angle_main']: kine_sat_angle_main,
+        [if kine_sat_far_dis != null then 'kine_sat_far_dis']: kine_sat_far_dis,
+        [if kine_sat_axis_dis_cut != null then 'kine_sat_axis_dis_cut']: kine_sat_axis_dis_cut,
+        [if kine_sat_cont_kink != null then 'kine_sat_cont_kink']: kine_sat_cont_kink,
+        [if kine_sat_track_max_nseg != null then 'kine_sat_track_max_nseg']: kine_sat_track_max_nseg,
+        [if kine_sat_em_far_dis != null then 'kine_sat_em_far_dis']: kine_sat_em_far_dis,
+        [if michel_stem_michel_check then 'michel_stem_michel_check']: true,
+        [if michel_stem_max_far_len != null then 'michel_stem_max_far_len']: michel_stem_max_far_len,
+        [if shower_stem_backfill then 'shower_stem_backfill']: true,
+        [if stem_backfill_max_len != null then 'stem_backfill_max_len']: stem_backfill_max_len,
+        [if stem_backfill_mip_lo != null then 'stem_backfill_mip_lo']: stem_backfill_mip_lo,
+        [if stem_backfill_mip_hi != null then 'stem_backfill_mip_hi']: stem_backfill_mip_hi,
+        [if stem_backfill_min_shower_len != null then 'stem_backfill_min_shower_len']: stem_backfill_min_shower_len,
+        [if shower_conn3_unreachable then 'shower_conn3_unreachable']: true,
+        [if conn3_unreachable_min_len != null then 'conn3_unreachable_min_len']: conn3_unreachable_min_len,
+        [if conn3_stitch_max != null then 'conn3_stitch_max']: conn3_stitch_max,
+        [if shower_dedup_start_seg then 'shower_dedup_start_seg']: true,
+        [if shower_traj_michel_stem then 'shower_traj_michel_stem']: true,
+        [if michel_stem_traj_min_len != null then 'michel_stem_traj_min_len']: michel_stem_traj_min_len,
+        [if michel_stem_traj_max_len != null then 'michel_stem_traj_max_len']: michel_stem_traj_max_len,
+        [if michel_stem_traj_mip_lo != null then 'michel_stem_traj_mip_lo']: michel_stem_traj_mip_lo,
+        [if michel_stem_traj_max_far_len != null then 'michel_stem_traj_max_far_len']: michel_stem_traj_max_far_len,
+        [if michel_stem_traj_min_kink_deg != null then 'michel_stem_traj_min_kink_deg']: michel_stem_traj_min_kink_deg,
+        [if shower_long_muon_keep_type then 'shower_long_muon_keep_type']: true,
+        [if shower_bragg_protect_start_segment then 'shower_bragg_protect_start_segment']: true,
+        [if shower_reclass_case_b_dqdx_guard then 'shower_reclass_case_b_dqdx_guard']: true,
+        [if shower_accept_pid_guard then 'shower_accept_pid_guard']: true,
+        [if shower_pid_guard_min_len != null then 'shower_pid_guard_min_len']: shower_pid_guard_min_len,
+        [if shower_vote_track_pid_counts then 'shower_vote_track_pid_counts']: true,
+        [if shower_cone_absorb_guard then 'shower_cone_absorb_guard']: true,
+        [if shower_detach_track_stem then 'shower_detach_track_stem']: true,
+        [if shower_ghost_member_drop then 'shower_ghost_member_drop']: true,
+        [if shower_ghost_overlap_frac != null then 'shower_ghost_overlap_frac']: shower_ghost_overlap_frac,
+        [if shower_ghost_dqdx_ratio != null then 'shower_ghost_dqdx_ratio']: shower_ghost_dqdx_ratio,
+        [if shower_ghost_min_len != null then 'shower_ghost_min_len']: shower_ghost_min_len,
+        // doc pr/117 round 1.  C++ defaults false/false/6cm/15deg/5cm.
+        // Key omitted when off => byte-identical pre-pr/117 config.
+        [if shower_pass4_best_owner then 'shower_pass4_best_owner']: true,
+        [if shower_merge_relax then 'shower_merge_relax']: true,
+        [if shower_merge_relax_dis != null then 'shower_merge_relax_dis']: shower_merge_relax_dis,
+        [if shower_merge_relax_angle != null then 'shower_merge_relax_angle']: shower_merge_relax_angle,
+        [if shower_merge_relax_min_len != null then 'shower_merge_relax_min_len']: shower_merge_relax_min_len,
+        // doc pr/118 round 1.  C++ defaults
+        // false/1.0/8cm/5000/7.5deg/120cm/1cm/30deg.
+        // Key omitted when off => byte-identical pre-pr/118 config.
+        [if shower_merge_relax_continuity then 'shower_merge_relax_continuity']: true,
+        [if shower_merge_relax_cont_frac != null then 'shower_merge_relax_cont_frac']: shower_merge_relax_cont_frac,
+        [if shower_merge_relax_cont_gap != null then 'shower_merge_relax_cont_gap']: shower_merge_relax_cont_gap,
+        [if shower_merge_relax_cont_qmed != null then 'shower_merge_relax_cont_qmed']: shower_merge_relax_cont_qmed,
+        [if shower_merge_relax_cont_axis != null then 'shower_merge_relax_cont_axis']: shower_merge_relax_cont_axis,
+        [if shower_merge_relax_cont_dmax != null then 'shower_merge_relax_cont_dmax']: shower_merge_relax_cont_dmax,
+        [if shower_merge_relax_cont_t1_gap != null then 'shower_merge_relax_cont_t1_gap']: shower_merge_relax_cont_t1_gap,
+        [if shower_merge_relax_cont_t1_fold != null then 'shower_merge_relax_cont_t1_fold']: shower_merge_relax_cont_t1_fold,
+        // doc pr/120 round 1.  C++ defaults false/110deg.
+        // Key omitted when off => byte-identical pre-pr/120 config.
+        [if stem_backfill_back_guard then 'stem_backfill_back_guard']: true,
+        [if stem_backfill_back_ang != null then 'stem_backfill_back_ang']: stem_backfill_back_ang,
+        // doc pr/121 round 1.  C++ default false.
+        // Key omitted when off => byte-identical pre-pr/121 config.
+        [if shower_ex1_dedup_rehome then 'shower_ex1_dedup_rehome']: true,
+        // doc pr/123 r1: C++ defaults false / 40 cm / 0. Keys omitted when off => byte-identical.
+        [if shower_pass4_prune_detached then 'shower_pass4_prune_detached']: true,
+        [if shower_pass4_prune_detached && shower_pass4_prune_gap != 40 then 'shower_pass4_prune_gap']: shower_pass4_prune_gap,
+        [if shower_pass4_track_guard_len != 0 then 'shower_pass4_track_guard_len']: shower_pass4_track_guard_len,
+        [if shower_pass4_prox_guard_len != 0 then 'shower_pass4_prox_guard_len']: shower_pass4_prox_guard_len,
+        [if shower_pass3_backfill_guard_len != 0 then 'shower_pass3_backfill_guard_len']: shower_pass3_backfill_guard_len,
+        [if stem_backfill_back_dvtx != 0 then 'stem_backfill_back_dvtx']: stem_backfill_back_dvtx,
+        // doc pr/132: C++ defaults 10 MeV / 30 deg / 0 / false / 2.  Keys omitted at defaults => byte-identical.
+        [if pi0_mass_offset != null then 'pi0_mass_offset']: pi0_mass_offset,
+        [if pi0_assoc_angle_deg != null then 'pi0_assoc_angle_deg']: pi0_assoc_angle_deg,
+        [if pi0_attached_partner_min_mev != 0 then 'pi0_attached_partner_min_mev']: pi0_attached_partner_min_mev,
+        [if pi0_nv_max_prongs != null then 'pi0_nv_max_prongs']: pi0_nv_max_prongs,
+        [if pi0_readmit_retyped then 'pi0_readmit_retyped']: true,
+        [if pi0_admit_type3 then 'pi0_admit_type3']: true,
+        [if pi0_crumb_assoc_mev != null then 'pi0_crumb_assoc_mev']: pi0_crumb_assoc_mev,
+        [if pi0_nv_max_vtx_shift_cm != null then 'pi0_nv_max_vtx_shift_cm']: pi0_nv_max_vtx_shift_cm,
+        [if pi0_nv_mass_window_mev != null then 'pi0_nv_mass_window_mev']: pi0_nv_mass_window_mev,
+        [if pi0_collinear_merge_deg != null then 'pi0_collinear_merge_deg']: pi0_collinear_merge_deg,
+        [if pi0_nv_partner_min_mev != null then 'pi0_nv_partner_min_mev']: pi0_nv_partner_min_mev,
+        [if shower_em_collinear_deg != null then 'shower_em_collinear_deg']: shower_em_collinear_deg,
+        [if shower_em_collinear_dis_cm != null then 'shower_em_collinear_dis_cm']: shower_em_collinear_dis_cm,
+        [if shower_em_collinear_host_mev != null then 'shower_em_collinear_host_mev']: shower_em_collinear_host_mev,
+        [if shower_em_backext_perp_cm != null then 'shower_em_backext_perp_cm']: shower_em_backext_perp_cm,
+        [if shower_em_backext_len_cm != null then 'shower_em_backext_len_cm']: shower_em_backext_len_cm,
+        [if pi0_accept_merge_dis_cm != null then 'pi0_accept_merge_dis_cm']: pi0_accept_merge_dis_cm,
+        [if pi0_bp_vertex_miss_cm != null then 'pi0_bp_vertex_miss_cm']: pi0_bp_vertex_miss_cm,
+        [if pi0_admit_muon_showers then 'pi0_admit_muon_showers']: true,
+        [if pi0_nc_sig_angle_deg != null then 'pi0_nc_sig_angle_deg']: pi0_nc_sig_angle_deg,
+        [if pi0_nc_floor_mev != null then 'pi0_nc_floor_mev']: pi0_nc_floor_mev,
+        [if pi0_nc_pf_assoc_deg != null then 'pi0_nc_pf_assoc_deg']: pi0_nc_pf_assoc_deg,
+        [if pi0_nc_frag_merge then 'pi0_nc_frag_merge']: true,
+        [if pi0_pf_assoc_deg != null then 'pi0_pf_assoc_deg']: pi0_pf_assoc_deg,
+        [if pi0_prefer_main_vertex then 'pi0_prefer_main_vertex']: true,
+        [if shower_pass4_prune_gap2 != 0 then 'shower_pass4_prune_gap2']: shower_pass4_prune_gap2,
+        [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_ang != 40 then 'shower_pass4_prune2_ang']: shower_pass4_prune2_ang,
+        [if shower_pass4_prune_gap2 != 0 && shower_pass4_prune2_mdqdx != 2.5 then 'shower_pass4_prune2_mdqdx']: shower_pass4_prune2_mdqdx,
+        [if shower_pass3_cone_guard_len != 0 then 'shower_pass3_cone_guard_len']: shower_pass3_cone_guard_len,
+        [if shower_samevtx_track_absorb then 'shower_samevtx_track_absorb']: true,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_gap != 6 then 'shower_samevtx_absorb_gap']: shower_samevtx_absorb_gap,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_max_len != 50 then 'shower_samevtx_absorb_max_len']: shower_samevtx_absorb_max_len,
+        [if shower_samevtx_track_absorb && shower_samevtx_absorb_min_len != 5 then 'shower_samevtx_absorb_min_len']: shower_samevtx_absorb_min_len,
+        [if shower_satellite_absorb then 'shower_satellite_absorb']: true,
+        [if shower_satellite_absorb && shower_satellite_absorb_max_mev != 10 then 'shower_satellite_absorb_max_mev']: shower_satellite_absorb_max_mev,
+        [if shower_satellite_absorb && shower_satellite_absorb_host_mev != 20 then 'shower_satellite_absorb_host_mev']: shower_satellite_absorb_host_mev,
+        [if shower_split then 'shower_split']: true,
+        [if shower_split && shower_split_max_valley != 0.95 then 'shower_split_max_valley']: shower_split_max_valley,
+        [if shower_split && shower_split_min_frac != 0.03 then 'shower_split_min_frac']: shower_split_min_frac,
+        [if shower_split && shower_split_max_parts != 2 then 'shower_split_max_parts']: shower_split_max_parts,
+        [if shower_split && shower_split_min_charge != 1e6 then 'shower_split_min_charge']: shower_split_min_charge,
+        [if shower_split && shower_split_min_nseg != 3 then 'shower_split_min_nseg']: shower_split_min_nseg,
+        [if shower_split && shower_split_bundle_gap != 4 then 'shower_split_bundle_gap']: shower_split_bundle_gap,
+        [if shower_split && shower_split_snap != 0.80 then 'shower_split_snap']: shower_split_snap,
+        // doc pr/139 phase 1 -- key-suppression idiom: nothing is emitted while
+        // each knob holds its shipped default, so the compiled JSON does not move.
+        [if shower_split && shower_split_skip_shared then 'shower_split_skip_shared']: true,
+        [if shower_split && shower_split_skip_shared && shower_split_shed_shared then 'shower_split_shed_shared']: true,
+        [if shower_split && shower_split_max_seeds != 4 then 'shower_split_max_seeds']: shower_split_max_seeds,
+        [if shower_split && shower_split_em_type_max_len != 0 then 'shower_split_em_type_max_len']: shower_split_em_type_max_len,
+        [if shower_split && shower_split_max_impact != 0 then 'shower_split_max_impact']: shower_split_max_impact,
+        [if shower_split && shower_split_em_start then 'shower_split_em_start']: true,
+        [if shower_split && shower_split_rehome then 'shower_split_rehome']: true,
+        [if shower_split && shower_split_rehome && shower_split_rehome_gap != 4 then 'shower_split_rehome_gap']: shower_split_rehome_gap,
+        [if shower_pass4_prefilter_v1_escape then 'shower_pass4_prefilter_v1_escape']: true,
+        [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_v2 != 0 then 'shower_pass4_prefilter_v1_max_v2']: shower_pass4_prefilter_v1_max_v2,
+        [if shower_pass4_prefilter_v1_escape && shower_pass4_prefilter_v1_max_dis != 0 then 'shower_pass4_prefilter_v1_max_dis']: shower_pass4_prefilter_v1_max_dis,
+        [if (if kine_charge_dedup == null then false else kine_charge_dedup) then 'kine_charge_dedup']: true,
+        [if (if kine_charge_rebuild == null then false else kine_charge_rebuild) then 'kine_charge_rebuild']: true,
+        [if (if kine_charge_track_ctx == null then false else kine_charge_track_ctx) then 'kine_charge_track_ctx']: true,
+        [if (if kine_mass_rules == null then false else kine_mass_rules) then 'kine_mass_rules']: true,
+        [if (if kine_hadronic_dqdx == null then false else kine_hadronic_dqdx) then 'kine_hadronic_dqdx']: true,
+        [if kine_long_muon_mode != null then 'kine_long_muon_mode']: kine_long_muon_mode,
+        [if kine_long_muon_ratio_lo != null then 'kine_long_muon_ratio_lo']: kine_long_muon_ratio_lo,
+        [if kine_long_muon_ratio_hi != null then 'kine_long_muon_ratio_hi']: kine_long_muon_ratio_hi,
+        [if long_muon_range_empty_chain_fallback then 'long_muon_range_empty_chain_fallback']: true,  // doc 84 r1 P1; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_members_geometry then 'long_muon_members_geometry']: true,  // doc 84 r2; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge then 'long_muon_cathode_bridge']: true,  // doc 84 r2; C++ default false. Key omitted when off => byte-identical.
+        [if long_muon_cathode_bridge_x != null then 'long_muon_cathode_bridge_x']: long_muon_cathode_bridge_x,  // doc 84 r2; C++ default 0.0 cm
+        [if long_muon_cathode_bridge_xcut != null then 'long_muon_cathode_bridge_xcut']: long_muon_cathode_bridge_xcut,  // doc 84 r2; C++ default 6.0 cm
+        [if long_muon_cathode_bridge_gap != null then 'long_muon_cathode_bridge_gap']: long_muon_cathode_bridge_gap,  // doc 84 r2; C++ default 20.0 cm
+        [if long_muon_cathode_bridge_angle != null then 'long_muon_cathode_bridge_angle']: long_muon_cathode_bridge_angle,  // doc 84 r2; C++ default 25.0 deg
+        [if long_muon_cathode_bridge_lever != null then 'long_muon_cathode_bridge_lever']: long_muon_cathode_bridge_lever,  // doc 84 r4 G1; C++ default 5.0 cm
+        [if long_muon_cathode_bridge_track_partner != null then 'long_muon_cathode_bridge_track_partner']: long_muon_cathode_bridge_track_partner,  // doc 84 r4 G2; C++ default false
+        [if long_muon_cathode_bridge_short_gap != null then 'long_muon_cathode_bridge_short_gap']: long_muon_cathode_bridge_short_gap,  // doc 84 r4 G3; C++ default 0.0 cm = off
+        [if long_muon_cathode_bridge_short_gap_angle != null then 'long_muon_cathode_bridge_short_gap_angle']: long_muon_cathode_bridge_short_gap_angle,  // doc 84 r4 G3; C++ default 10.0 deg
+        [if long_muon_cathode_bridge_short_gap_len != null then 'long_muon_cathode_bridge_short_gap_len']: long_muon_cathode_bridge_short_gap_len,  // doc 84 r4 G3; C++ default 50.0 cm
+        [if (if kine_mainvtx_used_guard == null then false else kine_mainvtx_used_guard) then 'kine_mainvtx_used_guard']: true,
+        [if (if shower_hadronic_tag == null then false else shower_hadronic_tag) then 'shower_hadronic_tag']: true,
+        [if shower_hadronic_min_len != null then 'shower_hadronic_min_len']: shower_hadronic_min_len,
+        [if shower_hadronic_scan_len != null then 'shower_hadronic_scan_len']: shower_hadronic_scan_len,
+        [if shower_hadronic_bin != null then 'shower_hadronic_bin']: shower_hadronic_bin,
+        [if shower_hadronic_r_cyl != null then 'shower_hadronic_r_cyl']: shower_hadronic_r_cyl,
+        [if shower_hadronic_r_core != null then 'shower_hadronic_r_core']: shower_hadronic_r_core,
+        [if shower_hadronic_growth_max != null then 'shower_hadronic_growth_max']: shower_hadronic_growth_max,
+        [if shower_hadronic_growth_bragg != null then 'shower_hadronic_growth_bragg']: shower_hadronic_growth_bragg,
+        [if shower_hadronic_bragg_ratio != null then 'shower_hadronic_bragg_ratio']: shower_hadronic_bragg_ratio,
+        [if shower_hadronic_stem_ratio != null then 'shower_hadronic_stem_ratio']: shower_hadronic_stem_ratio,
+        [if kine_count_orphan_tracks then 'kine_count_orphan_tracks']: true,
+        [if kine_orphan_track_min != null then 'kine_orphan_track_min']: kine_orphan_track_min,
+        [if kine_count_guard_freed then 'kine_count_guard_freed']: true,  // doc pr/123 r2
+        // doc pr/129: pointing test on the guard-freed pool.  C++ default 0 =
+        // no test => key omitted when off => byte-identical pre-fix config.
+        [if kine_guard_freed_impact != 0 then 'kine_guard_freed_impact']: kine_guard_freed_impact,
+        [if kine_guard_freed_impact != 0 then 'kine_guard_freed_miss_deg']: kine_guard_freed_miss_deg,
+        // doc pr/128; params in cm (the C++ scales them by units::cm at copy).
+        [if kine_count_near_cross_cluster then 'kine_count_near_cross_cluster']: true,
+        [if kine_near_gap_cm != null then 'kine_near_gap']: kine_near_gap_cm,
+        [if kine_near_min_len_cm != null then 'kine_near_min_len']: kine_near_min_len_cm,
+        [if kine_near_end_tol_cm != null then 'kine_near_end_tol']: kine_near_end_tol_cm,
+        [if kine_near_kink_deg != null then 'kine_near_kink_deg']: kine_near_kink_deg,
+        [if kine_count_conn4_near then 'kine_count_conn4_near']: true,
+        [if kine_conn4_near_gap_cm != null then 'kine_conn4_near_gap']: kine_conn4_near_gap_cm,
+        [if straight_cont_cross_cluster then 'straight_cont_cross_cluster']: true,
+        [if sccc_bridge_body then 'sccc_bridge_body']: true,
+        [if sccc_max_gap != null then 'sccc_max_gap']: sccc_max_gap,
+        [if sccc_kink_max != null then 'sccc_kink_max']: sccc_kink_max,
+        [if sccc_gap_aligned != null then 'sccc_gap_aligned']: sccc_gap_aligned,
+        [if sccc_kink_tight != null then 'sccc_kink_tight']: sccc_kink_tight,
+        [if single_muon_proton_chain_veto then 'single_muon_proton_chain_veto']: true,
+        [if single_muon_long_muon_claim then 'single_muon_long_muon_claim']: true,
+        [if pid_flag_reconcile then 'pid_flag_reconcile']: true,
+        [if other_seg_empty_2d_guard then 'other_seg_empty_2d_guard']: true,
+        [if long_muon_stub_bridge then 'long_muon_stub_bridge']: true,
+        [if long_muon_stub_bridge_len != null then 'long_muon_stub_bridge_len']: long_muon_stub_bridge_len,  // doc 84 r1 P3; C++ default 6.0 cm
+        [if long_muon_angle_relax_long then 'long_muon_angle_relax_long']: true,  // doc 84 r1 P2; C++ default false
+        [if long_muon_angle_relax_deg != null then 'long_muon_angle_relax_deg']: long_muon_angle_relax_deg,  // doc 84 r1 P2; C++ default 16.0 deg
+        [if two_end_break then 'two_end_break']: true,
+        [if teb_turn_min_arm_frac != null then 'teb_turn_min_arm_frac']: teb_turn_min_arm_frac,
+        [if teb_bragg_veto_turn != null then 'teb_bragg_veto_turn']: teb_bragg_veto_turn,
+        [if kink_walk_dqdx_stop then 'kink_walk_dqdx_stop']: true,
+        [if kink_break_protect then 'kink_break_protect']: true,
+        [if fit_blob_coverage != null then 'fit_blob_coverage']: fit_blob_coverage,
+        [if fit_blob_coverage_defer then 'fit_blob_coverage_defer']: true,
+        [if vertex_kink_snap then 'vertex_kink_snap']: true,
+        [if vks_radius != null then 'vks_radius']: vks_radius,
+        [if vks_min_dis != null then 'vks_min_dis']: vks_min_dis,
+        [if vks_angle != null then 'vks_angle']: vks_angle,
+        [if vks_margin != null then 'vks_margin']: vks_margin,
+        [if vks_collinear != null then 'vks_collinear']: vks_collinear,
+        [if vks_skirt != null then 'vks_skirt']: vks_skirt,
+        [if vks_baseline != null then 'vks_baseline']: vks_baseline,
+        [if vks_min_arm != null then 'vks_min_arm']: vks_min_arm,
+        [if vks_fit_miss != null then 'vks_fit_miss']: vks_fit_miss,
+        [if vks_hot_ratio != null then 'vks_hot_ratio']: vks_hot_ratio,
+        [if vks_carry_prong != null then 'vks_carry_prong']: vks_carry_prong,
+        [if vertex_junction_snap then 'vertex_junction_snap']: true,
+        [if vjs_radius != null then 'vjs_radius']: vjs_radius,
+        [if vjs_min_arm != null then 'vjs_min_arm']: vjs_min_arm,
+        [if vjs_min_prongs != null then 'vjs_min_prongs']: vjs_min_prongs,
+        [if vjs_collinear != null then 'vjs_collinear']: vjs_collinear,
+        [if vjs_fit_margin != null then 'vjs_fit_margin']: vjs_fit_margin,
+        [if vjs_fit_rms != null then 'vjs_fit_rms']: vjs_fit_rms,
+        [if vjs_override_kink_snap then 'vjs_override_kink_snap']: true,
+        [if vjs_min_move != null then 'vjs_min_move']: vjs_min_move,
+        [if esva_ignore_empty_2d then 'esva_ignore_empty_2d']: true,
+        [if main_vertex_graph_audit then 'main_vertex_graph_audit']: true,
+        [if mvga_radius != null then 'mvga_radius']: mvga_radius,
+        [if mvga_dup_tol != null then 'mvga_dup_tol']: mvga_dup_tol,
+        [if mvga_dup_frac != null then 'mvga_dup_frac']: mvga_dup_frac,
+        [if mvga_dup_angle != null then 'mvga_dup_angle']: mvga_dup_angle,
+        [if mvga_bridge_mip != null then 'mvga_bridge_mip']: mvga_bridge_mip,
+        [if mvga_reconnect != null then 'mvga_reconnect']: mvga_reconnect,
+        [if mvga_stub != null then 'mvga_stub']: mvga_stub,
+        [if mvga_stub_pts != null then 'mvga_stub_pts']: mvga_stub_pts,
+        [if mvga_reseat_angle != null then 'mvga_reseat_angle']: mvga_reseat_angle,
+        [if mvga_satellite != null then 'mvga_satellite']: mvga_satellite,
+        [if mvga_interposed then 'mvga_interposed']: true,
+        [if mvga_interposed_angle != null then 'mvga_interposed_angle']: mvga_interposed_angle,
+        [if mvga_interposed_len != null then 'mvga_interposed_len']: mvga_interposed_len,
+        [if mvga_sat_dup_frac != null then 'mvga_sat_dup_frac']: mvga_sat_dup_frac,
+        [if mvga_interposed_deg1 then 'mvga_interposed_deg1']: true,
+        [if mvga_splice_straighten != null then 'mvga_splice_straighten']: mvga_splice_straighten,
+        [if mvga_approach_collapse != null then 'mvga_approach_collapse']: mvga_approach_collapse,
+        [if mvga_straighten_radius != null then 'mvga_straighten_radius']: mvga_straighten_radius,
+        [if mvga_op1_radius != null then 'mvga_op1_radius']: mvga_op1_radius,
+        [if mvga_op1_dup_frac != null then 'mvga_op1_dup_frac']: mvga_op1_dup_frac,
+        [if mvga_op1_post then 'mvga_op1_post']: true,
+        [if swap_orphan_dup_audit then 'swap_orphan_dup_audit']: true,
+        [if mvga_proj_dup_frac != null then 'mvga_proj_dup_frac']: mvga_proj_dup_frac,
+        [if mvga_proj_dqdx_ratio != null then 'mvga_proj_dqdx_ratio']: mvga_proj_dqdx_ratio,
+        [if mvga_proj_angle != null then 'mvga_proj_angle']: mvga_proj_angle,
+        [if mvga_ac_chord_max != null then 'mvga_ac_chord_max']: mvga_ac_chord_max,
+        [if mvga_ac_no_cascade then 'mvga_ac_no_cascade']: true,
+        [if mvga_passthru != null then 'mvga_passthru']: mvga_passthru,
+        [if mvga_passthru_tol != null then 'mvga_passthru_tol']: mvga_passthru_tol,
+        [if mvga_interposed_fallback then 'mvga_interposed_fallback']: true,
+        [if mvga_interposed_fallback_min_angle != null then 'mvga_interposed_fallback_min_angle']: mvga_interposed_fallback_min_angle,
+        [if mvga_dup_starved_asym != null then 'mvga_dup_starved_asym']: mvga_dup_starved_asym,
+        [if mvga_dup_starved_mip != null then 'mvga_dup_starved_mip']: mvga_dup_starved_mip,
+        [if mvga_dup_starved_span != null then 'mvga_dup_starved_span']: mvga_dup_starved_span,
+        [if dl_vtx_cloud_no_exclusion then 'dl_vtx_cloud_no_exclusion']: true,
+        [if dl_vtx_dual_chain then 'dl_vtx_dual_chain']: true,
+        [if dual_chain_mode != null then 'dual_chain_mode']: dual_chain_mode,
+        [if dual_chain_transfer then 'dual_chain_transfer']: true,
+        [if dual_chain_transfer_max != null then 'dual_chain_transfer_max']: dual_chain_transfer_max,
+        [if dual_chain_allow_cluster_swap != null then 'dual_chain_allow_cluster_swap']: dual_chain_allow_cluster_swap,
+        [if dual_chain_vtx_weight != null then 'dual_chain_vtx_weight']: dual_chain_vtx_weight,
+        [if dqdx_fit_keep_all_points then 'dqdx_fit_keep_all_points']: true,
+        [if excl_t0_frame then 'excl_t0_frame']: true,   // doc pdhd/03
+        [if main_vertex_swap_apply then 'main_vertex_swap_apply']: true,
+        [if rough_path_probe then 'rough_path_probe']: true,
+        [if steiner_gap_penalty != null then 'steiner_gap_penalty']: steiner_gap_penalty,
+        [if sgp_dead_alpha != null then 'sgp_dead_alpha']: sgp_dead_alpha,
+        [if sgp_min_edge != null then 'sgp_min_edge']: sgp_min_edge,
+        [if sgp_sample_step != null then 'sgp_sample_step']: sgp_sample_step,
+        [if sgp_point_radius != null then 'sgp_point_radius']: sgp_point_radius,
+        [if good_point_pitch_frac != null then 'good_point_pitch_frac']: good_point_pitch_frac,
+        [if sgp_weak_scale != null then 'sgp_weak_scale']: sgp_weak_scale,
+        [if sgp_weak_qref != null then 'sgp_weak_qref']: sgp_weak_qref,
+        [if sgp_edge_probe then 'sgp_edge_probe']: true,
+        [if sgp_max_sep != null then 'sgp_max_sep']: sgp_max_sep,
+        [if break_seg_orient then 'break_seg_orient']: true,
+        [if vertex_scoreboard then 'vertex_scoreboard']: true,
+        [if dl_vtx_harvest then 'dl_vtx_harvest']: true,
+        [if mvfit_robust then 'mvfit_robust']: mvfit_robust,
+        [if mvfit_main_only != null then 'mvfit_main_only']: mvfit_main_only,
+        [if mvfit_min_len != null then 'mvfit_min_len']: mvfit_min_len,
+        [if mvfit_rin_margin != null then 'mvfit_rin_margin']: mvfit_rin_margin,
+        [if mvfit_rout_frac != null then 'mvfit_rout_frac']: mvfit_rout_frac,
+        [if mvfit_rout_min != null then 'mvfit_rout_min']: mvfit_rout_min,
+        [if mvfit_rout_max != null then 'mvfit_rout_max']: mvfit_rout_max,
+        [if mvfit_angle != null then 'mvfit_angle']: mvfit_angle,
+        [if mvfit_min_pts != null then 'mvfit_min_pts']: mvfit_min_pts,
+        [if mvfit_min_aniso != null then 'mvfit_min_aniso']: mvfit_min_aniso,
+        [if mvfit_prior_range != null then 'mvfit_prior_range']: mvfit_prior_range,
+        [if other_seg_keep_isolated then 'other_seg_keep_isolated']: true,
+        [if other_seg_keep_isolated_min_points != null then 'other_seg_keep_isolated_min_points']: other_seg_keep_isolated_min_points,
+        [if other_seg_keep_isolated_min_length != null then 'other_seg_keep_isolated_min_length']: other_seg_keep_isolated_min_length,
+        [if other_seg_keep_isolated_len_admit != null then 'other_seg_keep_isolated_len_admit']: other_seg_keep_isolated_len_admit,
+        [if iso_snap_min_dir_mag != null then 'iso_snap_min_dir_mag']: iso_snap_min_dir_mag,
+        [if shower_absorb_unreachable_main then 'shower_absorb_unreachable_main']: true,
+        [if assoc_full_recluster then 'assoc_full_recluster']: true,
+        [if assoc_reassign_orphans then 'assoc_reassign_orphans']: true,
+        [if assoc_clear_on_merge then 'assoc_clear_on_merge']: true,
+        [if es3_stub_guard then 'es3_stub_guard']: true,
+        [if es3sg_stub_max != null then 'es3sg_stub_max']: es3sg_stub_max,
+        [if es3sg_len_ratio != null then 'es3sg_len_ratio']: es3sg_len_ratio,
+        [if es3sg_ang3_min != null then 'es3sg_ang3_min']: es3sg_ang3_min,
+        [if es3sg_ang_ratio != null then 'es3sg_ang_ratio']: es3sg_ang_ratio,
+        [if es3sg_require_terminal != null then 'es3sg_require_terminal']: es3sg_require_terminal,
+        [if reclass_never_computed_ke_floor then 'reclass_never_computed_ke_floor']: true,
+        [if muon_dqdx_curve != null then 'muon_dqdx_curve']: muon_dqdx_curve,
+        [if sp_dedx_use_recomb_model then 'sp_dedx_use_recomb_model']: true,
+        [if sp_mean_dedx_cut != null then 'sp_mean_dedx_cut']: sp_mean_dedx_cut,
+        [if dl_vtx_cut != null then 'dl_vtx_cut']: dl_vtx_cut,
+    };
+
+    local pr = clus_maker.pr(anodes, dump=true,
+                             nticks=readout_window_ticks,
+                             flag_mains_min_length=flag_mains_min_cm * wc.cm,
+                             flag_mains_unmatched=flag_mains_unmatched,   // doc pdvd/101
+                             retile_sampler_half_pitch=retile_sampler_half_pitch,   // doc pdvd/101
+                             retile_sampler_min_step=retile_sampler_min_step,
+                             retile_sampler_strategy=retile_sampler_strategy,   // doc pdvd/102
+                             retile_sampler_wire_product=retile_sampler_wire_product,
+                             retile_sampler_charge_threshold=retile_sampler_charge_threshold,
+                             retile_mode=retile_mode,   // doc pdvd/113
+                             mip_dqdx_median=mip_dqdx_median,
+                             pipeline_names=pipeline_names,
+                             stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdhd/03; + doc pdvd/51 override bag
+                             tensor_outname=save_tensors,
+                             save_in_scope=save_in_scope,
+                             pr_bee=pr_bee,
+                             trackfitting_config_file=trackfitting_config,
+                             ctpc_aniso_metric=ctpc_aniso_metric,  // doc pdvd/36
+                             particle_dataset=pds.particle_dataset,
+                             extra_uses=pds.all,
+                             dl_weights=dl_weights,
+                             dl_vtx_min_accept_score=dl_vtx_min_accept_score,
+                             dl_vtx_top_k=dl_vtx_top_k,
+                             dl_vtx_rerank=dl_vtx_rerank,
+                             beam_window=[t * wc.us for t in beam_window_us],
+                             beam_window_only=beam_window_only,
+                             tgm_neutrino_candidate=tgm_neutrino_candidate,
+                             tgm_chord_charge=tgm_chord_charge,
+                             tgm_chord_mode=tgm_chord_mode,
+                             tgm_component_extremes=tgm_component_extremes,
+                             tgm_component_rescue=tgm_component_rescue,
+                             tgm_rescue_chord=tgm_rescue_chord,
+                             tgm_main_pair=tgm_main_pair,
+                             tgm_main_pair_mode=tgm_main_pair_mode,
+                             tgm_fv_zmax_margin=tgm_fv_zmax_margin,
+                             tgm_fv_zmax_margin_interior=tgm_fv_zmax_margin_interior,
+                             tgm_fv_x_margin=tgm_fv_x_margin,
+                             tgm_fv_y_margin=tgm_fv_y_margin,
+                             tgm_fv_zmin_margin=tgm_fv_zmin_margin,
+                             // doc pdhd/09: the curved (space-charge) fiducial surface.
+                             curved_fv=curved_fv,
+                             curved_fv_margin_y=curved_fv_margin_y,
+                             curved_fv_margin_z=curved_fv_margin_z,
+                             curved_fv_profile=curved_fv_profile,
+                             save_stm_fit=save_stm_fit,
+                             stm_rough_path_require_connected=stm_rough_path_require_connected,
+                             pf_track_main_cluster_only=pf_track_main_cluster_only,
+                             pf_track_bridged_clusters=pf_track_bridged_clusters,
+                             pf_shower_vertex_barrier=pf_shower_vertex_barrier,
+                             pf_shower_parent_precedence=pf_shower_parent_precedence,
+                             pf_pi0_node_per_id=pf_pi0_node_per_id,
+                             pf_pdg_name_prototype_fallback=pf_pdg_name_prototype_fallback,
+                             pf_orphan_track_parentage=pf_orphan_track_parentage,
+                             pf_orphan_audit_only=pf_orphan_audit_only,
+                             pf_direct_when_touching=pf_direct_when_touching,
+                             pf_touch_max=pf_touch_max,
+                             pf_pseudo_gap_from_main=pf_pseudo_gap_from_main,
+                             pf_unique_node_ids=pf_unique_node_ids,
+                             pf_drop_stray_satellites=pf_drop_stray_satellites,
+                             pf_orphan_confident_track=pf_orphan_confident_track,
+                             pf_orphan_track_min_cm=pf_orphan_track_min_cm,
+                             pf_orphan_guard_freed=pf_orphan_guard_freed,
+                             pf_orphan_near_cross_cluster=pf_orphan_near_cross_cluster,
+                             pf_orphan_near_gap_cm=pf_orphan_near_gap_cm,
+                             pf_orphan_near_min_len_cm=pf_orphan_near_min_len_cm,
+                             pf_orphan_near_end_tol_cm=pf_orphan_near_end_tol_cm,
+                             pf_orphan_near_kink_deg=pf_orphan_near_kink_deg,
+                             pf_conn4_near_candidate=pf_conn4_near_candidate,
+                             pf_conn4_near_gap_cm=pf_conn4_near_gap_cm,
+                             pf_track_owns_loose_vertex=pf_track_owns_loose_vertex,
+                             unmerge_bundle_mode=unmerge_bundle_mode,
+                             restore_demoted_mains=restore_demoted_mains,
+                             require_provenance=require_provenance,
+                             evaluate_demoted_mains=evaluate_demoted_mains,
+                             tgm_exempt_demoted_main=tgm_exempt_demoted_main,
+                             mip_dqdx=mip_dqdx,
+                             stm_consistent_fv=stm_consistent_fv,
+                             stm_accept_guards=stm_accept_guards,
+                             stm_proton_muon_guard=stm_proton_muon_guard,
+                             stm_cathode_guard=stm_cathode_guard,
+                             stm_cathode_guard_cm=stm_cathode_guard_cm,
+                             stm_readout_edge_guard=stm_readout_edge_guard,
+                             stm_readout_edge_ticks=stm_readout_edge_ticks,
+                             steiner_terminal_charge=steiner_terminal_charge,
+                             retile_wrapped_channel_activity=retile_wrapped_channel_activity,
+                             retile_steiner_terminal_charge=retile_steiner_terminal_charge,
+                             retile_bad_blob_max_run=retile_bad_blob_max_run,
+                             retile_bad_blob_report=retile_bad_blob_report,
+                             retile_hack_max_bridge=retile_hack_max_bridge,
+                             retile_bad_blob_run_merge=retile_bad_blob_run_merge,
+                             stm_anode_dist_fix=stm_anode_dist_fix,
+                             stm_second_track_guard=stm_second_track_guard,
+                             stm_deficit_guard=stm_deficit_guard,
+                             stm_vertex_kink_guard=stm_vertex_kink_guard,
+                             stm_kink_asym_enable=stm_kink_asym_enable,
+                             stm_kink_asym_entry_mip=stm_kink_asym_entry_mip,
+                             stm_kink_asym_far_mip=stm_kink_asym_far_mip,
+                             stm_descent_guard=stm_descent_guard,
+                             stm_descent_cos_y=stm_descent_cos_y,
+                             stm_descent_min_cm=stm_descent_min_cm,
+                             stm_vertex_hadron_guard=stm_vertex_hadron_guard,
+                             stm_hadron_len_cm=stm_hadron_len_cm,
+                             stm_hadron_mip=stm_hadron_mip,
+                             stm_entry_rise_guard=stm_entry_rise_guard,
+                             stm_entry_frac=stm_entry_frac,
+                             stm_entry_min_cm=stm_entry_min_cm,
+                             stm_entry_max_cm=stm_entry_max_cm,
+                             stm_entry_min_len_cm=stm_entry_min_len_cm,
+                             stm_entry_kink_deg=stm_entry_kink_deg,
+                             stm_d66_cuts=stm_d66_cuts,
+                             cathode_x=cathode_x,
+                             steiner_terminal_wire_tol=steiner_terminal_wire_tol,
+                             steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
+                             steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
+                             steiner_terminal_min_separation=steiner_terminal_min_sep_cm * wc.cm,
+                             steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
+                             steiner_blank_plane_radius=(if steiner_blank_plane_radius_cm == null then null else steiner_blank_plane_radius_cm * wc.cm),
+                             steiner_base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115
+                             steiner_base_weight_scope=steiner_base_weight_scope,
+                             steiner_skip_flags=steiner_skip_flags,
+                             protect_graph_name=protect_graph_name,
+                             protect_skip_convicted=protect_skip_convicted,
+                             protect_open_convicted_bundles=protect_open_convicted_bundles,
+                             protect_stm_only_bundles=if protect_stm_only_bundles then true else null,   // pdvd doc 25 sec 13.11; C++ default false. null => key omitted => byte-identical pre-knob config.
+                             protect_cathode_x=protect_cathode_x,
+                             protect_cathode_rejoin_xcut=protect_cathode_rejoin_xcut,
+                             protect_cathode_rejoin_dyz=protect_cathode_rejoin_dyz,
+                             protect_cathode_rejoin_dis=protect_cathode_rejoin_dis,
+                             protect_cathode_rejoin_perp=protect_cathode_rejoin_perp,
+                             protect_cathode_rejoin_angle=protect_cathode_rejoin_angle,
+                             protect_cathode_rejoin_dir_radius=protect_cathode_rejoin_dir_radius,
+                             protect_cathode_rejoin_dir_npts=protect_cathode_rejoin_dir_npts,
+                             neutrino_consistent_fv=neutrino_consistent_fv,
+                             cosmic_consistent_fv=cosmic_consistent_fv,
+                             nue_sp_consistent_fv=nue_sp_consistent_fv,
+                             neutrino_type_bitmask=neutrino_type_bitmask,
+                             nu_per_bundle=nu_per_bundle,
+                             nu_per_bundle_min_length=nu_per_bundle_min_length,
+                             mcs_enable=mcs_enable,
+                             pseudo_shower_track_paint=pseudo_shower_track_paint,
+                             use_power_recomb=use_power_recomb,
+                             stm_recomb_calibrated=stm_recomb_calibrated,   // doc pdhd/16
+                             fast_xgb_forest=fast_xgb_forest,
+                             tcn_knobs=tcn_knobs);
+
+    local graph = g.intern(
+        innodes=[source],
+        outnodes=[pr],
+        edges=[g.edge(source, pr, 0, 0)],
+    );
+
+    local app = {
+        type: 'Pgrapher',
+        data: { edges: g.edges(graph) },
+    };
+
+    // WireCellRoot hosts SbndMagnifyTrackingVisitor and the PR output
+    // components (SbndPrMagnifyTrackingVisitor, UbooneTaggerOutputVisitor,
+    // the Uboone BDT scorers).  It used to be loaded only when one of those
+    // was in the job, so the default compiled config stayed byte-identical.
+    // That is no longer possible: master commit 8d069234 ("add sce and
+    // dumper", merged here in 87ada3d5) put SCEFieldTH3 -- which lives in
+    // WireCellRoot -- unconditionally into the DetectorVolumes `uses` of
+    // pgrapher/experiment/sbnd/clus.jsonnet, so EVERY job importing that
+    // module instantiates it.  Without the plugin the job aborts at
+    // configure time with "No factory for class SCEFieldTH3" (the Q/L job
+    // never saw this because it always loads WireCellRoot).  The component
+    // is inert here -- both SBND realities set use_sce=false -- so loading
+    // the plugin only pays the SCE-map open, and no reconstruction changes.
+    // The narrower alternative is to gate that `uses` entry on use_sce in
+    // clus.jsonnet, which also moves the Q/L job's compiled config.
+    local needs_root = true;
+
+    local cmdline = {
+        type: 'wire-cell',
+        data: {
+            plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
+                      'WireCellSigProc', 'WireCellImg', 'WireCellClus']
+                     + (if needs_root then ['WireCellRoot'] else []),
+            apps: ['Pgrapher'],
+        },
+    };
+
+    [cmdline] + g.uses(graph) + [app]

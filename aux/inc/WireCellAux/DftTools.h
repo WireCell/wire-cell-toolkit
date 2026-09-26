@@ -108,30 +108,44 @@ namespace WireCell::Aux::DftTools {
     real_array_t inv_c2r_real(const IDFT::pointer& dft, const complex_array_t& spec, int axis);
 
 
-    /// Convolve in1 and in2 via DFT.  Returned vecgtor has size sum
-    /// of sizes of in1 and in2 less one element in order to assure no
-    /// periodic aliasing.  Caller need not (should not) pad either
-    /// input.  Caller is free to truncate result as required.
+    /// Linearly convolve wave1 and wave2 via DFT.  Returned vector has
+    /// size sum of sizes of wave1 and wave2 less one element in order
+    /// to assure no periodic aliasing.  Caller need not (should not)
+    /// pad either input.  Caller is free to truncate result as
+    /// required.
     real_vector_t convolve(const IDFT::pointer& dft,
                            const real_vector_t& wave1,
                            const real_vector_t& wave2);
 
 
-    /// Replace response res1 in meas with response res2.
+    /// Replace one response with another in a measured waveform.
     ///
-    /// This will compute the FFT of all three, in frequency space will form:
+    /// The waveform "meas" is taken to be some underlying signal
+    /// convolved with the response "res_old".  This returns the
+    /// waveform that would have been measured had the signal instead
+    /// been convolved with "res_new".  All three are zero-padded to a
+    /// common size, forward transformed and in frequency space this
+    /// forms:
     ///
-    ///     meas * resp2 / resp1
+    ///     FFT(meas) * FFT(res_new) / FFT(res_old)
     ///
-    /// apply the inverse FFT and return its real part.
+    /// The inverse FFT is applied and the real part returned.
+    ///
+    /// Frequency bins in which FFT(res_old) is exactly zero are left
+    /// unscaled (the ratio is taken as 1) rather than producing inf or
+    /// NaN.  No other regularization of the deconvolution is applied.
     ///
     /// The output vector is long enough to assure no periodic
     /// aliasing.  In general, caller should NOT pre-pad any input.
     /// Any subsequent truncation of result is up to caller.
+    ///
+    /// The argument order (new response before old response) follows
+    /// the legacy Waveform::replace_convolve(wave, newres, oldres) and
+    /// the callers Gen::Misconfigure and Gen::PerChannelVariation.
     real_vector_t replace(const IDFT::pointer& dft,
                           const real_vector_t& meas,
-                          const real_vector_t& res1,
-                          const real_vector_t& res2);
+                          const real_vector_t& res_new,
+                          const real_vector_t& res_old);
 
 
 

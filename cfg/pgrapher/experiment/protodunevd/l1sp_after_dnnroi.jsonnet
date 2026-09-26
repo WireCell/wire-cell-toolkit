@@ -57,7 +57,12 @@ function(anode, sp_pipe, dnnroi_pipe, tools, params,
          // runner's --loose-heur preset when running heuristic on DNN ROIs.
          l1sp_pd_gmax_min=1500.0,
          l1sp_pd_min_length=30,
-         l1sp_pd_energy_frac_thr=0.66)
+         l1sp_pd_energy_frac_thr=0.66,
+         // Top (TDE, n >= 4) electronics charge-scale constant; same
+         // semantics and same value as protodunevd/sp.jsonnet make_sigproc's
+         // top_gain_scale (it must be passed to both).  Default 1.0 = legacy
+         // top gain_scale => compiled config byte-identical.
+         top_gain_scale=1.0)
 
   local n = anode.data.ident;
   local sfx = if n < 4 then '_b' else '_t';
@@ -82,7 +87,7 @@ function(anode, sp_pipe, dnnroi_pipe, tools, params,
   // protodunevd/sp.jsonnet:165-167.
   local gain_scale = if n < 4
                      then params.elec.gain / (7.8 * wc.mV / wc.fC)
-                     else 1.0;
+                     else top_gain_scale;  // legacy 1.0
   local kernels_file = if n < 4
                        then 'pdvd_bottom_l1sp_kernels.json.bz2'
                        else 'pdvd_top_l1sp_kernels.json.bz2';

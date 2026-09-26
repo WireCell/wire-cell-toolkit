@@ -225,6 +225,9 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     // the precedence rule.  Default false => compiled config byte-identical.
     m_rse_from_metadata = get(cfg, "rse_from_metadata", m_rse_from_metadata);
 
+    // sbnd_xin/docs/110 -- restart the shower-id counter per event (see the header).
+    m_reset_shower_ids_per_event = get(cfg, "reset_shower_ids_per_event", m_reset_shower_ids_per_event);
+
     // Same, but keep the configured run/subrun -- with an optional per-ident
     // override table, because a group of events can span several runs.
     m_event_from_ident = get(cfg, "event_from_ident", m_event_from_ident);
@@ -260,6 +263,18 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     }
     m_bee_flash_per_flash = get(cfg, "bee_flash_per_flash", m_bee_flash_per_flash);
     m_bee_flash_pred_min = get(cfg, "bee_flash_pred_min", m_bee_flash_pred_min);
+    // doc pdvd/119: optional in-beam flash label window [lo, hi] (us, op_t axis).
+    // Absent => no op_beam array (byte-identical op JSON).
+    m_bee_beam_window_us.clear();
+    if (cfg.isMember("bee_beam_window_us")) {
+        const auto& jw = cfg["bee_beam_window_us"];
+        if (!jw.isArray() || jw.size() != 2 || !(jw[0].asDouble() <= jw[1].asDouble())) {
+            THROW(ValueError() << errmsg{"MultiAlgBlobClustering: bee_beam_window_us must be [lo, hi] with lo <= hi"});
+        }
+        m_bee_beam_window_us = {jw[0].asDouble(), jw[1].asDouble()};
+        log->debug("in-beam flash label window [{}, {}] us on op_t", jw[0].asDouble(), jw[1].asDouble());
+    }
+    m_bee_flash_cluster_anodes = get(cfg, "bee_flash_cluster_anodes", m_bee_flash_cluster_anodes);
     m_flash_group_window = get(cfg, "flash_group_window", m_flash_group_window);
     m_flash_group_greedy = get(cfg, "flash_group_greedy", m_flash_group_greedy);
 
@@ -397,6 +412,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
             // Prototype-parity options; absent => legacy output, byte-identical.
             pfc.prototype_names = get<bool>(pf, "prototype_names", false);
             pfc.em_ke_min = get<double>(pf, "em_ke_min", 0.0);
+            pfc.ke_decimal_below = get<double>(pf, "ke_decimal_below", 0.0);   // doc pdvd/51
             pfc.np_ke_min = get<double>(pf, "np_ke_min", 0.0);
             // doc pr/34 §10 port-fidelity knobs; absent => legacy, byte-identical.
             pfc.merge_metadata_key = get<std::string>(pf, "merge_metadata_key", "");
@@ -535,6 +551,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["eventNo"] = m_eventNo;
     cfg["rse_from_ident"] = m_rse_from_ident;
     cfg["event_from_ident"] = m_event_from_ident;
+    cfg["reset_shower_ids_per_event"] = m_reset_shower_ids_per_event;  // sbnd_xin/docs/110
     // UNION, not either/or: upstream's ident-based sources and our
     // metadata-based source coexist (issue 13 G3).  The 1-step LArSoft chain
     // gets its RSE from wclsTensorSetMetadataAttacher; the standalone driver
@@ -2162,6 +2179,14 @@ void MultiAlgBlobClustering::fill_bee_pf_tree(const BeePFConfig& cfg,
         // prototype_names: integer MeV like the prototype's
         // WCReader::MCJSON ("int e = KE(...)*1000").  Legacy: "%.2f".
         if (cfg.prototype_names) {
+            // doc pdvd/51: an integer MeV label reads "0" for everything below
+            // 1 MeV.  ke_decimal_below 0 (the default) keeps the prototype's
+            // formatting for every energy.
+            if (cfg.ke_decimal_below > 0.0 && energy < cfg.ke_decimal_below) {
+                char sbuf[32];
+                std::snprintf(sbuf, sizeof(sbuf), "%.2f", energy / units::MeV);
+                return std::string(sbuf);
+            }
             return std::to_string(static_cast<int>(energy / units::MeV));
         }
         char buf[32];
@@ -3597,6 +3622,7 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // enumeration (this runs at the same pre-pipeline point), so the Bee viewer
     // associates each flash to the same physical charge cluster.
     std::map<int, std::vector<std::pair<int, std::vector<double>>>> matched;
+    std::map<int, int> cluster_anode;   // cluster id -> anode (bee_flash_cluster_anodes)
     for (const auto* cluster : grouping.children()) {
         const int mgid = cluster->get_scalar<int>("matched_flash_gid", -1);
         if (mgid < 0) continue;
@@ -3621,6 +3647,19 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                       pred_tot >= 100);
         }
         if (pred_tot < m_bee_flash_pred_min) continue;
+        if (m_bee_flash_cluster_anodes) {
+            // doc pdvd/119 sec 8: the anode holding most of the cluster's blobs
+            // (ties -> the lowest ident; int-keyed map, deterministic).
+            std::map<int, int> nblob;
+            for (const auto& wpid : cluster->wpids_blob()) ++nblob[wpid.apa()];
+            int best = -1, nbest = 0;
+            for (const auto& an : nblob) {
+                if (an.second > nbest) { nbest = an.second; best = an.first; }
+            }
+            cluster_anode[cluster->get_cluster_id()] = best;
+            log->debug("op cluster {} anode {} ({} of {} blobs)", cluster->get_cluster_id(), best,
+                       nbest, cluster->nchildren());
+        }
         matched[mgid].push_back({cluster->get_cluster_id(), std::move(pred)});
     }
 
@@ -3631,8 +3670,39 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // back to the legacy gid encoding gid = anode_ident*kFlashGidStride + idx,
     // so apa = gid / kFlashGidStride (correct only for single-face anodes).
     constexpr int kFlashGidStride = 1000000;
+
+    // doc pdvd/119: the in-beam flash = the brightest flash whose op_t (us)
+    // lies inside the configured window; -1 = none (still emit an all-zero
+    // op_beam so the viewer knows the event was labelled and has no beam flash).
+    const bool label_beam = (m_bee_beam_window_us.size() == 2);
+    int beam_gid = -1;
+    if (label_beam) {
+        double best_pe = -1;
+        for (const int g : flash_order) {
+            const double t_us = flash_time[g] * 1e-3;
+            if (t_us < m_bee_beam_window_us[0] || t_us > m_bee_beam_window_us[1]) continue;
+            double tot = 0;
+            for (const auto& cv : flash_pe[g]) tot += cv.second;
+            if (tot > best_pe) { best_pe = tot; beam_gid = g; }
+        }
+        if (beam_gid >= 0) {
+            log->debug("in-beam flash: gid {} t={:.3f} us PE={:.1f} (window [{}, {}] us)",
+                       beam_gid, flash_time[beam_gid] * 1e-3, best_pe,
+                       m_bee_beam_window_us[0], m_bee_beam_window_us[1]);
+        } else {
+            log->debug("in-beam flash: none in window [{}, {}] us",
+                       m_bee_beam_window_us[0], m_bee_beam_window_us[1]);
+        }
+    }
+    std::vector<int> appended_beam;     // one 0/1 per appended row, same order
     std::vector<int> appended_groups;   // one per appended row, same order
     std::vector<double> appended_t1;    // ditto, input-1-clock time (us)
+    std::vector<std::vector<int>> appended_anodes;   // ditto, parallel to the row's cluster ids
+    auto anodes_of = [&](const std::vector<int>& cids) {
+        std::vector<int> an;
+        for (int c : cids) an.push_back(cluster_anode.count(c) ? cluster_anode[c] : -1);
+        return an;
+    };
     for (const int g : flash_order) {
         const int apa = have_apa ? flash_apa[g] : (g / kFlashGidStride);
         const int grp = have_group ? flash_group[g] : -1;
@@ -3658,19 +3728,25 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
                     for (size_t k = 0; k < cp.second.size(); ++k) pred_sum[k] += cp.second[k];
                 }
                 m_bee_flash.append(t_us, pes, peTotal, cids, pred_sum, apa);
+                appended_anodes.push_back(anodes_of(cids));
                 appended_groups.push_back(grp);
                 appended_t1.push_back(t1_us);
+                appended_beam.push_back(g == beam_gid ? 1 : 0);
             } else {
                 for (const auto& cp : mit->second) {
                     m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{cp.first}, cp.second, apa);
+                    appended_anodes.push_back(anodes_of(std::vector<int>{cp.first}));
                     appended_groups.push_back(grp);
                     appended_t1.push_back(t1_us);
+                    appended_beam.push_back(g == beam_gid ? 1 : 0);
                 }
             }
         } else {
             m_bee_flash.append(t_us, pes, peTotal, std::vector<int>{}, std::vector<double>{}, apa);
+            appended_anodes.push_back(std::vector<int>{});
             appended_groups.push_back(grp);
             appended_t1.push_back(t1_us);
+            appended_beam.push_back(g == beam_gid ? 1 : 0);
         }
     }
 
@@ -3680,6 +3756,10 @@ void MultiAlgBlobClustering::fill_bee_flashes(const WireCell::Clus::Facade::Grou
     // Attach the per-row input-1-clock time only when the opflash PC carries it
     // (per-input trigger_offsets, PDVD), so other detectors' op JSON is unchanged.
     if (have_time1) m_bee_flash.set_t1(appended_t1);
+    // Attach the in-beam label only when a window is configured (doc pdvd/119).
+    if (label_beam) m_bee_flash.set_beam(appended_beam);
+    // Attach each matched cluster's anode only when asked (doc pdvd/119 sec 8).
+    if (m_bee_flash_cluster_anodes) m_bee_flash.set_cluster_anodes(appended_anodes);
 }
 
 struct Perf {
@@ -3894,6 +3974,11 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // are already right and must keep being used, byte for byte.
     if (m_rse_from_ident || m_event_from_ident) {
         ensemble.set_rse(m_runNo, m_subRunNo, m_eventNo);
+    }
+    // sbnd_xin/docs/110: here, before the pipeline visitors below can build a
+    // PR::Shower, so this event's shower ids start at 0 as in a one-event process.
+    if (m_reset_shower_ids_per_event) {
+        WireCell::Clus::PR::reset_shower_id_counter();
     }
 
     // Publish the event's RSE on the ensemble scalar PC so pipeline visitors

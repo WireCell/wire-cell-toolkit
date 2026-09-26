@@ -92,6 +92,12 @@ namespace WireCell::Clus::PR {
         int matched_flash_gid{-1};
         int nu_index{-1};
 
+        // ---- sbnd_xin/docs/109: was a neutrino vertex found ------------ //
+        // kine_nu_*_corr stay (0,0,0) when there is no vertex, and (0,0,0)
+        // is a real point on SBND's cathode plane.  1 = vertex found, 0 =
+        // none, -1 = not filled (TaggerCheckNeutrino nu_provenance off).
+        int has_vertex{-1};
+
         // ---- doc 80: MCS muon momentum (one muon per bundle) ---------- //
         // Scalars plus a join key, NOT parallel arrays: the kine_* vectors
         // above carry no per-row segment provenance, so a row could never be
@@ -1493,6 +1499,40 @@ namespace WireCell::Clus::PR {
         std::vector<int>   act_fc;
         std::vector<int>   act_lm;
         std::vector<int>   act_evaluated;
+
+        // ---- sbnd_xin/docs/109: what the selection did ----------------- //
+        // Filled only when TaggerCheckNeutrino's nu_provenance knob is on
+        // (and nu_per_bundle, which builds the act_* roster); -1 / empty
+        // otherwise.
+        //
+        // sel_cluster_id: the activity the selection chose.  cluster_id above
+        // is the main cluster the row was WRITTEN with, which the overall
+        // neutrino-vertex search may have moved onto a companion of the same
+        // bundle; vertex_moved_cluster = 1 when the two differ.
+        int sel_cluster_id{-1};
+        int vertex_moved_cluster{-1};
+        // 1 = a neutrino vertex was found (nu_x/y/z are meaningful).
+        int has_vertex{-1};
+        // The row's matched flash (the bundle's gid): time, PE, physical TPC
+        // and the flash group shared with the other TPC's view of the same
+        // light (NuBundleCensus::flash_group).
+        float flash_time_us{0};
+        float flash_pe{0};
+        int flash_tpc{-1};
+        int flash_group{-1};
+        // With nu_provenance on the roster also lists the bundle's
+        // companions, each cluster ONCE.  act_role: 0 main, 1 demoted main
+        // (both evaluated by the cosmic taggers, as before), 2 companion not
+        // already listed, 3 companion dropped as cosmic
+        // (skip_cosmic_companions) not already listed.  Entries with role 0/1
+        // come first, in the same order as without the knob.
+        // act_in_pr: 1 = the cluster took part in this candidate's PR pass
+        // (the selected activity or a kept companion -- a demoted main can be
+        // both role 1 and a companion).  act_is_final: 1 on the entry whose
+        // cluster the row was written with.
+        std::vector<int>   act_role;
+        std::vector<int>   act_in_pr;
+        std::vector<int>   act_is_final;
     };
 
 } // namespace WireCell::Clus::PR

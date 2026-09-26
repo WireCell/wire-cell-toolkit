@@ -17,9 +17,16 @@
 //   * Bee detector 'protodunevd'; single-event RSE from the job TLAs.
 // Every knob keeps the SBND key-suppression idiom: an unset knob is absent from
 // the compiled config and means "C++ default".  The SBND-tuned DEFAULTS of the
-// pr() arguments are kept verbatim (they document the SBND operating point);
-// the PDVD operating point is set in pdvd/wct-pr-perevt.jsonnet, which passes
-// every physics knob explicitly.
+// pr() arguments here are kept verbatim; the PDVD operating point is set in
+// cfg/pgrapher/experiment/protodunevd/wct-pr-perevt.jsonnet (promoted in-tree by
+// doc sbnd_xin/120 round A), which passes every physics knob explicitly.
+//
+// NOTE, doc sbnd_xin/120 sec 4: those verbatim defaults no longer document the
+// SBND operating point.  SBND's own pr() defaults, in
+// cfg/pgrapher/experiment/sbnd/clus.jsonnet, ARE that operating point now -- it
+// moved there so the LArSoft 1-step chain gets it by calling pr().  This fork
+// was NOT changed with it, so read these as the values SBND's pr() carried when
+// this file was forked, not as SBND production today.
 //
 // Import as
 //   local pr_mod = import 'pgrapher/experiment/protodunevd/pr.jsonnet';
@@ -69,6 +76,40 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // partition knobs are FILTERED from tcn_knobs below, so the
               // production PR partition is reproduced without a second copy.
               stm_michel_knobs={},
+              // doc pdvd/120: the beam-particle PR stage (check_beam_particle):
+              // its knob bag (PR-partition keys + the stage's own switches; {}
+              // => C++ defaults) and the nominal beam entry / direction /
+              // acceptance radius (null => the C++ defaults documented in
+              // CheckBeamParticle::default_configuration()).  All inert unless
+              // 'check_beam_particle' is in pipeline_names.
+              beam_pr_knobs={},
+              beam_entry_point_cm=null,
+              beam_dir=null,
+              beam_entry_max_dist_cm=null,
+              // doc pdvd/53: the SURVEY.  Fit every same-bundle cluster within
+              // stm_survey_radius_cm of the STM stop (not just the 35 cm the
+              // capture-gamma stage reaches), give every fitted-but-unclaimed
+              // companion segment role-6 rows in stm_michel_pts, and record the
+              // gate that dropped it (rej/d_stop/d_body).  Scaffolding for the
+              // hand scan, NOT a selection change: the Michel's cluster test
+              // still uses michel_dot_radius_cm and the gamma ring's outer edge
+              // is still stop_gamma_radius_cm, so a cluster reached only by this
+              // radius is claimed by neither.  The one physics effect is the
+              // preload perturbation of the candidate's own fit (doc pdvd/53
+              // sec 6).  C++ default FALSE -- false here omits every key and
+              // reproduces the doc pdvd/51 job byte-for-byte.
+              //
+              // OWNER RULING 2026-09-08: it stays FALSE here.  The survey costs a
+              // 20-25 % mover rate on the muon's OWN profile branches through
+              // preload_clusters (doc pdvd/53 sec 6.2) for a feature with no
+              // physics value -- it is hand-scan scaffolding.  The scan arms turn
+              // it on per job with
+              //   -S stm_michel_extra={survey_enable:true, survey_radius_cm:60.0,
+              //                        survey_max_len_cm:25.0}
+              // so PRODUCTION PR output stays bit-identical to doc pdvd/51.
+              stm_survey=false,
+              stm_survey_radius_cm=60.0,
+              stm_survey_max_len_cm=25.0,
               // Readout length in ticks for the Magnify/PrDisplay writers (SBND 3427;
               // PDVD production window 10000, run_clus_evt.sh readout_window_ticks).
               nticks=10000,
@@ -78,6 +119,39 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // flash-matched cluster (matched_flash_gid >= 0 with a real t0)
               // at least this long as a main.  0 = every matched cluster.
               flag_mains_min_length=0,
+              // doc pdvd/101: admit clusters without a Q/L match as mains (light-less
+              // SIMULATION only).  C++ default false.  Key omitted when false =>
+              // byte-identical compiled config.
+              flag_mains_unmatched=false,
+              // doc pdvd/101: sampling of the RETILE samplers only, i.e. the Steiner
+              // cloud (the fit's association reads the clustering job's points).
+              // retile_sampler_half_pitch (C++ Stepped default false) adds half-pitch
+              // crossings; retile_sampler_min_step (wires; C++ default 3) is the
+              // stepped spacing.  false / null => keys omitted => byte-identical.
+              retile_sampler_half_pitch=false,
+              retile_sampler_min_step=null,
+              // doc pdvd/102: the RETILE samplers' strategy.  FLIPPED FOR PDVD by
+              // doc pdvd/103 sec 14, applied on the owner's go: null =>
+              // 'charge_stepped', the prototype's retile rule (clus.jsonnet
+              // bs_live_face; CalcPoints.cxx), now PDVD production.  Graded WITH the
+              // doc-101 fit keys on the production lineage (arms d103v0 -> d103v1,
+              // owner records own103v / own103v2): D1 on all four STM/Michel metrics.
+              // Doc 102 round 2 proposed the same flip for BOTH detectors and failed
+              // its gate; PDHD keeps 'stepped' (doc 103 sec 12.3).  'stepped' => the
+              // pre-flip retile; it compiles byte-identical to the pre-flip default.
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000.
+              retile_sampler_strategy=null,
+              retile_sampler_wire_product=null,
+              retile_sampler_charge_threshold=null,
+              // doc pdvd/113: how much of the retile the Steiner copy gets
+              // (ImproveCluster_2 retile_mode; C++ default "full" = the historical
+              // retile inherited from MicroBooNE).  "no_paint" drops the two
+              // path-disc paintings, "footprint" also the dead / nearby-charge
+              // extension, "none" re-samples the cluster's own blobs in place with
+              // the retile samplers above (so charge_stepped is kept).  null => key
+              // omitted => byte-identical compiled config.  Study knob, not flipped.
+              retile_mode=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -86,6 +160,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // 5 cm; PDVD's cathode is a 6 cm slab, so 12 cm) when cathode_guard is on.
               stm_readout_edge_guard=false,
               stm_readout_edge_ticks=60,
+              // stm_readout_edge_defer (doc pdvd/100 round 2): TaggerCheckSTM
+              // readout_edge_defer -- the guard leaves its veto to
+              // check_stm_michel, which applies it unless a Michel object exists
+              // at the stop (knob-bag key readout_edge_require_michel; WITHOUT
+              // that key the guard is effectively off).  C++ default false; key
+              // emitted only with the guard on => byte-identical when off.
+              stm_readout_edge_defer=false,
               stm_cathode_guard_cm=null,
               // Steiner-terminal per-point charge floor (electrons; CreateSteinerGraph
               // terminal_charge_threshold, C++ default 4000 = prototype).  null =>
@@ -149,6 +230,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // '' selects the C++ preset defaults, which are uBooNE-hard-coded --
               // never right for SBND, which is why this no longer defaults to ''.
               trackfitting_config_file='pgrapher/experiment/protodunevd/pdvd_track_fitting.json',
+              // stm_trackfitting_config_file (doc pdvd/76, P5 of doc pdvd/70): the
+              // TrackFitting parameter JSON for the STM side ONLY -- TaggerCheckSTM
+              // and CheckSTM_Michel.  TaggerCheckNeutrino keeps
+              // trackfitting_config_file.  null => the shared file above, so the
+              // compiled config is byte-identical when unset.  Exists so a
+              // sampling / smoothing study (doc 65 sec 4, doc 68 sec 4:
+              // dx_norm_length, low_dis_limit) can be scoped to the STM chain
+              // without touching the neutrino path; any change to it that moves
+              // the candidate set still needs a new scan (doc 70 sec 2.3).
+              stm_trackfitting_config_file=null,
               particle_dataset=null, extra_uses=[],
               // dl_weights: SCN (DL) neutrino-vertex weights, WIRECELL_PATH-resolved.
               // DEFAULT = the uBooNE-trained net, i.e. the DL vertex is ON for SBND
@@ -416,6 +507,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_kink_asym_enable: doc pdvd/56 T1b -- a third, additive
+              // OR-clause in find_first_kink's charge gate, admitting an
+              // ASYMMETRIC kink (Bragg into a cold Michel) that the existing
+              // "both arms hot" clauses never accept.  C++ defaults
+              // false/1.2/0.5; keys omitted when off => byte-identical.
+              // DEFAULT FALSE: unvalidated on this detector until doc 59
+              // confirms it (see the driver jsonnet for the per-detector
+              // production decision).
+              stm_kink_asym_enable=false,
+              stm_kink_asym_entry_mip=1.2,
+              stm_kink_asym_far_mip=0.5,
               // stm_descent_guard: doc-94 round-1 veto on a stop reached
               // travelling UPWARD or near-horizontally.  A cosmic stopping
               // muon arrived from the sky, so it entered a boundary face
@@ -684,6 +786,34 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
               // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
               steiner_terminal_min_separation=0,
+              // doc pdvd/114: blank-plane admission policy for the Steiner
+              // terminal candidates ("prefer3" | "nearby" | "prefer3+nearby")
+              // and the nearby radius (a LENGTH).  Threaded into BOTH steiner
+              // passes so the refresh builds its clusters like their peers.  Set
+              // from the driver, not here.  FLIPPED FOR PDVD by doc pdvd/116 on
+              // the owner's go 2026-09-18: null mode => 'prefer3' at the call
+              // sites below (was the C++ default 'wcp' = key omitted).  Escape
+              // hatch: -S steiner_blank_plane_mode='wcp' emits the C++ default
+              // (the OFF gates of docs 114/115 cover the binary).  The radius
+              // stays null = C++ default 0, key omitted.
+              steiner_blank_plane_mode=null,
+              steiner_blank_plane_radius=null,
+              // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
+              // before the Voronoi step (alpha per zero-charge plane at the
+              // edge endpoints; scope "tree" | "tree+path").  Threaded into
+              // BOTH steiner passes.  Set from the driver.  FLIPPED FOR PDVD by
+              // doc pdvd/116 (owner 2026-09-18): null => alpha 0.5, scope
+              // 'tree+path' at the call sites below (was the C++ default 0 /
+              // 'tree' = keys omitted).  Graded with the doc-116 tagger point
+              // (proton_muon_guard, michel_min_kink_deg 20, michel_max_len_cm 30
+              // in the driver bag) against production after the owner scans
+              // own116h / own116v: PDHD is_stm purity +0.002 / efficiency +0.032,
+              // Michel +0.019 / +0.064; PDVD +0.000 / +0.018 and +0.003 / +0.037
+              // (figs/116_grade_*_own116.txt; rule figs/116_pred.txt sha ad24efda).
+              // Escape hatch: -S steiner_base_weight_blank_alpha=0
+              // -S steiner_base_weight_scope='tree' emits the C++ defaults.
+              steiner_base_weight_blank_alpha=null,
+              steiner_base_weight_scope=null,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1159,6 +1289,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // is byte-identical to the pre-doc-16 job.  DEFAULT false; both
               // ProtoDUNE drivers set it true.
               stm_recomb_calibrated=false,
+              // stm_recomb_C (doc pdvd/100): the C of that calibrated inverse.
+              // DEFAULT 0.7941 = the doc pdhd/16 fit, so the compiled config is
+              // byte-identical to the pre-doc-100 job.  Doc pdvd/100 refits it
+              // after the top-electronics gain (sp.jsonnet top_gain_scale) moves
+              // top charge x1.125; the PDVD driver sets the production value.
+              stm_recomb_C=0.7941,
               // sp_dedx_use_recomb_model: route the single-photon stem dE/dx
               // through the configured recombination model instead of the
               // inline uBooNE-field (0.273 kV/cm) inverse Box.  DEFAULT ON
@@ -1289,7 +1425,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local pdvd_stm_recomb = {
             type: 'PowerBoxRecombination',
             name: 'pdvd_stm_recomb',
-            data: { A: 0.93, k: 0.7169082125603865, p: 1.0, C: 0.7941,
+            data: { A: 0.93, k: 0.7169082125603865, p: 1.0, C: stm_recomb_C,
                     pivot: 2.1, Wi: 23.6e-6, dedx_max: 77.0 },
         },
         local pdvd_stm_michel_recomb = if stm_recomb_calibrated then pdvd_stm_recomb else pdvd_recomb,
@@ -1363,13 +1499,21 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // so 16 samplers, each with its crate's drift speed (clus.jsonnet live_sampler).
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
-            samplers=[clus.sampler(clus_maker.live_sampler(a, f), apa=a.data.ident, face=f)
+            samplers=[clus.sampler(clus_maker.live_sampler(a, f, half_pitch=retile_sampler_half_pitch,
+                                                           min_step_size=retile_sampler_min_step,   // doc pdvd/101
+                                                           strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc pdvd/103 sec 14 flip (PDVD only)
+                                                           wire_product=retile_sampler_wire_product,   // doc pdvd/102
+                                                           charge_threshold=retile_sampler_charge_threshold),
+                                   apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
             wrapped_channel_activity=retile_wrapped_channel_activity,
             terminal_charge_threshold=retile_steiner_terminal_charge,
             bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
             bad_blob_report=retile_bad_blob_report,
-            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm),
+            hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm)
+            // doc pdvd/113: key omitted when null => byte-identical (same idiom as steiner's
+            // terminal_charge_threshold below).
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode } },
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
@@ -1390,6 +1534,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     require_t0: true,
                     min_length: flag_mains_min_length,
                     skip_flagged: true,
+                    [if flag_mains_unmatched then 'flag_unmatched']: true,   // doc pdvd/101
                 },
             },
             // PDVD has no unmerge_bundle stage (doc pdvd/25 sec 4): examine_bundles
@@ -1474,6 +1619,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
@@ -1502,6 +1651,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 // Same skip list as the first pass: replace=false
                                 // means this pass builds exactly the clusters
                                 // with no graph yet, i.e. everything the first
@@ -1510,9 +1663,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 replace=false)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             fiducialutils: cm.fiducialutils(),
+            // doc pdvd/76 (P5): the STM side's fit file; null => the shared one.
+            local stm_trackfitting_config = if stm_trackfitting_config_file == null then trackfitting_config_file else stm_trackfitting_config_file,
             tagger_check_stm: cm.tagger_check_stm(
                 evaluate_demoted_mains=evaluate_demoted_mains,
-                trackfitting_config_file=trackfitting_config_file,
+                trackfitting_config_file=stm_trackfitting_config,
                 particle_dataset=wc.tn(particle_dataset),
                 recombination_model=wc.tn(pdvd_recomb),
                 require_in_scope=true,
@@ -1549,6 +1704,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 // omitted when off => byte-identical): doc-63 round-5 vetoes.
                 deficit_guard=stm_deficit_guard,
                 vertex_kink_guard=stm_vertex_kink_guard,
+                // kink_asym_enable (C++ default false; keys omitted when off
+                // => byte-identical): doc pdvd/56 T1b asymmetric kink clause.
+                kink_asym_enable=stm_kink_asym_enable,
+                kink_asym_entry_mip=(if stm_kink_asym_enable then stm_kink_asym_entry_mip else null),
+                kink_asym_far_mip=(if stm_kink_asym_enable then stm_kink_asym_far_mip else null),
                 // descent_guard (C++ default false; keys omitted when off =>
                 // byte-identical): doc-94 round-1 travel-direction veto.
                 descent_guard=stm_descent_guard,
@@ -1606,6 +1766,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if stm_readout_edge_guard then 'readout_edge_guard']: true,
                     [if stm_readout_edge_guard then 'guard_readout_edge_ticks']: stm_readout_edge_ticks,
                     [if stm_readout_edge_guard then 'readout_nticks']: nticks,
+                    [if stm_readout_edge_guard && stm_readout_edge_defer then 'readout_edge_defer']: true,   // doc pdvd/100 round 2
                     [if stm_cathode_guard_cm != null then 'guard_cathode_cm']: stm_cathode_guard_cm,
                   } },
             // doc pdvd/48: the stopping-muon + Michel stage that REPLACES
@@ -1652,7 +1813,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 [k]: tcn_knobs[k] for k in std.objectFields(tcn_knobs) if std.member(stm_michel_partition_keys, k)
             },
             check_stm_michel: cm.check_stm_michel(
-                trackfitting_config_file=trackfitting_config_file,
+                trackfitting_config_file=stm_trackfitting_config,   // doc pdvd/76 (P5)
                 particle_dataset=wc.tn(particle_dataset),
                 // doc pdhd/16: THIS component only; the taggers keep pdvd_recomb.
                 recombination_model=wc.tn(pdvd_stm_michel_recomb),
@@ -1681,7 +1842,60 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if teb_turn_baseline != null then 'teb_turn_baseline']: teb_turn_baseline,
                     [if teb_turn_skirt != null then 'teb_turn_skirt']: teb_turn_skirt,
                     [if kink_dqdx_hot_ratio != null then 'kink_dqdx_hot_ratio']: kink_dqdx_hot_ratio,
+                    [if stm_survey then 'survey_enable']: true,
+                    [if stm_survey then 'survey_radius_cm']: stm_survey_radius_cm,
+                    [if stm_survey then 'survey_max_len_cm']: stm_survey_max_len_cm,
                 } + stm_michel_knobs),
+            // doc pdvd/120: the beam-particle PR stage.  Same fitter config,
+            // particle dataset and recombination model as tagger_check_neutrino
+            // (pdvd_recomb, NOT the STM+Michel calibrated one), and the beam
+            // window the whole PR tail shares (beam_window, i.e. the
+            // beam_window_us TLA after the wct-pr-perevt trigger arithmetic).
+            //
+            // doc pdvd/120 sec 9: the stage reads TaggerCheckNeutrino's PR
+            // knob set (same names, units and C++ defaults), so it is handed
+            // the NEUTRINO NODE's compiled data -- one config, two consumers
+            // -- rather than a hand-kept subset (the first cut forwarded only
+            // the 79-key STM+Michel partition and the beam bundle's particle
+            // flow lost every cross-cluster piece).  Dropped: the keys the
+            // beam builder sets itself and the families CheckBeamParticle
+            // does not read (DL/dual chain, candidate selection, cosmic
+            // taggers/BDT, MCS, vertex snaps, cathode bridge, probes).
+            // beam_pr_knobs (job TLA) merges last so it overrides.
+            local beam_knob_drop_exact = [
+                'grouping', 'trackfitting_config_file', 'particle_dataset', 'recombination_model', 'perf',
+                'detector_volumes', 'pc_transforms', 'fiducial', 'fv_tolerance',
+                'beam_window_low', 'beam_window_high', 'mip_dqdx', 'mip_dqdx_median',
+                'dQdx_scale', 'dQdx_offset', 'clus_geom_helper', 'main_vertex_swap_apply',
+                'rough_path_probe', 'sgp_edge_probe', 'vertex_scoreboard',
+                'skip_cosmic_companions', 'cosmic_companion_min_length', 'flash_pair_dt_us',
+                'nue_sp_consistent_fv', 'ssm_target_dir', 'ssm_absorber_dir', 'muon_dqdx_curve',
+                'tagger_ordered_segment_sets', 'stem_endpoint_wcpt_parity', 'broken_muon_cluster_id_count',
+                'neutrino_type_bitmask', 'vertex_kink_snap', 'vertex_junction_snap', 'kine_continuation_debug',
+            ],
+            local beam_knob_drop_prefix = ['mcs_', 'dl_', 'dual_chain_', 'nu_', 'cosmic_', 'sp_',
+                                           'long_muon_cathode_bridge', 'vks_', 'vjs_'],
+            local beam_knob_dropped(k) = std.member(beam_knob_drop_exact, k)
+                || std.foldl(function(acc, p) acc || std.startsWith(k, p), beam_knob_drop_prefix, false),
+            local tcn_node_data = self.tagger_check_neutrino.data,
+            local beam_neutrino_knobs = {
+                [k]: tcn_node_data[k] for k in std.objectFields(tcn_node_data) if !beam_knob_dropped(k)
+            },
+            check_beam_particle: cm.check_beam_particle(
+                trackfitting_config_file=trackfitting_config_file,
+                particle_dataset=wc.tn(particle_dataset),
+                recombination_model=wc.tn(pdvd_recomb),
+                perf=true,
+                mip_dqdx=mip_dqdx,
+                mip_dqdx_median=mip_dqdx_median,
+                fiducial=(if neutrino_consistent_fv then wc.tn(pdvd_pr_fv) else null),
+                fv_tolerance=(if neutrino_consistent_fv then pdvd_pr_fv_margins else []),
+                beam_window_low=beam_window[0],
+                beam_window_high=beam_window[1],
+                beam_entry_point_cm=beam_entry_point_cm,
+                beam_dir=beam_dir,
+                beam_entry_max_dist_cm=beam_entry_max_dist_cm,
+                knobs=beam_neutrino_knobs + beam_pr_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
             // writes tracking-stm.root (T_rec_charge/T_proj_data/T_bad_ch/Trun)
@@ -2013,6 +2227,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local tagger_uses = (if std.member(pipeline_names, 'tagger_check_stm')
                              || std.member(pipeline_names, 'tagger_check_neutrino')
                              || std.member(pipeline_names, 'check_stm_michel')   // doc pdvd/48
+                             || std.member(pipeline_names, 'check_beam_particle')   // doc pdvd/120
                              then [pdvd_recomb] + extra_uses else [])
                             // doc pdhd/16: check_stm_michel's own calibrated
                             // model.  Only when the knob is on AND the component
@@ -2036,6 +2251,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                // under the same stm_consistent_fv switch.
                                || (stm_consistent_fv
                                    && std.member(pipeline_names, 'check_stm_michel'))
+                               // doc pdvd/120: the beam-particle stage names pdvd_pr_fv
+                               // under the neutrino stage's consistent-FV switch.
+                               || (neutrino_consistent_fv
+                                   && std.member(pipeline_names, 'check_beam_particle'))
                                then pdvd_pr_fv_uses else []),
         local bee_zip_path = evt_out_prefix + 'mabc-pr.zip',
         // doc pdvd/48: the PR-tail Bee layers (track_fit / shower_track /
@@ -2046,8 +2265,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // pipeline_names both locals reduce to the legacy values => the
         // production (-stm) compiled config is byte-identical.
         local michel_on = std.member(pipeline_names, 'check_stm_michel'),
-        local pr_tail_on = std.member(pipeline_names, 'tagger_check_neutrino') || michel_on,
-        local pr_visitor = if michel_on then 'CheckSTM_Michel:pr' else 'TaggerCheckNeutrino:pr',
+        // doc pdvd/120: a third publisher, the beam-particle stage.  It wins
+        // when both it and check_stm_michel are named (a beam pipeline has no
+        // STM stage, so this never arises in the shipped modes); with neither
+        // the locals reduce to the legacy values exactly as before.
+        local beam_on = std.member(pipeline_names, 'check_beam_particle'),
+        local pr_tail_on = std.member(pipeline_names, 'tagger_check_neutrino') || michel_on || beam_on,
+        local pr_visitor = if beam_on then 'CheckBeamParticle:pr'
+                           else if michel_on then 'CheckSTM_Michel:pr'
+                           else 'TaggerCheckNeutrino:pr',
         local mabc = g.pnode({
             type: 'MultiAlgBlobClustering',
             name: 'clus_pr',
@@ -2294,8 +2520,27 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                         // the pipeline => default compiled config byte-identical.
                         [if pr_tail_on
                          then 'prototype_names']: true,
+                        // doc pdvd/51: 5 -> 0.2 MeV.  The floor is a DISPLAY floor
+                        // (MultiAlgBlobClustering.cxx:2078 keep_node), and at 5 MeV it
+                        // deletes every muon-capture gamma this chain now reconstructs:
+                        // that population is ~1 MeV (d16vnu p10 0.37 / p50 0.97 / p90
+                        // 4.37).  append_pseudo_shower drops the carrier too when its
+                        // only leaf goes (:2174), so the node would vanish whole.
+                        // COLLATERAL, measured not assumed: over d16vnu (119 events) the
+                        // PR labels 1096 segments pdg 11 and 666 reach mc.json, so this
+                        // can restore at most ~430 nodes (~3.6/event), mostly sub-5-MeV
+                        // delta rays.  Only the two ProtoDUNE PR configs carry it -- no
+                        // MultiAlgBlobClustering change, so SBND is untouched.
                         [if pr_tail_on
-                         then 'em_ke_min']: 5 * wc.MeV,
+                         then 'em_ke_min']: 0.2 * wc.MeV,
+                        // doc pdvd/51: prototype_names writes an INTEGER MeV, so
+                        // a ~1 MeV capture gamma is labelled "0 MeV".  Below this
+                        // value the node text carries two decimals instead.
+                        // C++ default 0 = off = prototype formatting everywhere,
+                        // so the key's absence is byte-identical and no other
+                        // detector sees it.
+                        [if pr_tail_on
+                         then 'ke_decimal_below']: 10 * wc.MeV,
                         // doc pr/38: nucleon floor lowered from the prototype's
                         // 10 MeV (WCReader::KeepMC) to 3 MeV, owner decision
                         // 2026-08-05 -- sub-10-MeV protons attached at the

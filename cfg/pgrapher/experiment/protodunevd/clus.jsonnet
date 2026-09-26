@@ -189,7 +189,10 @@ local pctransforms(dv) = {
 
 
 
-local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
+local bs_live_face(apa, face, center_fallback=false, speed=drift_speed, half_pitch=false, min_step_size=null,
+                   strategy_name='stepped', wire_product=null, charge_threshold=null) = {
+    assert strategy_name == 'stepped' || strategy_name == 'charge_stepped' :
+        "bs_live_face: strategy_name must be 'stepped' or 'charge_stepped'",
     type: "BlobSampler",
     name: "live-%s-%d"%[apa, face],
     data: {
@@ -197,7 +200,30 @@ local bs_live_face(apa, face, center_fallback=false, speed=drift_speed) = {
         time_offset: time_offset,
         // center_fallback: emit one point at the blob center when the stepped
         // grid yields none (tiny 1-wire blobs); default off -> bit-identical.
-        strategy: [{name: "stepped", center_fallback: center_fallback}],
+        // doc pdvd/101: half_pitch (C++ Stepped default false) adds the half-pitch
+        // crossings; min_step_size (C++ default 3 wires) is the stepped spacing.
+        // Passed only by the PR job's retile samplers (live_sampler); false / null
+        // => keys omitted => byte-identical compiled config.
+        // doc pdvd/102 (counterpart of pdhd/clus.jsonnet): strategy_name
+        // 'charge_stepped' selects the port of the prototype's RETILE sampler,
+        // WCPPID::calc_sampling_points(..., disable_mix_dead_cell=false)
+        // (prototype ImprovePR3DCluster.cxx:59, CalcPoints.cxx:75-160): every
+        // wire of the min/max views when N_max*N_min <= max_wire_product_threshold
+        // (C++ 2500), non-stepped wires kept only above charge_threshold_* (C++
+        // 4000).  ChargeStepped has no center_fallback.  Default 'stepped' =>
+        // this branch is never taken => byte-identical compiled config.
+        strategy: if strategy_name == 'charge_stepped' then
+                  [{name: "charge_stepped",
+                    disable_mix_dead_cell: false,
+                    [if min_step_size != null then 'min_step_size']: min_step_size,
+                    [if wire_product != null then 'max_wire_product_threshold']: wire_product,
+                    [if charge_threshold != null then 'charge_threshold_max']: charge_threshold,
+                    [if charge_threshold != null then 'charge_threshold_min']: charge_threshold,
+                    [if charge_threshold != null then 'charge_threshold_other']: charge_threshold}]
+                  else
+                  [{name: "stepped", center_fallback: center_fallback,
+                    [if half_pitch then 'half_pitch']: true,
+                    [if min_step_size != null then 'min_step_size']: min_step_size}],
         extra: [".*wire_index", ".*charge_val", ".*charge_unc", "wpid"],
         // wrapped_channel_charge: read a sampled point's induction charge by
         // channel IDENT when its wire is a wrapped strip's continuation.  PDVD
@@ -656,6 +682,15 @@ local clus_all_tpc (
     eventNo = 1,
     save_opflash = false,
     premerged = false,   // skip the input PointTreeMerging (joint QLMatching already merged)
+    // doc pdvd/119: [lo, hi] in MICROSECONDS on the Bee op_t axis; the brightest
+    // flash inside is labelled the in-beam flash (op_beam array, Bee "/" key).
+    // C++ default: no window.  null => key omitted => byte-identical config.
+    bee_beam_window_us = null,
+    // doc pdvd/119 sec 8: also write each matched cluster's anode into the op
+    // dump (op_cluster_anodes) so the Bee side panel puts the cluster in its
+    // own drift volume.  C++ default false.  false => key omitted =>
+    // byte-identical config.
+    bee_flash_cluster_anodes = false,
     // Tip-touch relaxation for the cathode-crossing connector (see the
     // cm.cathode_connect call below).  null => the C++ defaults leave the
     // relaxation OFF, so the compiled config is byte-identical when unset.
@@ -802,6 +837,8 @@ local clus_all_tpc (
             // No flash-flash grouping: PDVD has ONE all-PD flash per time (no
             // per-side pair to group).  0 = off (no column).
             flash_group_window: 0,
+            [if bee_beam_window_us != null then 'bee_beam_window_us']: bee_beam_window_us,
+            [if bee_flash_cluster_anodes then 'bee_flash_cluster_anodes']: true,
             dead_area_version: 2,  // v2 wrapper (tpc=apa) so the dead slab lands on the correct PDVD anode face
             // doc pdvd/39 round 2: see the save_assoc_id argument.  This is the
             // node whose TensorFileSink writes the pctree the PR job reads, so
@@ -902,7 +939,7 @@ local clus_all_tpc (
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
     per_apa(anode, dump=true, po_fast=false, dg_fast=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast),
     per_group(anodes, group_name, dump=true, dg_fast=false, save_assoc_id=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast, save_assoc_id=save_assoc_id),
-    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
+    all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false, bee_beam_window_us=null, bee_flash_cluster_anodes=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id, bee_beam_window_us=bee_beam_window_us, bee_flash_cluster_anodes=bee_flash_cluster_anodes),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
     // reference the SAME all-anode DV the clustering uses (deterministic by name).
     detector_volumes(anodes, face="") :: detector_volumes(anodes, face),
@@ -913,8 +950,12 @@ local clus_all_tpc (
     // the T0 scope coordinates.  Hidden fields => nothing here reaches a compiled
     // clustering config.
     pc_transforms(dv) :: pctransforms(dv),
-    live_sampler(anode, face, center_fallback=stepped_center_fallback) ::
+    live_sampler(anode, face, center_fallback=stepped_center_fallback, half_pitch=false, min_step_size=null,
+                 strategy_name='stepped', wire_product=null, charge_threshold=null) ::
         bs_live_face(anode.name, face, center_fallback=center_fallback,
+                     half_pitch=half_pitch, min_step_size=min_step_size,   // doc pdvd/101
+                     strategy_name=strategy_name, wire_product=wire_product,   // doc pdvd/102
+                     charge_threshold=charge_threshold,
                      speed=if anode.data.ident < 4 then drift_speed_bot else drift_speed_top),
     drift_speed_bot :: drift_speed_bot,
     drift_speed_top :: drift_speed_top,

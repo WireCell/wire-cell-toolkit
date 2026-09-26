@@ -27,6 +27,28 @@ namespace WireCell {
             OpDecon();
             virtual ~OpDecon();
 
+            // saturation_repair_mode "tot": the channel's normalized model
+            // shape (peak 1) and its width-vs-level table.  Public and static
+            // for unit testing (flash/test/doctest_opdecon_tot.cxx).
+            struct TotShape {
+                std::vector<double> s;    // model shape, max = 1
+                std::vector<double> lam;  // levels, increasing (1e-3 .. <1)
+                std::vector<int> u;       // first index with s >= lam
+                std::vector<double> w;    // width above lam, fractional crossings
+            };
+            // Bright-pulse model y = template (x) scintillation kernel, n samples.
+            // par = {ff, bi, tau_i, tau_s, sigma} (ticks).
+            static std::vector<double> tot_model(const std::vector<float>& wave, double tau_fall,
+                                                 const std::vector<double>& par, int n = 1600);
+            static TotShape tot_shape(const std::vector<double>& y);
+            // lambda with width(lambda) = tot (np.interp on the reversed table).
+            static double tot_level_for(const TotShape& shp, double tot);
+            // Fill w[i, j) with max(w, pedestal + (R/lambda) s(k0 + t - i)),
+            // R = rail + 0.5 - pedestal.  Returns false (w untouched) when tot
+            // is at or beyond the table's widest level.
+            static bool tot_fill_run(std::vector<float>& w, int i, int j, double pedestal,
+                                     double rail, const TotShape& shp);
+
             virtual bool operator()(const IFrame::pointer& in, IFrame::pointer& out);
 
             virtual WireCell::Configuration default_configuration() const;
@@ -139,6 +161,24 @@ namespace WireCell {
             int m_overflow_adc{1};             // samples <= this are floor-pinned
             int m_overflow_min_samples{5};     // run length to qualify
             int m_overflow_min_neighbor{8000}; // both immediate neighbours must reach this
+            // Fill method of saturation_repair.  "twoside" (default) = the
+            // exponential bridge of repair_runs -> bit-identical to every
+            // existing config.  "tot" = time-over-threshold fill: each railed
+            // run (runs <= tot_merge_gap samples apart merged) is filled with
+            // the channel's bright-pulse model shape s(t) scaled so that it is
+            // exactly ToT samples wide at the rail, A = R / lambda(ToT),
+            // R = saturation_adc + 0.5 - pedestal.  s = SPE template (x) a
+            // 3-component LAr scintillation profile (x) Gauss, with per-channel
+            // parameters from tot_shape_file (fit on PDVD run 039252 bright
+            // unrailed pulses).  Channels without a shape, runs touching a
+            // trace edge and runs wider than the shape table fall back to
+            // twoside.  Bias on synthetically clipped real pulses <= 5% to
+            // depth 6.7 (twoside +23% at 4).  Port of tot_fill in
+            // pdvd/docs/qlmatch/scripts/saturation_tot_study.py; see
+            // pdvd/docs/qlmatch/30_pdvd-saturation-tot-vs-repair.md and 31_*.
+            std::string m_saturation_repair_mode{"twoside"};
+            std::string m_tot_shape_file{""};
+            int m_tot_merge_gap{2};
 
             IDFT::pointer m_dft;
 
@@ -171,6 +211,14 @@ namespace WireCell {
             // Rewrite floor-pinned OVERFLOW runs of `w` to m_saturation_adc in
             // place; returns the number rewritten.  Used by overflow_to_rail.
             int unclip_overflow(std::vector<float>& w) const;
+            // saturation_repair_mode "tot": merge runs, ToT-fill each merged
+            // run, fall back to repair_runs (twoside) where ToT cannot apply.
+            // Adds to the fill / fallback counters.
+            void repair_runs_tot(std::vector<float>& w,
+                                 const std::vector<std::pair<int, int>>& runs,
+                                 double pedestal, const SPETemplate& spe,
+                                 const TotShape* shp, int& nfill, int& nfallback) const;
+            std::map<int, TotShape> m_tot_shapes;  // channel -> shape ("tot" only)
             double auto_scale(const SPETemplate& spe,
                               const std::vector<std::complex<float>>& xG) const;
             // Transform via the complex (default) or real (use_real_dft) path.

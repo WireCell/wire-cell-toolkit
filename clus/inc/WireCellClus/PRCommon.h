@@ -123,7 +123,16 @@ namespace WireCell::Clus::PR {
 
         int index{-1};
         double range{-1};
-        bool flag_fix{false};        
+        bool flag_fix{false};
+
+        // doc pdvd/56 T4: per-plane dead-channel flags the fitter's
+        // regulariser already computes at this point (TrackFitting.cxx
+        // dQ_dx_fit's reg_flag_u/v/w) but never persisted anywhere -- writer
+        // only, no verdict path reads these.  Default false everywhere a Fit
+        // is built without setting them (dQ_dx_fill's placeholder path),
+        // correctly meaning "no dead-channel information available" rather
+        // than "not dead".
+        bool reg_flag_u{false}, reg_flag_v{false}, reg_flag_w{false};
 
         // Explicitly NOT defined:
 

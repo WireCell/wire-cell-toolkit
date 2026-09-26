@@ -30,9 +30,16 @@
 //   * Bee detector 'protodunehd'; single-event RSE from the job TLAs.
 // Every knob keeps the SBND key-suppression idiom: an unset knob is absent from
 // the compiled config and means "C++ default".  The SBND/PDVD-tuned DEFAULTS of
-// the pr() arguments are kept verbatim (they document those operating points);
-// the PDHD operating point is set in pdhd/wct-pr-perevt.jsonnet, which passes
-// every physics knob explicitly.
+// the pr() arguments here are kept verbatim; the PDHD operating point is set in
+// cfg/pgrapher/experiment/pdhd/wct-pr-perevt.jsonnet (promoted in-tree by doc
+// sbnd_xin/120 round A), which passes every physics knob explicitly.
+//
+// NOTE, doc sbnd_xin/120 sec 4: those verbatim defaults no longer document the
+// SBND operating point.  SBND's own pr() defaults, in
+// cfg/pgrapher/experiment/sbnd/clus.jsonnet, ARE that operating point now -- it
+// moved there so the LArSoft 1-step chain gets it by calling pr().  This fork
+// was NOT changed with it, so read these as the values SBND's pr() carried when
+// this file was forked, not as SBND production today.
 //
 // Import as
 //   local pr_mod = import 'pgrapher/experiment/pdhd/pr.jsonnet';
@@ -79,6 +86,30 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // from tcn_knobs below, so the production PR partition is
               // reproduced without a second copy.
               stm_michel_knobs={},
+              // doc pdvd/53: the SURVEY.  Fit every same-bundle cluster within
+              // stm_survey_radius_cm of the STM stop (not just the 35 cm the
+              // capture-gamma stage reaches), give every fitted-but-unclaimed
+              // companion segment role-6 rows in stm_michel_pts, and record the
+              // gate that dropped it (rej/d_stop/d_body).  Scaffolding for the
+              // hand scan, NOT a selection change: the Michel's cluster test
+              // still uses michel_dot_radius_cm and the gamma ring's outer edge
+              // is still stop_gamma_radius_cm, so a cluster reached only by this
+              // radius is claimed by neither.  The one physics effect is the
+              // preload perturbation of the candidate's own fit (doc pdvd/53
+              // sec 6).  C++ default FALSE -- false here omits every key and
+              // reproduces the doc pdvd/51 job byte-for-byte.
+              //
+              // OWNER RULING 2026-09-08: it stays FALSE here.  The survey costs a
+              // 20-25 % mover rate on the muon's OWN profile branches through
+              // preload_clusters (doc pdvd/53 sec 6.2) for a feature with no
+              // physics value -- it is hand-scan scaffolding.  The scan arms turn
+              // it on per job with
+              //   -S stm_michel_extra={survey_enable:true, survey_radius_cm:60.0,
+              //                        survey_max_len_cm:25.0}
+              // so PRODUCTION PR output stays bit-identical to doc pdvd/51.
+              stm_survey=false,
+              stm_survey_radius_cm=60.0,
+              stm_survey_max_len_cm=25.0,
               // Readout length in ticks for the Magnify/PrDisplay writers (SBND 3427;
               // PDVD production window 10000, run_clus_evt.sh readout_window_ticks).
               nticks=10000,
@@ -88,6 +119,46 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // flash-matched cluster (matched_flash_gid >= 0 with a real t0)
               // at least this long as a main.  0 = every matched cluster.
               flag_mains_min_length=0,
+              // doc pdvd/101: admit clusters without a Q/L match as mains (light-less
+              // SIMULATION only).  C++ default false.  Key omitted when false =>
+              // byte-identical compiled config.
+              flag_mains_unmatched=false,
+              // doc pdvd/101: sampling of the RETILE samplers only, i.e. the Steiner
+              // cloud (the fit's association reads the clustering job's points).
+              // retile_sampler_half_pitch (C++ Stepped default false) adds half-pitch
+              // crossings; retile_sampler_min_step (wires; C++ default 3) is the
+              // stepped spacing.  false / null => keys omitted => byte-identical.
+              retile_sampler_half_pitch=false,
+              retile_sampler_min_step=null,
+              // doc pdvd/102: the RETILE samplers' strategy.  FLIPPED FOR PDHD by
+              // doc pdvd/108, applied on the owner's go 2026-09-15: null =>
+              // 'charge_stepped', the prototype's retile rule (clus.jsonnet
+              // bs_live_face; CalcPoints.cxx), now PDHD production.  Graded WITH
+              // the doc-101 fit keys on the PDHD production lineage (arms
+              // d101hnew -> d102hcs, truth own103h > smx27 > smx28 under amendment
+              // 5, plus the symmetric owner check own103h2): is_stm purity
+              // 0.975 -> 0.959, efficiency 0.626 -> 0.616; michel purity
+              // 0.914 -> 0.880, efficiency 0.604 -> 0.689.
+              // This is D2, NOT D1: michel purity -0.035 misses the -0.020 bar of
+              // frozen amendment 7 (figs/104_pred_amend7.txt, sha 321360da).  The
+              // owner accepted the trade explicitly -- purity for efficiency, both
+              // is_stm metrics passing -- after rounds 7-10 (docs pdvd/104, 105,
+              // 106, 107) refuted five candidate explanations for the cost and
+              // localised what remains to 8 shared clusters.  'stepped' => the
+              // pre-flip retile; it compiles byte-identical to the pre-flip default.
+              // retile_sampler_wire_product / retile_sampler_charge_threshold
+              // override the C++ 2500 / 4000.
+              retile_sampler_strategy=null,
+              retile_sampler_wire_product=null,
+              retile_sampler_charge_threshold=null,
+              // doc pdvd/113: how much of the retile the Steiner copy gets
+              // (ImproveCluster_2 retile_mode; C++ default "full" = the historical
+              // retile inherited from MicroBooNE).  "no_paint" drops the two
+              // path-disc paintings, "footprint" also the dead / nearby-charge
+              // extension, "none" re-samples the cluster's own blobs in place with
+              // the retile samplers above (so charge_stepped is kept).  null => key
+              // omitted => byte-identical compiled config.  Study knob, not flipped.
+              retile_mode=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -433,6 +504,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // (owner 2026-07-26, after validation).
               stm_deficit_guard=true,
               stm_vertex_kink_guard=true,
+              // stm_kink_asym_enable: doc pdvd/56 T1b -- a third, additive
+              // OR-clause in find_first_kink's charge gate, admitting an
+              // ASYMMETRIC kink (Bragg into a cold Michel) that the existing
+              // "both arms hot" clauses never accept.  C++ defaults
+              // false/1.2/0.5; keys omitted when off => byte-identical.
+              // DEFAULT FALSE: no PDHD STM/Michel hand-scan record exists to
+              // confirm it here.
+              stm_kink_asym_enable=false,
+              stm_kink_asym_entry_mip=1.2,
+              stm_kink_asym_far_mip=0.5,
               // stm_descent_guard: doc-94 round-1 veto on a stop reached
               // travelling UPWARD or near-horizontally.  A cosmic stopping
               // muon arrived from the sky, so it entered a boundary face
@@ -701,6 +782,34 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
               // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
               steiner_terminal_min_separation=0,
+              // doc pdvd/114: blank-plane admission policy for the Steiner
+              // terminal candidates ("prefer3" | "nearby" | "prefer3+nearby")
+              // and the nearby radius (a LENGTH).  Threaded into BOTH steiner
+              // passes so the refresh builds its clusters like their peers.  Set
+              // from the driver, not here.  FLIPPED FOR PDHD by doc pdvd/116 on
+              // the owner's go 2026-09-18: null mode => 'prefer3' at the call
+              // sites below (was the C++ default 'wcp' = key omitted).  Escape
+              // hatch: -S steiner_blank_plane_mode='wcp' emits the C++ default
+              // (the OFF gates of docs 114/115 cover the binary).  The radius
+              // stays null = C++ default 0, key omitted.
+              steiner_blank_plane_mode=null,
+              steiner_blank_plane_radius=null,
+              // doc pdvd/115: charge-aware pricing of the Steiner BASE graph
+              // before the Voronoi step (alpha per zero-charge plane at the
+              // edge endpoints; scope "tree" | "tree+path").  Threaded into
+              // BOTH steiner passes.  Set from the driver.  FLIPPED FOR PDHD by
+              // doc pdvd/116 (owner 2026-09-18): null => alpha 0.5, scope
+              // 'tree+path' at the call sites below (was the C++ default 0 /
+              // 'tree' = keys omitted).  Graded with the doc-116 tagger point
+              // (proton_muon_guard, michel_min_kink_deg 20, michel_max_len_cm 30
+              // in the driver bag) against production after the owner scans
+              // own116h / own116v: PDHD is_stm purity +0.002 / efficiency +0.032,
+              // Michel +0.019 / +0.064; PDVD +0.000 / +0.018 and +0.003 / +0.037
+              // (figs/116_grade_*_own116.txt; rule figs/116_pred.txt sha ad24efda).
+              // Escape hatch: -S steiner_base_weight_blank_alpha=0
+              // -S steiner_base_weight_scope='tree' emits the C++ defaults.
+              steiner_base_weight_blank_alpha=null,
+              steiner_base_weight_scope=null,
               // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  OFF here =
               // the historical toolkit behaviour, key omitted => byte-identical.
               //   steiner_edge_charge_forward_dead_mix=true   weights steiner
@@ -1341,15 +1450,23 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
         // THIS downstream-z inset instead of tgm_fv_zmax_margin, i.e. the doc-32
         // widening becomes endpoint-only.
         local pdhd_pr_fv_margins_interior = [-tgm_fv_x_margin * wc.cm, -tgm_fv_x_margin * wc.cm, -mgn_y * wc.cm, -mgn_y * wc.cm, -tgm_fv_zmax_margin_interior * wc.cm, -mgn_zmin * wc.cm],
-        // Retiler for the steiner stage: same 'stepped' samplers that built the 3d
-        // PC (PointTreeBuilding), one per (anode, face) -- 4 PDHD anodes x 2 faces
+        // Retiler for the steiner stage: the same sampler OBJECTS that built the 3d
+        // PC (PointTreeBuilding), one per (anode, face), but since doc pdvd/108 no
+        // longer the same strategy -- clustering still builds the PC with 'stepped'
+        // (clus.jsonnet bs_live_face's default, untouched on both detectors), while
+        // the retile below runs 'charge_stepped'.  4 PDHD anodes x 2 faces
         // = 8 samplers.  Only one face per anode images (even idents face 0, odd
         // face 1; the other is a PDHD wall face), but bs_live_face's config does
         // not depend on the face, so both are emitted and the retiler's (apa,face)
         // lookup can never miss.  PDHD has ONE drift speed for every sampler.
         local improve2 = cm.improve_cluster_2(
             anodes=anodes,
-            samplers=[clus.sampler(clus_maker.live_sampler(a, f, wrapped_channel_charge=wrapped_channel_charge),
+            samplers=[clus.sampler(clus_maker.live_sampler(a, f, wrapped_channel_charge=wrapped_channel_charge,
+                                                           half_pitch=retile_sampler_half_pitch,
+                                                           min_step_size=retile_sampler_min_step,   // doc pdvd/101
+                                                           strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc pdvd/108 flip (PDHD only)
+                                                           wire_product=retile_sampler_wire_product,   // doc pdvd/102
+                                                           charge_threshold=retile_sampler_charge_threshold),
                                    apa=a.data.ident, face=f)
                       for a in anodes for f in [0, 1]],
             wrapped_channel_activity=retile_wrapped_channel_activity,
@@ -1357,7 +1474,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             bad_blob_max_run=if retile_bad_blob_max_run == null then null else retile_bad_blob_max_run * wc.cm,
             bad_blob_report=retile_bad_blob_report,
             hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm,
-            bad_blob_run_merge=if retile_bad_blob_run_merge == null then null else retile_bad_blob_run_merge * wc.cm),
+            bad_blob_run_merge=if retile_bad_blob_run_merge == null then null else retile_bad_blob_run_merge * wc.cm)
+            // doc pdvd/113: key omitted when null => byte-identical (same idiom as steiner's
+            // terminal_charge_threshold below).
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode } },
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
@@ -1378,6 +1498,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     require_t0: true,
                     min_length: flag_mains_min_length,
                     skip_flagged: true,
+                    [if flag_mains_unmatched then 'flag_unmatched']: true,   // doc pdvd/101
                 },
             },
             // PDVD has no unmerge_bundle stage (doc pdvd/25 sec 4): examine_bundles
@@ -1462,6 +1583,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
@@ -1490,6 +1615,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
+                                terminal_blank_plane_radius=steiner_blank_plane_radius,
+                                base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
+                                base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 // Same skip list as the first pass: replace=false
                                 // means this pass builds exactly the clusters
                                 // with no graph yet, i.e. everything the first
@@ -1546,6 +1675,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // omitted when off => byte-identical): doc-63 round-5 vetoes.
                 deficit_guard=stm_deficit_guard,
                 vertex_kink_guard=stm_vertex_kink_guard,
+                // kink_asym_enable (C++ default false; keys omitted when off
+                // => byte-identical): doc pdvd/56 T1b asymmetric kink clause.
+                kink_asym_enable=stm_kink_asym_enable,
+                kink_asym_entry_mip=(if stm_kink_asym_enable then stm_kink_asym_entry_mip else null),
+                kink_asym_far_mip=(if stm_kink_asym_enable then stm_kink_asym_far_mip else null),
                 // descent_guard (C++ default false; keys omitted when off =>
                 // byte-identical): doc-94 round-1 travel-direction veto.
                 descent_guard=stm_descent_guard,
@@ -1680,6 +1814,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     [if teb_turn_baseline != null then 'teb_turn_baseline']: teb_turn_baseline,
                     [if teb_turn_skirt != null then 'teb_turn_skirt']: teb_turn_skirt,
                     [if kink_dqdx_hot_ratio != null then 'kink_dqdx_hot_ratio']: kink_dqdx_hot_ratio,
+                    [if stm_survey then 'survey_enable']: true,
+                    [if stm_survey then 'survey_radius_cm']: stm_survey_radius_cm,
+                    [if stm_survey then 'survey_max_len_cm']: stm_survey_max_len_cm,
                 } + stm_michel_knobs),
             // STM-stage Magnify-tracking ROOT dump (doc sbnd_xin/docs/40): reads
             // the stm_fit/stm_pass cluster PCs and the "stm" TrackFitting slot,
@@ -2179,6 +2316,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // PR track_fit layer.  Entry present only when save_stm_fit is on
                 // => compiled config byte-identical otherwise.  Name must avoid
                 // the substring '-track' (bee3 models.py filters such files).
+                //
+                // ROUND 3 SCOPE (doc pdvd/39 sec 17, owner decision 2026-09-05;
+                // propagated to PDHD in doc pdvd/109).  require_flag:'STM' -- the
+                // trajectories of the clusters the tagger TAGGED, not of every
+                // cluster it fitted.  PDHD was left on the round-2 scope when PDVD
+                // moved, so this layer drew 18.6 clusters/event against PDVD's 4.6
+                // and the PDHD display read 5x busier for a config reason, not a
+                // physics one (doc pdvd/109 sec 2).
                 + (if save_stm_fit then [{
                     name: 'stm_fit',
                     visitor: 'TaggerCheckSTM:pr',
@@ -2190,10 +2335,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     individual: false,
                     dQdx_scale: 0.1,
                     dQdx_offset: -1000.0,
+                    require_flag: 'STM',
                 }] else [])
-                // doc pdvd/39: four STM-SCOPED layers, so the cosmic-only
+                // doc pdvd/39: three STM-SCOPED layers, so the cosmic-only
                 // chain's display shows the STM result and the inputs it was
-                // built from, and nothing else.  All four are bound to the
+                // built from, and nothing else.  All three are bound to the
                 // STM visitor, so they capture the grouping exactly as the
                 // tagger saw it -- before protect_bundle can split a cluster
                 // out from under its flag.  require_flag / require_pc /
@@ -2203,20 +2349,27 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                 // Names must avoid the substring '-track' (bee3 models.py
                 // filters such files).
                 //
-                // ROUND 2 SCOPE (doc pdvd/39 sec 11): the first three carry
-                // require_pc:'stm_fit', NOT require_flag:'STM'.  TaggerCheckSTM
-                // writes the 'stm_fit' local PC for every evaluated main that
-                // recorded a fit pass, whatever the verdict
-                // (TaggerCheckSTM.cxx persist_stm_fit, unconditional on is_stm),
-                // so gating on that PC makes these layers cover EXACTLY the
-                // object set the stm_fit layer draws -- 25 clusters vs 9 on
-                // evt 298595, the inconsistency the owner flagged.  The verdict
-                // itself moves to the separate 'stm_tagged' layer below.
+                // Round 2 (doc pdvd/39 sec 11) gated these on require_pc:'stm_fit'
+                // -- the set the tagger FITTED -- so they paired 1:1 with an
+                // unscoped 'stm_fit'.  ROUND 3 (doc pdvd/39 sec 17, owner decision
+                // 2026-09-05; reached PDHD only in doc pdvd/109) moves all four
+                // layers to require_flag:'STM' together, so the pairing is kept
+                // and the whole STM display carries the VERDICT population.
+                // require_flag alone, not ANDed with require_pc: a cluster can be
+                // tagged after a pass that recorded no fit, and require_pc would
+                // hide it (doc pdvd/39 sec 17.1).  Measured on PDHD: 0 such
+                // clusters in 61 events, so the two agree today -- the AND is
+                // omitted for what it would do, not for what it does.
+                // 'stm_tagged' is gone: with 'stm' on require_flag the two select
+                // the same clusters and dump the same PC through the same coords.
+                // Verified on PDHD 028084_3/12, 029107_5/16/18 (doc pdvd/109 sec 4):
+                // the new 0-stm-global.json equals the old 0-stm_tagged-global.json
+                // on every array, differing only in the layer's own type string.
                 + (if std.member(pipeline_names, 'tagger_check_stm') then [
                     {
                         // The original 3D image of every cluster the STM tagger
-                        // fitted: the 'clustering' layer restricted to the
-                        // stm_fit candidates.  Pairs 1:1 with 'stm_fit'.
+                        // TAGGED: the 'clustering' layer restricted to the
+                        // flag_STM set.  Pairs 1:1 with 'stm_fit'.
                         name: 'stm',
                         visitor: 'TaggerCheckSTM:pr',
                         grouping: 'live',
@@ -2225,7 +2378,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: '3d',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
+                        require_flag: 'STM',
                     },
                     {
                         // The Steiner tree's NODE cloud for those clusters (Bee
@@ -2244,7 +2397,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
+                        require_flag: 'STM',
                     },
                     {
                         // The same cloud thinned to flag_steiner_terminal only.
@@ -2256,24 +2409,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         pcname: 'steiner_pc',
                         coords: clus_maker.t0cor_coords,
                         individual: false,
-                        require_pc: 'stm_fit',
-                        steiner_terminals_only: true,
-                    },
-                    {
-                        // The VERDICT layer: the 3D image of the clusters the
-                        // tagger actually tagged STM (flag_STM, set once at
-                        // TaggerCheckSTM.cxx set_flag(Flags::STM)).  A strict
-                        // subset of 'stm' above -- this is the small layer to
-                        // read first; 'stm' is the candidate population.
-                        name: 'stm_tagged',
-                        visitor: 'TaggerCheckSTM:pr',
-                        grouping: 'live',
-                        detector: 'protodunehd',
-                        algorithm: 'stm_tagged',
-                        pcname: '3d',
-                        coords: clus_maker.t0cor_coords,
-                        individual: false,
                         require_flag: 'STM',
+                        steiner_terminals_only: true,
                     },
                 ] else []),
                 // Particle-flow Bee output ("mc" jsTree JSON), emitted once after
@@ -2290,8 +2427,27 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                         // the pipeline => default compiled config byte-identical.
                         [if pr_tail_on
                          then 'prototype_names']: true,
+                        // doc pdvd/51: 5 -> 0.2 MeV.  The floor is a DISPLAY floor
+                        // (MultiAlgBlobClustering.cxx:2078 keep_node), and at 5 MeV it
+                        // deletes every muon-capture gamma this chain now reconstructs:
+                        // that population is ~1 MeV (d16vnu p10 0.37 / p50 0.97 / p90
+                        // 4.37).  append_pseudo_shower drops the carrier too when its
+                        // only leaf goes (:2174), so the node would vanish whole.
+                        // COLLATERAL, measured not assumed: over d16vnu (119 events) the
+                        // PR labels 1096 segments pdg 11 and 666 reach mc.json, so this
+                        // can restore at most ~430 nodes (~3.6/event), mostly sub-5-MeV
+                        // delta rays.  Only the two ProtoDUNE PR configs carry it -- no
+                        // MultiAlgBlobClustering change, so SBND is untouched.
                         [if pr_tail_on
-                         then 'em_ke_min']: 5 * wc.MeV,
+                         then 'em_ke_min']: 0.2 * wc.MeV,
+                        // doc pdvd/51: prototype_names writes an INTEGER MeV, so
+                        // a ~1 MeV capture gamma is labelled "0 MeV".  Below this
+                        // value the node text carries two decimals instead.
+                        // C++ default 0 = off = prototype formatting everywhere,
+                        // so the key's absence is byte-identical and no other
+                        // detector sees it.
+                        [if pr_tail_on
+                         then 'ke_decimal_below']: 10 * wc.MeV,
                         // doc pr/38: nucleon floor lowered from the prototype's
                         // 10 MeV (WCReader::KeepMC) to 3 MeV, owner decision
                         // 2026-08-05 -- sub-10-MeV protons attached at the

@@ -64,3 +64,37 @@ TEST_CASE("pr102 keep-isolated: pre-pr/102 call shape unchanged (default args)")
     CHECK(other_seg_keep_isolated_ok(true, 102, 8.0 * units::cm, MIN_POINTS, MIN_LENGTH));
     CHECK_FALSE(other_seg_keep_isolated_ok(true, 4, 8.0 * units::cm, MIN_POINTS, MIN_LENGTH));
 }
+
+// doc pdvd/87: other_seg_keep_anchor_ok, doc pdvd/62's stop-local keep with
+// the size floor.  The residuals are the ones doc pdvd/86 sec 8.1 read off
+// PDVD production's pr54 drop lines.
+TEST_CASE("pdvd87 keep near-anchor: no anchor or radius 0 never keeps")
+{
+    CHECK_FALSE(other_seg_keep_anchor_ok(-1.0, 5.0 * units::cm, 20, 10.6 * units::cm, 0, 0.0));
+    CHECK_FALSE(other_seg_keep_anchor_ok(-1.0, 5.0 * units::cm, 20, 10.6 * units::cm, 5, 5.0 * units::cm));
+    CHECK_FALSE(other_seg_keep_anchor_ok(3.1 * units::cm, 0.0, 20, 10.6 * units::cm, 0, 0.0));
+}
+
+TEST_CASE("pdvd87 keep near-anchor: 0/0 floors are doc 62's radius test")
+{
+    for (double d : {0.0, 1.1, 3.1, 4.99, 5.0, 5.01, 19.0}) {
+        const bool radius = d <= 5.0;
+        CHECK(other_seg_keep_anchor_ok(d * units::cm, 5.0 * units::cm, 2, 1.19 * units::cm, 0, 0.0) == radius);
+    }
+}
+
+TEST_CASE("pdvd87 keep near-anchor: the 5/5 floor, inclusive and AND-ed")
+{
+    const double R = 5.0 * units::cm, L = 5.0 * units::cm;
+    const int N = 5;
+    CHECK(other_seg_keep_anchor_ok(3.1 * units::cm, R, 20, 10.61 * units::cm, N, L));    // 039253_0/44
+    CHECK(other_seg_keep_anchor_ok(1.4 * units::cm, R, 6, 8.53 * units::cm, N, L));      // 039349_30/45, the 6-terminal piece
+    CHECK_FALSE(other_seg_keep_anchor_ok(1.7 * units::cm, R, 4, 5.47 * units::cm, N, L)); // 039349_30/45, the 4-terminal piece
+    CHECK_FALSE(other_seg_keep_anchor_ok(1.1 * units::cm, R, 2, 1.19 * units::cm, N, L)); // 039349_61/21, doc 62's lost TP
+    CHECK_FALSE(other_seg_keep_anchor_ok(2.7 * units::cm, R, 3, 6.77 * units::cm, N, L)); // 039349_20/73 (THRU): long, too few terminals
+    CHECK_FALSE(other_seg_keep_anchor_ok(1.9 * units::cm, R, 6, 0.82 * units::cm, N, L)); // 039252_17/91 (THRU): enough terminals, a stub
+    CHECK(other_seg_keep_anchor_ok(R, R, N, L, N, L));                                    // boundaries inclusive
+    CHECK_FALSE(other_seg_keep_anchor_ok(R, R, N - 1, L, N, L));
+    CHECK_FALSE(other_seg_keep_anchor_ok(R, R, N, 0.999 * L, N, L));
+    CHECK_FALSE(other_seg_keep_anchor_ok(1.01 * R, R, 20, 10.61 * units::cm, N, L));    // outside the radius, whatever the size
+}

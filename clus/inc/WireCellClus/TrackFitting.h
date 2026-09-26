@@ -133,6 +133,43 @@ namespace WireCell::Clus {
             // Inert while fit_blob_coverage < 0.
             double fit_blob_coverage_weight = 0.1;
 
+            // doc pdvd/101 -- position least-squares WEIGHT POWER.  Each wire
+            // row of fit_point / trajectory_fit is scaled by s = q/err * div
+            // factor * quality factors, so its weight is s^2; with a flat
+            // charge_err that is q^2, and on a coarse pitch (PDVD U/V 7.65 mm)
+            // the brightest wire wins and the fitted point snaps to its centre.
+            // When != 2 the row scale becomes |s|^(fit_weight_pow/2), i.e. the
+            // weight is |s|^fit_weight_pow.  2 (default) skips the line =>
+            // byte-identical.
+            double fit_weight_pow = 2;
+
+            // doc pdvd/101 -- centre form_point_association's per-plane wire
+            // window on the CONTINUOUS wire coordinate of the point instead of
+            // its rounded wire index.  The rounded centre puts the window
+            // edges on the wire lattice, so a point half-way between two wires
+            // collects one side's wires.  Non-zero = on; 0 (default) =>
+            // byte-identical.  (A double for the set_parameter plumbing.)
+            double assoc_cont_center = 0;
+
+            // doc pdvd/111 -- SEED RE-CENTRING before the first trajectory_fit
+            // pass.  The fit only refines a point inside its association window
+            // (~1.1 cm on pass 1, ~0.5 cm on pass 2) and the area smoothing
+            // reverts a point that moves away from its neighbours, so a seed
+            // (the Steiner Dijkstra path, filled by organize_orig_path) that runs
+            // 1-5 cm off the track's charge ridge -- a straight chord across the
+            // Steiner cloud at a bend, a path along the cloud's edge -- stays
+            // there.  When > 0, every organize_orig_path point is moved
+            // TRANSVERSELY to the local path direction by a Gaussian-kernel
+            // mean shift (width seed_recenter_sigma, mm) over the cluster's own
+            // 3-D points weighted by blob charge per point, restricted to a slab
+            // of half the pass-1 spacing along the path; at most
+            // seed_recenter_iter shifts; a point whose total move would exceed
+            // seed_recenter_max_move (mm) keeps its seed position.  0 (default)
+            // => not called => byte-identical.
+            double seed_recenter_sigma = 0;
+            double seed_recenter_iter = 5;
+            double seed_recenter_max_move = 30;
+
             // doc sbnd_xin/docs/pr/67 -- LOG-ONLY probe (0 = off = no lines =
             // byte-identical).  examine_end_ps_vec is the primary END trimmer:
             // it pops points off the front and back of a trajectory while
@@ -235,6 +272,17 @@ namespace WireCell::Clus {
             // Reported as a double for the set_parameter(name, value) plumbing.
             double excl_t0_frame = 0;
 
+            // doc pdvd/81 -- keep the multi-track dQ/dx fit's RESPONSE for the
+            // fitted cluster: the whitened sparse matrices R (U,V,W), the
+            // solution pos_3D and the 2-D row keys with their un-whitening
+            // scale, so a caller can form the prediction of a SUBSET of the
+            // trajectory rows (e.g. the stopping muon's chain alone) as
+            // scale * R * (pos_3D masked).  CheckSTM_Michel reads it for the
+            // charge-based Michel energy.  0 = OFF = nothing stored, no code
+            // path touched (TrackFitting.cxx is shared with SBND / uBooNE).
+            // Reported as a double for the set_parameter(name, value) plumbing.
+            double keep_dqdx_response = 0;
+
             // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
             // looks up wpid_offsets/wpid_slopes for the (apa, face) that
             // contained_by() returns and dereferenced a MISSING entry (a volume
@@ -243,7 +291,13 @@ namespace WireCell::Clus {
             // trajectory_fit's loop already does.  0 = legacy = byte-identical.
             double proj_skip_unmapped_face = 0;
 
-            // doc pdhd/11 -- the FINAL organize_ps_path (do_single_tracking's
+            // doc pdhd/11 (comment corrected doc pdvd/61 sec 9 item 1: the
+            // low_dis_limit named below is the local variable AS ALREADY
+            // HALVED by do_single_tracking's own pass-2 reassignment
+            // (TrackFitting.cxx ~:10088, m_params.low_dis_limit/2.), not the
+            // config default -- so with the shipped 12.0 mm default the gap
+            // threshold below is 1.6 * 6.0 mm = 9.6 mm = 0.96 cm, not 1.92 cm)
+            // -- the FINAL organize_ps_path (do_single_tracking's
             // third call, low_dis_limit / end_point_limit 0) straight-line-fills
             // every gap >= 1.6 * low_dis_limit, and nothing between it and the
             // PR::Fit construction charge-tests the points it inserts: no
@@ -520,6 +574,9 @@ namespace WireCell::Clus {
          */
         std::vector<WireCell::Point> organize_orig_path(std::shared_ptr<PR::Segment> segment, double low_dis_limit=1.2*units::cm, double end_point_limit=0.6*units::cm);
 
+        // doc pdvd/111: the seed_recenter_sigma step (see Parameters); no-op when the knob is 0.
+        void recenter_seed_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double half_slab) const;
+
         std::vector<WireCell::Point> examine_end_ps_vec(std::shared_ptr<PR::Segment> segment, const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end);
 
         void organize_ps_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts, double low_dis_limit, double end_point_limit);
@@ -692,6 +749,30 @@ namespace WireCell::Clus {
             /// instead of duplicating one cluster's cells under every pass.
             std::map<APAFacePlane, std::map<WireTime, FittedCharge2D>> cells;
             int pass{-1};   // declared LAST so the PR-stage {cluster, ident, cells} initializer keeps compiling
+        };
+
+        /// doc pdvd/81: one 2-D row of a stored dQ/dx multi-fit response.  `scale`
+        /// is the row's whitening denominator total_err (the same expression the
+        /// fit divides the data by) for a live measured row, 0 otherwise -- the
+        /// prediction in electrons is scale * (R * pos_3D)(row).
+        struct DqdxResponseRow {
+            explicit DqdxResponseRow(const CoordReadout& k) : key(k) {}
+            CoordReadout key;
+            double charge{0}, charge_err{0}, scale{0};
+            int flag{0};
+            std::vector<Coord2D> coords;   // the (face, wire) cells the readout row maps to, set order
+        };
+        /// doc pdvd/81: the multi-fit response of ONE cluster's LAST dQ_dx_multi_fit
+        /// (Parameters::keep_dqdx_response).  Row i of R[p] is rows[p][i]; column k
+        /// is trajectory row k (PR::Fit::index of every segment/vertex fit the
+        /// fit wrote back).  Erased at the next dQ_dx_multi_fit entry for the
+        /// same cluster, so an early-returning fit never leaves a stale pairing.
+        struct DqdxResponse {
+            Facade::Cluster* cluster{nullptr};
+            int ident{-1};
+            std::array<Eigen::SparseMatrix<double>, 3> R;
+            Eigen::VectorXd pos_3D;
+            std::array<std::vector<DqdxResponseRow>, 3> rows;
         };
 
         // Fill fitted 2D charge results after dQ/dx fitting
@@ -986,6 +1067,15 @@ namespace WireCell::Clus {
         /// (doc pdvd/25 M3: PDVD trajectories cross 16 (anode,face) volumes).
         /// Identical to the former branch order whenever i+1 exists.
         static int dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf);
+
+        /// doc pdvd/81: un-whitened prediction of a SUBSET of trajectory rows:
+        /// out(i) = row_scale[i] * sum_k R(i,k) * pos(k) * (col_mask[k] != 0).
+        /// Pure; col_mask shorter than pos.size() reads as 0 beyond its end,
+        /// row_scale shorter than R.rows() reads as 0 beyond its end.
+        static Eigen::VectorXd masked_response_prediction(const Eigen::SparseMatrix<double>& R,
+                                                          const Eigen::VectorXd& pos,
+                                                          const std::vector<char>& col_mask,
+                                                          const std::vector<double>& row_scale);
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
         // Measured 2D charge data access
@@ -1004,6 +1094,12 @@ namespace WireCell::Clus {
         /// get_fitted_charge_2d() these are NOT merged, so pred_charge is the
         /// value the named cluster's own fit produced.
         const std::vector<ClusterFitted2D>& get_cluster_fitted_charge_2d() const { return m_cluster_fitted_charge_2d; }
+
+        /// doc pdvd/81: the stored multi-fit response of `cluster` (nullptr when
+        /// keep_dqdx_response was off, the cluster was never multi-fitted with
+        /// a cluster filter, or its last fit returned early).
+        const DqdxResponse* get_dqdx_response(const Facade::Cluster* cluster) const;
+        void clear_dqdx_responses() { m_dqdx_responses.clear(); }
 
         /// doc pdvd/42: append a snapshot captured elsewhere (the STM tagger's
         /// per-pass copy of its private fitter's map) so a holder TrackFitting
@@ -1277,6 +1373,10 @@ namespace WireCell::Clus {
         /// wherever no collision occurs.
         std::vector<ClusterFitted2D> m_cluster_fitted_charge_2d;
 
+        /// doc pdvd/81: per-cluster multi-fit responses, capture order (see
+        /// DqdxResponse).  Empty unless Parameters::keep_dqdx_response > 0.
+        std::vector<DqdxResponse> m_dqdx_responses;
+
         // global geometry
 
         void BuildGeometry();
@@ -1306,6 +1406,15 @@ namespace WireCell::Clus {
         std::vector<double> pt;
         std::vector<std::pair<int, int>> paf;
         std::vector<double> reduced_chi2;
+        // doc pdvd/56 T4: per-plane dead-channel flags, populated by
+        // dQ_dx_fit only (the single-segment path CheckSTM_Michel/
+        // TaggerCheckSTM actually call); dQ_dx_multi_fit keeps its own
+        // function-local reg_flag_u/v/w, unrelated to these.  Sized/zeroed by
+        // dQ_dx_fill too so do_single_tracking's Fit-build loop always sees a
+        // consistent (possibly empty) vector; see the bounds guard there.
+        std::vector<int> reg_flag_u;
+        std::vector<int> reg_flag_v;
+        std::vector<int> reg_flag_w;
     };
 
 } // namespace WireCell::Clus

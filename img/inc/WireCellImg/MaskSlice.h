@@ -81,6 +81,20 @@ namespace WireCell::Img {
         // input frame.
         int m_min_tbin{0};
         int m_max_tbin{0}; // not including
+        // doc sbnd_xin/113 "quiet-plane 2-view tiling".  A masked plane's channels are normally filled
+        // only from the "bad" channel mask, so a track whose signal one plane does not see (a track
+        // running along that plane's wires or along the drift, whose prolonged signal the SP does not
+        // pass) yields NO blob at all: GridTiling needs every layer non-empty.  With
+        // quiet_mask_window >= 0, a masked-plane channel is ALSO marked masked ({masked_charge,
+        // masked_error}) in every slice that has no active tick on that channel within +-window
+        // slices, so the 2-view branch can tile the two live planes there.  -1 (default) = off,
+        // byte-identical legacy behaviour.
+        int m_quiet_mask_window{-1};
+        // quiet_mask_gap >= 0 restricts the quiet masking to the slices within +-gap slices of an ACTIVE slice
+        // of the same channel (a gap in a channel that does carry signal nearby in time: the prolonged-signal
+        // stretch of a track that plane sees at its ends), leaving channels that are silent everywhere live and
+        // empty, so the 2-view tiling cannot ghost on them.  -1 (default) = no restriction (window rule only).
+        int m_quiet_mask_gap{-1};
     };
 
     class MaskSlicer : public MaskSliceBase, public IFrameSlicer {

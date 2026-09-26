@@ -163,6 +163,14 @@ namespace WireCell::Match {
         // self-trigger-silent families never enters matching.  Empty channel
         // list (default) => no-op => bit-identical legacy admission.
         std::vector<int> m_flash_sel_channels;
+        // Channels whose per-flash saturation flag is cleared when the flash is
+        // read (Opflash::clear_sat), so use_saturation_flag no longer masks them
+        // out of chi2/KS/LASSO nor inflates their chi2 term.  Meant for channels
+        // whose railed pulses the light chain repairs into a measurement (PDVD
+        // cathode X-ARAPUCAs under the OpDecon ToT fill, docs/qlmatch/32);
+        // other channels keep their flags.  Empty (default) => no-op =>
+        // bit-identical.
+        std::vector<int> m_sat_flag_ignore_channels;
         double m_flash_sel_minPE{0.0};
         int m_flash_sel_min_fired{0};
         double m_flash_sel_fired_pe{1.0};
@@ -485,6 +493,36 @@ namespace WireCell::Match {
         // Pair with chi2_sat_inflate for the extra per-channel error.
         // Default TRUE = the legacy drop => bit-identical for existing cfgs.
         bool m_saturation_mask_fit{true};
+
+        // fit_round2_shared was the one LASSO fill site that did NOT skip
+        // rail-flagged rows (d29d5f670 zeroed them in fit_round1, fit_round2
+        // and fit_round1_shared).  With saturation_mask_fit=false the railed
+        // channel's clipped/repaired PE and its prediction therefore enter the
+        // joint round-2 solve that sets `strength`.  true => skip those rows
+        // there too (same test as fit_round1_shared).  Default FALSE = the
+        // legacy fill => bit-identical for existing cfgs.  (doc pdvd/qlmatch/33)
+        bool m_sat_skip_round2_shared{false};
+
+        // LASSO column weight base |pred_tot - meas_tot| / meas_tot in the
+        // shared fits uses the flash total over ALL channels (railed and
+        // masked included) against the bundle's summed prediction.  On a
+        // cathode-railed flash most of meas_tot sits on railed channels, so
+        // the weight follows the light's rail repair rather than the pattern
+        // the fit uses.  true => both totals are summed over the LASSO row
+        // channels (opdet_idx_v) that are not rail-flagged; a flash with no
+        // unrailed light falls back to the legacy totals.  Shared fits only
+        // (fit_round1_shared, fit_round2_shared).  Default FALSE = legacy
+        // totals => bit-identical for existing cfgs.  (doc pdvd/qlmatch/33)
+        bool m_lasso_weight_unrailed{false};
+
+        // Repaired-rail tolerance in the bundle KS shape test (forwarded as
+        // BundleQualityParams::ks_sat_tol; see TimingTPCBundle.h ks_sat_clamp).
+        // > 0: a rail-flagged channel left in the KS by saturation_mask_fit=false
+        // enters the KS clamped to within a factor (1+tol) of the bundle
+        // prediction scaled to its unrailed light.  The KS feeds the LASSO weight
+        // (delta_shape term), the ks cuts and the bundle merges.  Default 0 =
+        // off => bit-identical for existing cfgs.  (doc pdvd/qlmatch/34)
+        double m_ks_sat_tol{0.0};
 
         // Track readout coverage PER FLASH (Opflash::get_cov, fed by the
         // OpHitFinder emit_coverage -> OpFlashFinder flash_cov chain): a
@@ -1119,6 +1157,15 @@ namespace WireCell::Match {
         bool   m_xtpc_sc1_light_gate{false};
         double m_xtpc_sc1_ks_max{0.3};
         double m_xtpc_sc1_c2n_max{50.0};
+        // Over-prediction ceiling for the same gate (doc sbnd_xin/123 sec 18,
+        // SBND evt 59003): a cathode-side crosser half at a dim coincident
+        // flash can pass ks/chi2 (ks 0.13, chi2/ndf 14.6) while predicting 36x
+        // the measured light (pred 5966 PE vs meas 164 PE) -- the prefilter's
+        // over-prediction cut exempts at_x_boundary bundles, so it never saw
+        // it.  > 0 (with the gate on): the flags are denied when
+        // total_pred_light > overpred_max * max(flash total PE, 1).  0 (default)
+        // => not tested, bit-identical.
+        double m_xtpc_sc1_overpred_max{0.0};
         // Cathode-rescue ks ceiling: purge_unconfirmed_cathode_rescue keeps a
         // provisional overshoot bundle on scenario-1 confirmation alone; scan
         // shows those survivors at 69% phantom (ks p50 0.435 vs agrees 0.20).

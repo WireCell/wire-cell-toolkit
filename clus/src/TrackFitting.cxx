@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <set>
 #include <unordered_set>
+#include <Eigen/Dense>   // doc pdvd/111 trace: 3x3 leave-one-plane-out solves
 #include <string>
 #include <sstream>
 #include <iomanip>
@@ -143,6 +145,61 @@ static void stm_path_dump(const std::string& tag, const char* stage,
     stm_path_dump(tag, stage, pts);
 }
 
+// doc pdvd/111: per-point association trace of trajectory_fit, log-only, off unless
+// WCT_TRAJ_ASSOC_DEBUG is set.  It answers "which plane put this fitted point where it
+// is?": for every trajectory point it prints the per-plane association (cell count,
+// charge, the effective-weight wire/time centroid), the solved position, the three
+// leave-one-plane-out solves of the same normal equations, and what the post-solve
+// steps did to the point (skip_trajectory_point, area-smoothing revert).  Every value
+// is computed on the side from the matrices the fit already built; nothing the fit
+// uses is read back, so the trajectory is unchanged with the variable set or unset.
+//
+//     TRAJASSOC <tag> <method> <call> <i> <cluster> <apa> <face> <kept> <skip> <rev> <nan>
+//               <init xyz> <sol xyz> <final xyz> <noU xyz> <noV xyz> <noW xyz>      (cm)
+//               then per plane U, V, W: <ncell> <sum_q> <wcen> <tcen> <wsol> <quantity>
+//     tsol      (the solved point's time coordinate, ticks) closes the line.
+// wcen/tcen are weighted by scaling^2 (the least-squares weight); wsol/tsol project the
+// solved point with the point's own (apa, face) offsets and slopes.  <final> is nan when
+// the point did not survive.  Cell-level lines for clusters listed (comma-separated
+// idents) in WCT_TRAJ_ASSOC_CLUSTERS:
+//     TRAJCELL <tag> <method> <call> <i> <plane> <apa> <face> <wire> <time> <q> <qerr> <div> <scaling>
+static bool traj_assoc_debug()
+{
+    static const bool v = (getenv("WCT_TRAJ_ASSOC_DEBUG") != nullptr);
+    return v;
+}
+
+static bool traj_assoc_cells_for(int ident)
+{
+    static const std::set<int> ids = []() {
+        std::set<int> s;
+        const char* e = getenv("WCT_TRAJ_ASSOC_CLUSTERS");
+        if (e) {
+            std::stringstream ss(e);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                if (!tok.empty()) s.insert(std::atoi(tok.c_str()));
+            }
+        }
+        return s;
+    }();
+    return ids.count(ident) > 0;
+}
+
+namespace {
+    struct TrajAssocCell {
+        int plane, apa, face, wire, time;
+        double q, qerr, div, scaling;
+    };
+    struct TrajAssocPoint {
+        int apa{-1}, face{-1};
+        bool nan{false}, kept{false}, skip{false}, rev{false};
+        WireCell::Point init, sol, fin, loo[3];
+        std::vector<TrajAssocCell> cells;
+        double quantity[3]{0, 0, 0};
+    };
+}
+
 // Temporary determinism-debug helpers, enabled with WCT_DET_DEBUG=1.
 // FNV-1a over raw double bytes; prints stable per-call checksums of solver
 // inputs so two runs can be diffed to localize run-to-run divergence.
@@ -189,6 +246,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.end_trim_gap_len = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
+    } else if (name == "keep_dqdx_response") {          // doc pdvd/81
+        m_params.keep_dqdx_response = value;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -261,6 +320,16 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.fit_blob_coverage_ghost_dis = value;
     } else if (name == "fit_blob_coverage_weight") {
         m_params.fit_blob_coverage_weight = value;
+    } else if (name == "seed_recenter_sigma") {        // doc pdvd/111
+        m_params.seed_recenter_sigma = value;
+    } else if (name == "seed_recenter_iter") {         // doc pdvd/111
+        m_params.seed_recenter_iter = value;
+    } else if (name == "seed_recenter_max_move") {     // doc pdvd/111
+        m_params.seed_recenter_max_move = value;
+    } else if (name == "fit_weight_pow") {
+        m_params.fit_weight_pow = value;
+    } else if (name == "assoc_cont_center") {
+        m_params.assoc_cont_center = value;
     } else if (name == "default_dQ_dx") {
         m_params.default_dQ_dx = value;
     } else if (name == "end_point_factor") {
@@ -364,6 +433,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.skip_revert_iso_xext_cut;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         return m_params.dqdx_fit_keep_all_points;
+    } else if (name == "keep_dqdx_response") {          // doc pdvd/81
+        return m_params.keep_dqdx_response;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -382,6 +453,16 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.fit_blob_coverage_ghost_dis;
     } else if (name == "fit_blob_coverage_weight") {
         return m_params.fit_blob_coverage_weight;
+    } else if (name == "seed_recenter_sigma") {        // doc pdvd/111
+        return m_params.seed_recenter_sigma;
+    } else if (name == "seed_recenter_iter") {         // doc pdvd/111
+        return m_params.seed_recenter_iter;
+    } else if (name == "seed_recenter_max_move") {     // doc pdvd/111
+        return m_params.seed_recenter_max_move;
+    } else if (name == "fit_weight_pow") {
+        return m_params.fit_weight_pow;
+    } else if (name == "assoc_cont_center") {
+        return m_params.assoc_cont_center;
     } else if (name == "default_dQ_dx") {
         return m_params.default_dQ_dx;
     } else if (name == "end_point_factor") {
@@ -454,6 +535,7 @@ void TrackFitting::clear_graph(){
 // live heap in these members across the 12 candidate fitters.
 void TrackFitting::release_fit_scratch(){
     m_charge_data.clear();
+    m_dqdx_responses.clear();   // doc pdvd/81
     m_orig_charge_data.clear();
     m_2d_to_3d.clear();
     m_3d_to_2d.clear();
@@ -1703,6 +1785,35 @@ void TrackFitting::build_dqdx_rows(const std::unordered_map<CoordReadout, Charge
     }
 }
 
+// doc pdvd/81
+const TrackFitting::DqdxResponse* TrackFitting::get_dqdx_response(const Facade::Cluster* cluster) const
+{
+    for (const auto& r : m_dqdx_responses) {
+        if (r.cluster == cluster) return &r;
+    }
+    return nullptr;
+}
+
+// doc pdvd/81
+Eigen::VectorXd TrackFitting::masked_response_prediction(const Eigen::SparseMatrix<double>& R,
+                                                         const Eigen::VectorXd& pos,
+                                                         const std::vector<char>& col_mask,
+                                                         const std::vector<double>& row_scale)
+{
+    Eigen::VectorXd masked = Eigen::VectorXd::Zero(pos.size());
+    const Eigen::Index nmask = static_cast<Eigen::Index>(col_mask.size());
+    for (Eigen::Index k = 0; k < pos.size() && k < nmask; ++k) {
+        if (col_mask[k]) masked(k) = pos(k);
+    }
+    Eigen::VectorXd out = Eigen::VectorXd::Zero(R.rows());
+    if (pos.size() == R.cols()) out = R * masked;
+    const Eigen::Index nscale = static_cast<Eigen::Index>(row_scale.size());
+    for (Eigen::Index i = 0; i < out.size(); ++i) {
+        out(i) *= (i < nscale) ? row_scale[i] : 0.0;
+    }
+    return out;
+}
+
 void TrackFitting::record_cluster_fitted_charge_2d()
 {
     // Persist this cluster's cells so they survive when the next
@@ -2559,6 +2670,49 @@ std::vector<WireCell::Point> TrackFitting::organize_orig_path(std::shared_ptr<PR
     return pts;
 }
 
+// doc pdvd/111: seed re-centring (Parameters::seed_recenter_sigma).  The measured
+// defect: 90 % of the PDHD STM-fit rows more than 1 cm off the image ridge were
+// already off in the Steiner seed at that place, and the fit, whose association
+// window reaches about one window per pass, kept a recovery at only 7 % of them.
+// Directions come from the ORIGINAL seed (+-2 points), so every point is moved
+// against the same reference regardless of order; the candidate image points are
+// sorted by index so the kernel sums are order-stable.
+void TrackFitting::recenter_seed_path(std::shared_ptr<PR::Segment> segment, std::vector<WireCell::Point>& pts,
+                                      double half_slab) const
+{
+    const double sigma = m_params.seed_recenter_sigma;
+    if (!(sigma > 0) || pts.size() < 3 || !segment) return;
+    const auto* cluster = segment->cluster();
+    if (!cluster) return;
+    const int max_iter = std::max(1, static_cast<int>(std::lround(m_params.seed_recenter_iter)));
+    const double max_move = m_params.seed_recenter_max_move;
+    const double gather = 3.0 * sigma + max_move;
+    const std::vector<WireCell::Point> orig = pts;
+    const int n = static_cast<int>(orig.size());
+    std::vector<size_t> idx;
+    std::vector<WireCell::Point> cand;
+    std::vector<double> weights;
+    for (int i = 0; i != n; ++i) {
+        const WireCell::Vector dir = orig[std::min(n - 1, i + 2)] - orig[std::max(0, i - 2)];
+        if (!(dir.magnitude() > 0)) continue;
+        const auto res = cluster->kd_radius(gather, orig[i]);
+        idx.clear(); cand.clear(); weights.clear();
+        for (const auto& r : res) idx.push_back(r.first);
+        std::sort(idx.begin(), idx.end());
+        for (size_t k : idx) {
+            const auto* blob = cluster->blob_with_point(k);
+            if (!blob) continue;
+            const double q = blob->charge();
+            const int np = blob->npoints();
+            if (!(q > 0) || np <= 0) continue;
+            cand.push_back(cluster->point3d(k));
+            weights.push_back(q / np);
+        }
+        pts[i] = TrackFittingUtil::recenter_point_transverse(orig[i], dir, cand, weights, sigma, half_slab,
+                                                              max_iter, max_move);
+    }
+}
+
 std::vector<WireCell::Point> TrackFitting::examine_end_ps_vec(std::shared_ptr<PR::Segment> segment,const std::vector<WireCell::Point>& pts, bool flag_start, bool flag_end) {
     // doc pr/82 sec 12.7 companion guard.  `ps_list.front()` / `.back()` below
     // (:1949, :1998) are unguarded, so an empty `pts` is undefined behaviour
@@ -2999,6 +3153,15 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_w2      = std::get<1>(ch_w2);
             int cur_time_slice2  = std::floor(std::get<0>(ch_u2) / cur_ntime_ticks) * cur_ntime_ticks;
 
+            // doc pdvd/101 assoc_cont_center: centre of the wire window below -- the rounded wire
+            // when off (int -> float is exact, so the window is the legacy one bit for bit).
+            float cen_u2 = cur_wire_u2, cen_v2 = cur_wire_v2, cen_w2 = cur_wire_w2;
+            if (m_params.assoc_cont_center != 0) {
+                cen_u2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 0);
+                cen_v2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 1);
+                cen_w2 = m_grouping->convert_3Dpoint_wire_cont(p_raw2, apa2, face2, 2);
+            }
+
             // Adaptive distance cuts for this face.
             double dis_cut_u2 = dis_cut, dis_cut_v2 = dis_cut, dis_cut_w2 = dis_cut;
             double max_ts_u2 = 0, max_ts_v2 = 0, max_ts_w2 = 0;
@@ -3055,17 +3218,17 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                         float half_v = sqrt(range_sq_v2) / pitch_v2;
                         float half_w = sqrt(range_sq_w2) / pitch_w2;
 
-                        for (int j = std::round(cur_wire_u2 - half_u); j <= std::round(cur_wire_u2 + half_u); j++) {
+                        for (int j = std::round(cen_u2 - half_u); j <= std::round(cen_u2 + half_u); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 0, j), WirePlaneLayer_t::kUlayer);
                             temp_2dut.associated_2d_points.insert(coord);
                         }
-                        for (int j = std::round(cur_wire_v2 - half_v); j <= std::round(cur_wire_v2 + half_v); j++) {
+                        for (int j = std::round(cen_v2 - half_v); j <= std::round(cen_v2 + half_v); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 1, j), WirePlaneLayer_t::kVlayer);
                             temp_2dvt.associated_2d_points.insert(coord);
                         }
-                        for (int j = std::round(cur_wire_w2 - half_w); j <= std::round(cur_wire_w2 + half_w); j++) {
+                        for (int j = std::round(cen_w2 - half_w); j <= std::round(cen_w2 + half_w); j++) {
                             Coord2D coord(apa2, face2, this_time_slice, j,
                                          get_channel_for_wire(apa2, face2, 2, j), WirePlaneLayer_t::kWlayer);
                             temp_2dwt.associated_2d_points.insert(coord);
@@ -3147,6 +3310,14 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
             int cur_wire_u = std::get<1>(cur_u);
             int cur_wire_v = std::get<1>(cur_v);
             int cur_wire_w = std::get<1>(cur_w);
+
+            // doc pdvd/101 assoc_cont_center: window centre (the rounded wire when off; exact).
+            float cen_u = cur_wire_u, cen_v = cur_wire_v, cen_w = cur_wire_w;
+            if (m_params.assoc_cont_center != 0) {
+                cen_u = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 0);
+                cen_v = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 1);
+                cen_w = m_grouping->convert_3Dpoint_wire_cont(closest_point_raw, st_apa, st_face, 2);
+            }
 
             // Calculate adaptive distance cuts (equivalent to original max_time_slice_u/v/w calculation)
             double dis_cut_u = dis_cut;
@@ -3272,12 +3443,12 @@ void TrackFitting::organize_ps_path(std::shared_ptr<PR::Segment> segment, std::v
                         float half_u = sqrt(range_u) / st_pitch_u;
                         float half_v = sqrt(range_v) / st_pitch_v;
                         float half_w = sqrt(range_w) / st_pitch_w;
-                        float low_u_limit = cur_wire_u - half_u;
-                        float high_u_limit = cur_wire_u + half_u;
-                        float low_v_limit = cur_wire_v - half_v;
-                        float high_v_limit = cur_wire_v + half_v;
-                        float low_w_limit = cur_wire_w - half_w;
-                        float high_w_limit = cur_wire_w + half_w;
+                        float low_u_limit = cen_u - half_u;
+                        float high_u_limit = cen_u + half_u;
+                        float low_v_limit = cen_v - half_v;
+                        float high_v_limit = cen_v + half_v;
+                        float low_w_limit = cen_w - half_w;
+                        float high_w_limit = cen_w + half_w;
 
                         for (int j = std::round(low_u_limit); j <= std::round(high_u_limit); j++) {
                             Coord2D coord(st_apa, st_face, vertex_time_slice, j,
@@ -4826,6 +4997,10 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         }
 
 
+        // doc pdvd/101: position-LSQ weight power (TrackFitting.h fit_weight_pow).  The row
+        // scale s becomes |s|^(pow/2), so the weight is |s|^pow; the default 2 skips this.
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
         if (scaling != 0) {
             data_u_2D(2 * index) = scaling * (it->wire - offset_u);
             data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -4883,6 +5058,9 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
             scaling *= m_params.fit_blob_coverage_weight;
         }
 
+        // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
         if (scaling != 0) {
             data_v_2D(2 * index) = scaling * (it->wire - offset_v);
             data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -4938,6 +5116,9 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         if (!plane_data_w.deweighted_2d_points.empty() && plane_data_w.deweighted_2d_points.count(*it)) {
             scaling *= m_params.fit_blob_coverage_weight;
         }
+
+        // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+        if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
 
         if (scaling != 0) {
             data_w_2D(2 * index) = scaling * (it->wire - offset_w);
@@ -5493,6 +5674,16 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     // Main fitting loop using Eigen
     Eigen::VectorXd pos_3D(3 * pss_vec.size());
 
+    // doc pdvd/111: side record for the WCT_TRAJ_ASSOC_DEBUG trace (empty and untouched when unset).
+    const bool assoc_dbg = traj_assoc_debug();
+    std::vector<TrajAssocPoint> assoc_pts;
+    static long assoc_call = 0;
+    long assoc_this_call = 0;
+    if (assoc_dbg) {
+        assoc_pts.resize(pss_vec.size());
+        assoc_this_call = ++assoc_call;
+    }
+
     // §4.1: per-cluster transform cache — pc_transform() is constant for a given cluster
     IPCTransform::pointer fit_xform;
     Facade::Cluster* fit_xform_cluster = nullptr;
@@ -5618,6 +5809,13 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_yu = std::get<1>(u_slope_it->second).first;
             auto slope_zu = std::get<1>(u_slope_it->second).second;
                
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
+            if (assoc_dbg) {
+                assoc_pts[i].cells.push_back({0, it->apa, it->face, it->wire, it->time,
+                                              charge, charge_err, div_factor, scaling});
+            }
             if (scaling != 0) {
                 data_u_2D(2 * index) = scaling * (it->wire - offset_u);
                 data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -5700,6 +5898,13 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_zv = std::get<2>(v_slope_it->second).second;
             
             // std::cout << "Test: " << std::endl;
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
+            if (assoc_dbg) {
+                assoc_pts[i].cells.push_back({1, it->apa, it->face, it->wire, it->time,
+                                              charge, charge_err, div_factor, scaling});
+            }
             if (scaling != 0) {
                 data_v_2D(2 * index) = scaling * (it->wire - offset_v);
                 data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -5783,6 +5988,13 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             auto slope_yw = std::get<3>(w_slope_it->second).first;
             auto slope_zw = std::get<3>(w_slope_it->second).second;
             
+            // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
+            if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
+
+            if (assoc_dbg) {
+                assoc_pts[i].cells.push_back({2, it->apa, it->face, it->wire, it->time,
+                                              charge, charge_err, div_factor, scaling});
+            }
             if (scaling != 0) {
                 data_w_2D(2 * index) = scaling * (it->wire - offset_w);
                 data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
@@ -5820,6 +6032,38 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
             pos_3D(3 * i + 1) = temp_pos_3D(1);
             pos_3D(3 * i + 2) = temp_pos_3D(2);
         }
+
+        // doc pdvd/111: leave-one-plane-out solves of the same normal equations, on the side.
+        if (assoc_dbg) {
+            auto& ap = assoc_pts[i];
+            ap.nan = std::isnan(solver.error());
+            ap.quantity[0] = plane_data_u.quantity;
+            ap.quantity[1] = plane_data_v.quantity;
+            ap.quantity[2] = plane_data_w.quantity;
+            if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+                ap.apa = test_wpid.apa();
+                ap.face = test_wpid.face();
+            }
+            const Eigen::SparseMatrix<double> AU = RUT * RU, AV = RVT * RV, AW = RWT * RW;
+            const Eigen::VectorXd bU = RUT * data_u_2D, bV = RVT * data_v_2D, bW = RWT * data_w_2D;
+            const Eigen::SparseMatrix<double> Al[3] = {AV + AW, AU + AW, AU + AV};
+            const Eigen::VectorXd bl[3] = {bV + bW, bU + bW, bU + bV};
+            auto to_corr = [&](const Eigen::Vector3d& r) {
+                WireCell::Point praw(r(0), r(1), r(2));
+                if (ap.apa == -1) return praw;
+                return transform->forward(praw, cluster_t0, ap.face, ap.apa);
+            };
+            ap.init = pss_vec[i].first;
+            ap.sol = to_corr(Eigen::Vector3d(pos_3D(3 * i), pos_3D(3 * i + 1), pos_3D(3 * i + 2)));
+            for (int k = 0; k != 3; ++k) {
+                const Eigen::Matrix3d Ad(Al[k]);
+                Eigen::Vector3d r = Ad.colPivHouseholderQr().solve(bl[k]);
+                // a plane pair without a time row (or rank < 3) leaves an undetermined direction;
+                // report the init coordinate there rather than an arbitrary null-space value
+                if (Ad.colPivHouseholderQr().rank() < 3 || !r.allFinite()) r = temp_pos_3D_init;
+                ap.loo[k] = to_corr(r);
+            }
+        }
         // std::cout << "Track Fitting: " << i << " " << temp_pos_3D(0) << " " << temp_pos_3D(1) << " " << temp_pos_3D(2) << " " << temp_pos_3D_init(0) << " " << temp_pos_3D_init(1) << " " << temp_pos_3D_init(2) << std::endl;
     }
     
@@ -5834,6 +6078,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
     std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>> temp_fine_tracking_path;
     std::vector<std::pair<int, int> > saved_paf;
     int skip_count = 0;
+    std::vector<size_t> assoc_fine_i;   // doc pdvd/111 trace: pss_vec index of each kept point
     
     // §4.1: per-cluster transform cache for the post-solve path-building pass
     IPCTransform::pointer path_xform;
@@ -5872,6 +6117,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         if (flag_skip) {
             skip_count++;
             if (skip_count <= 3) {
+                if (assoc_dbg) assoc_pts[i].skip = true;
                 continue;
             } else {
                 skip_count = 0;
@@ -5879,6 +6125,10 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         }
 
         // now all corrected points ... 
+        if (assoc_dbg) {
+            assoc_pts[i].kept = true;
+            assoc_fine_i.push_back(i);
+        }
         temp_fine_tracking_path.push_back(pss_vec[i]);
         fine_tracking_path.push_back(std::make_pair(p, segment));
         saved_paf.push_back(std::make_pair(test_wpid.apa(), test_wpid.face()));
@@ -5976,8 +6226,68 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         if (flag_replace) {
             fine_tracking_path[i] = temp_fine_tracking_path[i];
         }
+        if (assoc_dbg) assoc_pts[assoc_fine_i.at(i)].rev = flag_replace;
 
         // std::cout << i << " " << flag_replace << " " << std::endl;
+    }
+
+    if (assoc_dbg) {
+        for (size_t k = 0; k != fine_tracking_path.size(); ++k) assoc_pts[assoc_fine_i.at(k)].fin = fine_tracking_path[k].first;
+        auto xyz = [](std::ostream& os, const WireCell::Point& q, bool valid) {
+            if (valid) os << " " << q.x() / units::cm << " " << q.y() / units::cm << " " << q.z() / units::cm;
+            else os << " nan nan nan";
+        };
+        for (size_t i = 0; i != pss_vec.size(); ++i) {
+            const auto& ap = assoc_pts[i];
+            auto cluster = pss_vec[i].second->cluster();
+            const int ident = cluster ? cluster->ident() : -1;
+            std::ostringstream os;
+            os << std::setprecision(7) << "TRAJASSOC " << m_path_debug_tag << " " << charge_div_method << " "
+               << assoc_this_call << " " << i << " " << ident << " " << ap.apa << " " << ap.face << " "
+               << ap.kept << " " << ap.skip << " " << ap.rev << " " << ap.nan;
+            xyz(os, ap.init, true);
+            xyz(os, ap.sol, true);
+            xyz(os, ap.fin, ap.kept);
+            for (int k = 0; k != 3; ++k) xyz(os, ap.loo[k], true);
+            // per-plane association summary; wsol/tsol use the point's own (apa, face) geometry
+            double wsol[3] = {std::nan(""), std::nan(""), std::nan("")};
+            double tsol = std::nan("");
+            if (ap.apa != -1) {
+                WirePlaneId wpid(kAllLayers, ap.face, ap.apa);
+                auto oit = wpid_offsets.find(wpid);
+                auto sit = wpid_slopes.find(wpid);
+                if (oit != wpid_offsets.end() && sit != wpid_slopes.end()) {
+                    const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+                    const auto r = transform->backward(ap.sol, cluster->get_cluster_t0(), ap.face, ap.apa);
+                    tsol = std::get<0>(oit->second) + std::get<0>(sit->second) * r.x();
+                    wsol[0] = std::get<1>(oit->second) + std::get<1>(sit->second).first * r.y() + std::get<1>(sit->second).second * r.z();
+                    wsol[1] = std::get<2>(oit->second) + std::get<2>(sit->second).first * r.y() + std::get<2>(sit->second).second * r.z();
+                    wsol[2] = std::get<3>(oit->second) + std::get<3>(sit->second).first * r.y() + std::get<3>(sit->second).second * r.z();
+                }
+            }
+            for (int pl = 0; pl != 3; ++pl) {
+                int n = 0;
+                double sq = 0, sw = 0, swx = 0, swt = 0;
+                for (const auto& c : ap.cells) {
+                    if (c.plane != pl) continue;
+                    ++n;
+                    sq += c.q;
+                    const double w2 = c.scaling * c.scaling;
+                    sw += w2; swx += w2 * c.wire; swt += w2 * c.time;
+                }
+                os << " " << n << " " << sq << " " << (sw > 0 ? swx / sw : std::nan("")) << " "
+                   << (sw > 0 ? swt / sw : std::nan("")) << " " << wsol[pl] << " " << ap.quantity[pl];
+            }
+            os << " " << tsol;
+            std::cout << os.str() << std::endl;
+            if (traj_assoc_cells_for(ident)) {
+                for (const auto& c : ap.cells) {
+                    std::cout << "TRAJCELL " << m_path_debug_tag << " " << charge_div_method << " " << assoc_this_call
+                              << " " << i << " " << c.plane << " " << c.apa << " " << c.face << " " << c.wire << " "
+                              << c.time << " " << c.q << " " << c.qerr << " " << c.div << " " << c.scaling << std::endl;
+                }
+            }
+        }
     }
     
     // Generate 2D projections
@@ -7100,6 +7410,11 @@ void TrackFitting::dQ_dx_fill(double dis_end_point_ext) {
     dQ.resize(fine_tracking_path.size(), 0);
     dx.resize(fine_tracking_path.size(), 0);
     reduced_chi2.resize(fine_tracking_path.size(), 0);
+    // doc pdvd/56 T4: no per-plane information on the placeholder path (no
+    // real fit ran), so the flags are all "no dead-channel information", 0.
+    reg_flag_u.assign(fine_tracking_path.size(), 0);
+    reg_flag_v.assign(fine_tracking_path.size(), 0);
+    reg_flag_w.assign(fine_tracking_path.size(), 0);
     
     // Loop through each point in the fine tracking path
     for (size_t i = 0; i != fine_tracking_path.size(); i++) {
@@ -7215,6 +7530,19 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         if (cit != m_cluster_charge_data.end()) p_charge_source = &cit->second;
     }
     const auto& charge_source = *p_charge_source;
+
+    // doc pdvd/81: drop this cluster's stored response BEFORE the fit so an
+    // early return below (no rows, no 2-D data) cannot leave a response paired
+    // with fits that were reset to -1.  Re-captured after the prediction.
+    const bool keep_response = m_params.keep_dqdx_response > 0 && m_cluster_filter;
+    if (keep_response) {
+        for (size_t i = 0; i < m_dqdx_responses.size(); ++i) {
+            if (m_dqdx_responses[i].cluster == m_cluster_filter) {
+                m_dqdx_responses.erase(m_dqdx_responses.begin() + i);
+                break;
+            }
+        }
+    }
 
     // Use parameters from member variable
     const double DL = m_params.DL;
@@ -8328,6 +8656,38 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     pred_data_v_2D = RV * pos_3D;
     pred_data_w_2D = RW * pos_3D;
 
+    // doc pdvd/81: keep this cluster's response (see Parameters::keep_dqdx_response).
+    // Row order = the map iteration order the data vectors were filled in above;
+    // `scale` is that fill's total_err for a live row (charge > 0, flag != 0 --
+    // the same gate fill_fitted_charge_2d applies to pred_charge), else 0.
+    if (keep_response) {
+        DqdxResponse resp;
+        resp.cluster = m_cluster_filter;
+        resp.ident = m_cluster_filter->ident();
+        resp.R = {RU, RV, RW};
+        resp.pos_3D = pos_3D;
+        auto fill_rows = [](const std::map<CoordReadout, std::pair<ChargeMeasurement, std::set<Coord2D>>>& plane_map,
+                            double rel_uncer, double add_uncer, std::vector<DqdxResponseRow>& out) {
+            out.reserve(plane_map.size());
+            for (const auto& [coord_key, result] : plane_map) {
+                const auto& m = result.first;
+                DqdxResponseRow row(coord_key);
+                row.charge = m.charge;
+                row.charge_err = m.charge_err;
+                row.flag = m.flag;
+                row.scale = (m.charge > 0 && m.flag != 0)
+                    ? sqrt(m.charge_err*m.charge_err + (m.charge*rel_uncer)*(m.charge*rel_uncer) + add_uncer*add_uncer)
+                    : 0.0;
+                row.coords.assign(result.second.begin(), result.second.end());
+                out.push_back(std::move(row));
+            }
+        };
+        fill_rows(map_U_charge_2D, rel_uncer_ind, add_uncer_ind, resp.rows[0]);
+        fill_rows(map_V_charge_2D, rel_uncer_ind, add_uncer_ind, resp.rows[1]);
+        fill_rows(map_W_charge_2D, rel_uncer_col, add_uncer_col, resp.rows[2]);
+        m_dqdx_responses.push_back(std::move(resp));
+    }
+
     // Persist fitted 2D charge results
     fill_fitted_charge_2d(map_U_charge_2D, map_V_charge_2D, map_W_charge_2D,
                           pred_data_u_2D, pred_data_v_2D, pred_data_w_2D,
@@ -8506,9 +8866,16 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     Eigen::SparseMatrix<double> RW(n_2D_w, n_3D_pos);
     
     Eigen::VectorXd pos_3D_init(n_3D_pos);
-    std::vector<int> reg_flag_u(n_3D_pos, 0), reg_flag_v(n_3D_pos, 0), reg_flag_w(n_3D_pos, 0);
-    
-    
+    // doc pdvd/56 T4: these are the TrackFitting MEMBER vectors (declared
+    // beside dQ/dx/pu/pv/pw), not a function-local shadow -- do_single_tracking
+    // reads them back after this function returns, the same way it already
+    // reads dQ/dx/pu/pv/pw/pt/paf/reduced_chi2.  dQ_dx_multi_fit keeps its own
+    // unrelated local of the same name; untouched.
+    reg_flag_u.assign(n_3D_pos, 0);
+    reg_flag_v.assign(n_3D_pos, 0);
+    reg_flag_w.assign(n_3D_pos, 0);
+
+
     // Initialize solution vector
     for (int i = 0; i < n_3D_pos; i++) {
         pos_3D_init(i) = 50000.0; // Initial guess
@@ -9699,7 +10066,22 @@ void TrackFitting::do_multi_tracking(bool flag_dQ_dx_fit_reg, bool flag_dQ_dx_fi
         // }
 
         // organize path
-        low_dis_limit = 0.6*units::cm;
+        // doc pdvd/56 sec 9 item 1 / doc pdvd/61: this was a bare prototype
+        // literal (PR3DCluster_multi_track_fitting.h:198 hard-codes all three
+        // passes' steps; the toolkit port parameterized passes 1/2 via
+        // m_params.low_dis_limit but left pass 3 as the verbatim prototype
+        // constant, with no comment recording that as a decision).  Reusing
+        // pass 2's own expression (:9536) is PROVEN byte-identical, not just
+        // matched in value: low_dis_limit is 12.0 mm on every detector this
+        // tree configures (PDVD/PDHD/SBND *_track_fitting.json) and equals
+        // the C++ default (so uBooNE, which sets none of these keys,
+        // inherits it too), so m_params.low_dis_limit/2. == 0.6*units::cm ==
+        // 6.0 in IEEE double on every configuration in the tree today.  Do
+        // NOT also touch end_point_limit nearby: it is halved at :9537 and
+        // never reset before dQ_dx_multi_fit consumes it at :9890, so a
+        // "symmetric" edit there would be a real behavior change, not a
+        // no-op.
+        low_dis_limit = m_params.low_dis_limit/2.;
         organize_segments_path_3rd(low_dis_limit);
         det_fits("organize_3rd");
         // if (m_perf) std::cout << "do_multiple_tracking timing: organize_segments_path_3rd took " << DST_MS(DST_Clock::now() - t_dst).count() << " ms" << std::endl; t_dst = DST_Clock::now();
@@ -10021,6 +10403,11 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
 
     auto pts = organize_orig_path(segment, low_dis_limit, end_point_limit); 
     stm_path_dump(m_path_debug_tag, "org1", pts);
+    // doc pdvd/111 seed_recenter_sigma: C++ default 0 => not called => byte-identical.
+    if (m_params.seed_recenter_sigma > 0 && pts.size() > 2) {
+        recenter_seed_path(segment, pts, 0.5 * low_dis_limit);
+        stm_path_dump(m_path_debug_tag, "org1r", pts);
+    }
     if (pts.size() == 0) return;
     else if (pts.size() == 1) {
         const auto& segment_wcpts = segment->wcpts();
@@ -10427,12 +10814,21 @@ void TrackFitting::do_single_tracking(std::shared_ptr<PR::Segment> segment, bool
         // std::cout <<"test " << fit.paf.first << " " << fit.paf.second << " " << paf[i].first << " " << paf[i].second << std::endl;
         fit.reduced_chi2 = reduced_chi2[i];
 
+        // doc pdvd/56 T4: writer-only per-plane dead-channel flags, already
+        // computed by dQ_dx_fit's regulariser.  Bounds-guarded, not .at(i):
+        // dQ_dx_fill's placeholder path resizes these to fine_tracking_path's
+        // size (all 0), but a caller that skips both leaves them empty, and
+        // "no information" (Fit's own false default) is the correct read then.
+        if (i < reg_flag_u.size()) fit.reg_flag_u = reg_flag_u[i];
+        if (i < reg_flag_v.size()) fit.reg_flag_v = reg_flag_v[i];
+        if (i < reg_flag_w.size()) fit.reg_flag_w = reg_flag_w[i];
+
         // Set trajectory information
         fit.index = static_cast<int>(i);
         fit.range = cumulative_range[i];
-        
+
         // Set fix flags (typically fix endpoints for track fitting)
-        fit.flag_fix = false;        
+        fit.flag_fix = false;
         segment_fits.push_back(fit);
     }
 

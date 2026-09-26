@@ -189,58 +189,68 @@ DftTools::real_array_t DftTools::inv_c2r_real(const IDFT::pointer& dft, const Df
 
 /*** high level functions ***/
 
+// Zero-pad a real waveform to the given size and forward transform it.
+static DftTools::complex_vector_t padded_spectrum(const IDFT::pointer& dft,
+                                                  const DftTools::real_vector_t& wave,
+                                                  size_t size)
+{
+    DftTools::real_vector_t padded(size, 0);
+    std::copy(wave.begin(), wave.end(), padded.begin());
+    return DftTools::fwd_r2c(dft, padded);
+}
+
 DftTools::real_vector_t DftTools::convolve(const IDFT::pointer& dft,
                                  const DftTools::real_vector_t& in1,
                                  const DftTools::real_vector_t& in2)
 {
-    size_t size = in1.size() + in2.size() - 1;
-    DftTools::complex_vector_t cin1(size,0), cin2(size,0);
+    const size_t size = in1.size() + in2.size() - 1;
 
-    std::transform(in1.begin(), in1.end(), cin1.begin(),
-                   [](float re) { return DftTools::complex_t(re,0.0); } );
-    std::transform(in2.begin(), in2.end(), cin2.begin(),
-                   [](float re) { return DftTools::complex_t(re,0.0); } );
-
-    dft->fwd1d(cin1.data(), cin1.data(), size);
-    dft->fwd1d(cin2.data(), cin2.data(), size);
+    auto spec1 = padded_spectrum(dft, in1, size);
+    const auto spec2 = padded_spectrum(dft, in2, size);
 
     for (size_t ind=0; ind<size; ++ind) {
-        cin1[ind] *= cin2[ind];
+        spec1[ind] *= spec2[ind];
     }
 
-    DftTools::real_vector_t ret(size);
-    std::transform(cin1.begin(), cin1.end(), ret.begin(),
-                   [](const complex_t& c) { return std::real(c); });
-    return ret;
+    // Inverse transform back to the time domain.  (Prior to the fix
+    // for issue #531 this step was missing and the real part of the
+    // spectrum was returned.)
+    return DftTools::inv_c2r(dft, spec1);
 }
 
 DftTools::real_vector_t DftTools::replace(const IDFT::pointer& dft,
                                 const DftTools::real_vector_t& meas,
-                                const DftTools::real_vector_t& res1,
-                                const DftTools::real_vector_t& res2)
+                                const DftTools::real_vector_t& res_new,
+                                const DftTools::real_vector_t& res_old)
 {
-    size_t sizes[3] = {meas.size(), res1.size(), res2.size()};
-    size_t size = sizes[0] + sizes[1] + sizes[2] - *std::min_element(sizes, sizes + 3) - 1;
+    // Pad to a size large enough that the linear convolution of meas
+    // with the (new/old) response ratio suffers no periodic aliasing.
+    // This is the same size rule as the legacy Waveform::replace_convolve().
+    const size_t sizes[3] = {meas.size(), res_new.size(), res_old.size()};
+    const size_t size = sizes[0] + sizes[1] + sizes[2] - *std::min_element(sizes, sizes + 3) - 1;
 
-    DftTools::complex_vector_t cmeas(size,0), cres1(size,0), cres2(size,0);
-    std::transform(meas.begin(), meas.end(), cmeas.begin(),
-                   [](float re) { return DftTools::complex_t(re,0.0); } );
-    std::transform(res1.begin(), res1.end(), cres1.begin(),
-                   [](float re) { return DftTools::complex_t(re,0.0); } );
-    std::transform(res2.begin(), res2.end(), cres2.begin(),
-                   [](float re) { return DftTools::complex_t(re,0.0); } );
+    auto smeas = padded_spectrum(dft, meas, size);
+    const auto snew = padded_spectrum(dft, res_new, size);
+    const auto sold = padded_spectrum(dft, res_old, size);
 
-    dft->fwd1d(cmeas.data(), cmeas.data(), size);
-    dft->fwd1d(cres1.data(), cres1.data(), size);
-    dft->fwd1d(cres2.data(), cres2.data(), size);
-
+    // Form meas * new / old in frequency space.
+    //
+    // Issue #531: the previous implementation divided by the untransformed,
+    // unpadded time-domain response samples (reading past their ends),
+    // had the new/old ratio inverted and never applied the inverse
+    // transform.  See the doctest in aux/test/doctest_dfttools_replace.cxx.
+    const complex_t zero{0, 0};
     for (size_t ind=0; ind<size; ++ind) {
-        cmeas[ind] *= res2[ind]/res1[ind];
+        const complex_t den = sold[ind];
+        if (den == zero) {
+            // Old response has no power at this frequency so the
+            // measurement should not either.  Leave the bin unscaled
+            // rather than emit inf/NaN.
+            continue;
+        }
+        smeas[ind] *= snew[ind] / den;
     }
-    DftTools::real_vector_t ret(size);
-    std::transform(cmeas.begin(), cmeas.end(), ret.begin(),
-                   [](const complex_t& c) { return std::real(c); });
 
-    return ret;
+    return DftTools::inv_c2r(dft, smeas);
 }
 
