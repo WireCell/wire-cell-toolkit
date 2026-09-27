@@ -311,6 +311,23 @@ namespace WireCell::Clus::Facade {
         std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
         std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
 
+        // icarus/docs/04 (G1): the (apa, face) a tagger falls back to for an
+        // uncontained vertex.  (0, 0) -- the legacy fallback -- whenever the
+        // detector volumes carry that face (uBooNE, SBND, PDHD, PDVD, ICARUS
+        // east), else the lowest (apa, face) they do carry (ICARUS west,
+        // anodes {2,3}, where the keyed lookups wire_angles(0,0) /
+        // get_drift_dir().at(0) would throw).  (0, 0) with no detector volumes.
+        std::pair<int, int> fallback_apa_face() const { return fallback_apa_face(cache().dv_wpids); }
+        static std::pair<int, int> fallback_apa_face(const std::set<WireCell::WirePlaneId>& ws) {
+            for (const auto& w : ws) {
+                if (w.apa() == 0 && w.face() == 0) return {0, 0};
+            }
+            if (ws.empty()) return {0, 0};
+            std::pair<int, int> best{ws.begin()->apa(), ws.begin()->face()};
+            for (const auto& w : ws) best = std::min(best, std::make_pair(w.apa(), w.face()));
+            return best;
+        }
+
         const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
         std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;
 

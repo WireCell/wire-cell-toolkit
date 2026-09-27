@@ -2284,7 +2284,12 @@ bool PatternAlgorithms::singlephoton_tagger(
 
     // Derive apa/face from the main vertex position so the tagger works
     // correctly for any detector geometry (multi-APA, multi-face, etc.).
+    // G1 (icarus/docs/04): fall back to (0,0) only where that face exists
+    // (unchanged for every pre-ICARUS detector); ICARUS west has no apa 0.
     int apa = 0, face = 0;
+    if (main_cluster && main_cluster->grouping()) {
+        std::tie(apa, face) = main_cluster->grouping()->fallback_apa_face();
+    }
     if (dv) {
         Point vtx_pt = main_vertex->fit().valid()
                        ? main_vertex->fit().point

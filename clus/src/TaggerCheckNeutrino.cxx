@@ -348,6 +348,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_cosmic_y_top_strict  = get(config, "cosmic_y_top_strict",  m_cosmic_y_top_strict);
     m_cosmic_y_top_loose   = get(config, "cosmic_y_top_loose",   m_cosmic_y_top_loose);
     m_cosmic_y_small_piece = get(config, "cosmic_y_small_piece", m_cosmic_y_small_piece);
+    m_cosmic_y_mid         = get(config, "cosmic_y_mid",         m_cosmic_y_mid);          // icarus/docs/04 G2, cm
+    m_cosmic_vtx_z_origin  = get(config, "cosmic_vtx_z_origin",  m_cosmic_vtx_z_origin);   // icarus/docs/04 G3, cm
     m_vertex_z_prior_scale = get(config, "vertex_z_prior_scale", m_vertex_z_prior_scale);
     if (m_vertex_z_prior_scale <= 0) {
         SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: vertex_z_prior_scale must be > 0; keeping 200 cm");
@@ -1023,6 +1025,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["cosmic_y_top_strict"]  = m_cosmic_y_top_strict;   // 102 = 15 cm below
     cfg["cosmic_y_top_loose"]   = m_cosmic_y_top_loose;    // 80  = 37 cm below
     cfg["cosmic_y_small_piece"] = m_cosmic_y_small_piece;  // 50  = 67 cm below
+    cfg["cosmic_y_mid"]         = m_cosmic_y_mid;          // icarus/docs/04 G2: 0 = the y=0 mid-plane (uBooNE/SBND)
+    cfg["cosmic_vtx_z_origin"]  = m_cosmic_vtx_z_origin;   // icarus/docs/04 G3: 0 = absolute z (uBooNE/SBND)
     cfg["cosmic_consistent_fv"] = m_cosmic_consistent_fv;  // doc 74 G1/G2; false = FiducialUtils fallback
     cfg["nue_sp_consistent_fv"] = m_nue_sp_consistent_fv;  // doc 75; false = FiducialUtils fallback
     cfg["vertex_z_prior_scale"] = m_vertex_z_prior_scale;  // cm; 200 = uBooNE (1037 cm detector)
@@ -3306,6 +3310,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_cosmic_y_top_strict  = m_cosmic_y_top_strict  * units::cm;
         pattern_algos.m_cosmic_y_top_loose   = m_cosmic_y_top_loose   * units::cm;
         pattern_algos.m_cosmic_y_small_piece = m_cosmic_y_small_piece * units::cm;
+        pattern_algos.m_cosmic_y_mid         = m_cosmic_y_mid         * units::cm;
+        pattern_algos.m_cosmic_vtx_z_origin  = m_cosmic_vtx_z_origin  * units::cm;
         // sbnd_xin/docs/74 G1/G2: consistent-FV routing for cosmic_tagger().
         // m_fv_tolerance is already INTERNAL units (read raw in configure(),
         // same values cluster_fc_check consumes) -- no conversion.
@@ -4241,7 +4247,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             // otherwise be evaluated against APA 0's mirrored wire angles and
             // opposite drift direction.  Same derivation as
             // PatternAlgorithms::singlephoton_tagger (NeutrinoTaggerSinglePhoton.cxx).
+            // G1 (icarus/docs/04): the fallback is (0,0) wherever that face
+            // exists (every pre-ICARUS detector: unchanged), else the lowest
+            // (apa, face) of the detector volumes -- ICARUS west has no apa 0.
             int nue_apa = 0, nue_face = 0;
+            if (main_cluster && main_cluster->grouping()) {
+                std::tie(nue_apa, nue_face) = main_cluster->grouping()->fallback_apa_face();
+            }
             if (m_dv) {
                 const Point nue_vtx_pt = final_main_vertex->fit().valid()
                                          ? final_main_vertex->fit().point

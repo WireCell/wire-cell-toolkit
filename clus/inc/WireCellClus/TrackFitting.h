@@ -283,6 +283,21 @@ namespace WireCell::Clus {
             // Reported as a double for the set_parameter(name, value) plumbing.
             double keep_dqdx_response = 0;
 
+            // wcp-porting-img icarus/docs/04 -- electron-lifetime correction of
+            // the FITTED charge.  0 = OFF = no code path touched (legacy,
+            // byte-identical; SBND/uBooNE/PDHD/PDVD never set it).  When > 0 it
+            // is the lifetime tau in WCT internal time units (units::ms = 1e6;
+            // the JSON loaders do no unit conversion, as for every knob here),
+            // and every point fitted by dQ_dx_fit / dQ_dx_multi_fit gets
+            //     dQ *= exp(t_d / tau),  t_d = |x - x_anode(apa, face)| / v(apa, face)
+            // -- the same drift distance the fitter's diffusion model uses, in
+            // the T0-corrected frame.  Only points of clusters with a matched
+            // flash (Cluster::get_matched_flash()) are corrected: an unmatched
+            // cluster's x is not its drift position.  dQ_dx_fill's placeholder
+            // values are never corrected.  This is the pre-applied correction
+            // segment_cal_kine_dQdx asks for (PRSegmentFunctions.cxx NOTE).
+            double electron_lifetime = 0;
+
             // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
             // looks up wpid_offsets/wpid_slopes for the (apa, face) that
             // contained_by() returns and dereferenced a MISSING entry (a volume
@@ -914,6 +929,17 @@ namespace WireCell::Clus {
         void update_dQ_dx_data();
         void recover_original_charge_data();
 
+        // icarus/docs/04: Parameters::electron_lifetime applied to one fitted
+        // point of `cluster` at `p` in (apa, face).  Returns the factor (1 when
+        // the knob is off, the cluster has no matched flash, or (apa, face) is
+        // not a live face) and counts the point as corrected or skipped.
+        double electron_lifetime_at(const Facade::Cluster* cluster, const WireCell::Point& p, int apa, int face);
+        size_t m_lifetime_ncorr{0};
+        size_t m_lifetime_nskip{0};
+        // Log and zero the census (knob on only): at each event reset and at
+        // destruction, so the last event of a job is reported too.
+        void flush_lifetime_census();
+
         /**
          * Calculate compact matrix analysis for wire plane sharing
          * 
@@ -1067,6 +1093,11 @@ namespace WireCell::Clus {
         /// (doc pdvd/25 M3: PDVD trajectories cross 16 (anode,face) volumes).
         /// Identical to the former branch order whenever i+1 exists.
         static int dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf);
+
+        /// icarus/docs/04: the electron-lifetime charge factor exp(t_d/tau),
+        /// t_d = |drift_distance| / drift_speed.  1 when tau <= 0 (knob off) or
+        /// the drift speed is not positive.  Pure; see Parameters::electron_lifetime.
+        static double electron_lifetime_factor(double drift_distance, double drift_speed, double lifetime);
 
         /// doc pdvd/81: un-whitened prediction of a SUBSET of trajectory rows:
         /// out(i) = row_scale[i] * sum_k R(i,k) * pos(k) * (col_mask[k] != 0).

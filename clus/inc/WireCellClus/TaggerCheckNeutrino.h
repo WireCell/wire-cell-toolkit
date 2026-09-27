@@ -409,6 +409,15 @@ public:
         double m_cosmic_y_top_strict{102};
         double m_cosmic_y_top_loose{80};
         double m_cosmic_y_small_piece{50};
+        // icarus/docs/04 G2: y of the detector mid-plane that cosmic_tagger's
+        // flagp_cosmic gate requires the main vertex to sit above (cm).  C++
+        // default 0 = the legacy literal (uBooNE and SBND are symmetric about
+        // y=0); ICARUS's active y is [-181.86, 134.96], mid-plane -23.45.
+        double m_cosmic_y_mid{0};
+        // icarus/docs/04 G3: subtracted from the numu-BDT input
+        // cosmict_10_vtx_z only (cm).  C++ default 0 = absolute z (uBooNE and
+        // SBND start at z=0); ICARUS's active z starts at -894.95.
+        double m_cosmic_vtx_z_origin{0};
         // sbnd_xin/docs/74 G1/G2: when true (and "fiducial" is configured),
         // cosmic_tagger()'s containment tests run against m_fiducial +
         // m_fv_tolerance instead of the grouping's FiducialUtils zero-margin
