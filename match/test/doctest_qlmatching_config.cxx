@@ -161,3 +161,50 @@ TEST_CASE("ks_sat_clamp: repaired rails in a shared flash (docs/qlmatch/34)")
         CHECK(meas[0] == 1000);
     }
 }
+
+TEST_CASE("qlmatching sign_offset_from_geometry (doc icarus/03)")
+{
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("sign_offset_from_geometry"));
+    CHECK(cfg["sign_offset_from_geometry"].asBool() == false);
+
+    SUBCASE("off: the legacy ident rule, whatever the geometry")
+    {
+        for (double s : {+1.0, -1.0}) {
+            CHECK(Match::ql_sign_offset(0, s, false) == -1);
+            for (unsigned int tpc : {1u, 2u, 3u, 4u}) CHECK(Match::ql_sign_offset(tpc, s, false) == +1);
+        }
+    }
+    SUBCASE("on: -s agrees with the ident rule where it was right (SBND TPC0/1)")
+    {
+        CHECK(Match::ql_sign_offset(0, +1.0, true) == Match::ql_sign_offset(0, +1.0, false));
+        CHECK(Match::ql_sign_offset(1, -1.0, true) == Match::ql_sign_offset(1, -1.0, false));
+    }
+    SUBCASE("on: ICARUS anodes EE, EW, WE, WW")
+    {
+        // s = +1 when the drift volume lies at larger x than the wire planes:
+        // EE (-359 -> cathode -210), WE (+61 -> +210).
+        CHECK(Match::ql_sign_offset(0, +1.0, true) == -1);
+        CHECK(Match::ql_sign_offset(1, -1.0, true) == +1);
+        CHECK(Match::ql_sign_offset(2, +1.0, true) == -1);   // legacy rule gives +1
+        CHECK(Match::ql_sign_offset(3, -1.0, true) == +1);
+        CHECK(Match::ql_sign_offset(2, +1.0, false) == +1);
+    }
+}
+
+TEST_CASE("qlmatching cathode_x_wct_units (doc icarus/03)")
+{
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("cathode_x_wct_units"));
+    CHECK(cfg["cathode_x_wct_units"].asBool() == false);
+
+    // off: the raw semimodel number, as before (also for a non-zero value)
+    CHECK(Match::ql_cathode_x_wct(0.0, false) == 0.0);
+    CHECK(Match::ql_cathode_x_wct(210.29, false) == 210.29);
+    // on: cm -> WCT units; zero stays exactly zero (SBND/PDHD/PDVD semimodels)
+    CHECK(Match::ql_cathode_x_wct(0.0, true) == 0.0);
+    CHECK(Match::ql_cathode_x_wct(210.29, true) == doctest::Approx(210.29 * units::cm));
+    CHECK(Match::ql_cathode_x_wct(-210.29, true) == doctest::Approx(-2102.9 * units::mm));
+}

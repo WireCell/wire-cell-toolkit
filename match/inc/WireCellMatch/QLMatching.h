@@ -21,6 +21,25 @@
 
 namespace WireCell::Match {
 
+    // Flash-time x-shift sign of one drift-side run (QLMatching
+    // sign_offset_from_geometry).  tpc = the run's anode ident, s = its drift
+    // direction (+1 when the drift volume lies at larger x than the anode).
+    // from_geometry false => the legacy ident rule, byte-identical.
+    inline int ql_sign_offset(unsigned int tpc, double s, bool from_geometry)
+    {
+        if (from_geometry) return (s > 0) ? -1 : +1;
+        return (tpc == 0) ? -1 : 1;
+    }
+
+    // The cathode x (semimodel Geometry.cathode_x, cm) for comparisons with
+    // WCT-unit coordinates (QLMatching cathode_x_wct_units).  wct_units false
+    // => the raw number (legacy), byte-identical.
+    inline double ql_cathode_x_wct(double cathode_x_cm, bool wct_units)
+    {
+        return wct_units ? cathode_x_cm * WireCell::units::cm : cathode_x_cm;
+    }
+
+
     /// Charge-light matcher.
     ///
     /// Port of larwirecell/qlmatch/QLMatching to wire-cell-toolkit, without
@@ -130,6 +149,24 @@ namespace WireCell::Match {
         // splitting by cathode-plane x (PDVD: the cathode XAs sit AT x=0 and are
         // double-sided; a single flash needs all PDs on both drift-side runs).
         bool m_opdet_all_volumes{false};
+        // sign_offset_from_geometry: take each run's flash-time x-shift sign
+        // (ApaRun::sign_offset, x_shift = sign_offset * t_flash * v) from the
+        // drift geometry, -s (s = +1 when the drift volume lies at larger x than
+        // the anode), instead of the legacy anode-ident rule (ident 0 -> -1, any
+        // other -> +1).  The two agree for SBND TPC0/1, PDHD and the PDVD
+        // representative anodes; they differ for ICARUS anode 2 (WE, wires at
+        // x=+61 cm, cathode at +210 cm => s = +1 => -1, legacy +1), doc
+        // icarus/03.  Default false => the legacy rule => byte-identical.
+        bool m_sign_offset_from_geometry{false};
+        // cathode_x_wct_units: the semimodel Geometry.cathode_x (m_cathode_x) is
+        // in cm -- the OpDet side tests compare it with cm OpDet positions -- but
+        // compute_geometry's cathode-end choice and the two run-side labels
+        // (flash grouping, xtpc pairing) compare it with WCT-unit (mm) anode /
+        // bbox x.  true converts it (cm -> WCT units) for those three
+        // comparisons.  Inert while cathode_x == 0 (SBND, PDHD, PDVD); needed
+        // for a detector whose cathode is off x = 0 (ICARUS, -+210.29 cm).
+        // Default false => the raw number => byte-identical.
+        bool m_cathode_x_wct_units{false};
         // vd_surface_flags: PD-surface-aware endpoint flags. The historical
         // flag_close_to_PMT test assumes the PDs sit behind the anode plane (SBND /
         // PDHD horizontal drift). For PDVD the PDs are at the cathode (XAs), on the
