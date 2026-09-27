@@ -8,6 +8,8 @@
 //    (anodes {2,3}), so wire_angles(0,0) threw.  Unchanged wherever (0,0) exists.
 //  * TaggerCheckNeutrino cosmic_y_mid / cosmic_vtx_z_origin (G2/G3): default 0,
 //    the legacy y=0 mid-plane and absolute-z BDT feature.
+//  * Grouping dead_region (sec 8): a 3-D region (IFiducial) that is dead on
+//    every plane; none by default.
 
 #include "WireCellUtil/doctest.h"
 
@@ -90,4 +92,59 @@ TEST_CASE("icarus/04 G2/G3: cosmic_y_mid and cosmic_vtx_z_origin default to 0")
     REQUIRE_MESSAGE(cfg.isMember("cosmic_vtx_z_origin"), "missing knob: cosmic_vtx_z_origin");
     CHECK(cfg["cosmic_y_mid"].asDouble() == 0.0);
     CHECK(cfg["cosmic_vtx_z_origin"].asDouble() == 0.0);
+}
+
+// doc icarus/04 sec 8: the 3-D dead region.  A slab |z| < w stands in for the
+// ICARUS face seam; a point inside it is dead on every plane, answered before
+// any wire lookup (so no geometry is needed here).
+namespace {
+    struct SlabZ : public IFiducial {
+        double lo, hi;
+        SlabZ(double l, double h) : lo(l), hi(h) {}
+        bool contained(const Point& p) const override { return p.z() >= lo && p.z() <= hi; }
+    };
+}
+
+TEST_CASE("icarus/04 dead_region: none by default")
+{
+    PointCloud::Tree::Points::node_t root;
+    Facade::Grouping* g = root.value.facade<Facade::Grouping>();
+    REQUIRE(g);
+    CHECK_FALSE(g->in_dead_region(Point(0, 0, 0)));
+    g->set_dead_region(nullptr);
+    CHECK_FALSE(g->in_dead_region(Point(0, 0, 0)));
+}
+
+TEST_CASE("icarus/04 dead_region: inside the slab every plane is dead")
+{
+    PointCloud::Tree::Points::node_t root;
+    Facade::Grouping* g = root.value.facade<Facade::Grouping>();
+    REQUIRE(g);
+    g->set_dead_region(std::make_shared<SlabZ>(-2.0 * units::cm, 2.5 * units::cm));
+    const Point in(-100 * units::cm, 30 * units::cm, 1.0 * units::cm);
+    CHECK(g->in_dead_region(in));
+    CHECK(g->in_dead_region(Point(0, 0, -2.0 * units::cm)));
+    CHECK_FALSE(g->in_dead_region(Point(0, 0, 2.6 * units::cm)));
+    CHECK_FALSE(g->in_dead_region(Point(0, 0, -300 * units::cm)));
+
+    // The good-point tests answer "dead on all planes" (apa/face are not consulted).
+    int slots[6];
+    g->test_good_point(in, 0, 1, slots, 0.6 * units::cm, 1);
+    CHECK(slots[0] == 0); CHECK(slots[1] == 0); CHECK(slots[2] == 0);
+    CHECK(slots[3] == 1); CHECK(slots[4] == 1); CHECK(slots[5] == 1);
+    CHECK(g->is_good_point(in, 0, 1));
+    CHECK(g->is_good_point_wc(in, 0, 1));
+    for (int pind = 0; pind < 3; ++pind) {
+        CHECK(g->get_closest_dead_chs(in, 1, 0, 1, pind));
+    }
+}
+
+TEST_CASE("icarus/04 dead_region: MultiAlgBlobClustering round-trips the key, empty by default")
+{
+    PluginManager::instance().add("WireCellClus");
+    auto icfg = Factory::lookup<IConfigurable>("MultiAlgBlobClustering", "icarus04_dr_probe");
+    REQUIRE(icfg);
+    auto cfg = icfg->default_configuration();
+    REQUIRE_MESSAGE(cfg.isMember("dead_region"), "missing knob: dead_region");
+    CHECK(cfg["dead_region"].asString() == "");
 }

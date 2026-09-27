@@ -14,6 +14,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Flash.h"
@@ -88,6 +89,8 @@ namespace WireCell::Clus::Facade {
         IDetectorVolumes::pointer m_dv{nullptr};
         // doc pdvd/36; see set_ctpc_aniso_metric().  Default OFF = legacy.
         bool m_ctpc_aniso_metric{false};
+        // doc icarus/04 sec 8; see set_dead_region().  Default null = no region.
+        IFiducial::pointer m_dead_region{nullptr};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -304,6 +307,21 @@ namespace WireCell::Clus::Facade {
         /// charge averages disagree about what "within 0.6 cm" means.
         void set_ctpc_aniso_metric(bool on) { m_ctpc_aniso_metric = on; }
         bool ctpc_aniso_metric() const { return m_ctpc_aniso_metric; }
+
+        /// doc icarus/04 sec 8: a 3-D region with no data (ICARUS: the slab
+        /// |z| of a few cm where an anode's two faces meet and the Collection
+        /// plane records no charge).  A point inside it counts as dead on all
+        /// three planes in is_good_point / is_good_point_wc / test_good_point
+        /// and get_closest_dead_chs, and the path walkers treat an off-face
+        /// step inside it as dead instead of bad.  Unlike the W-wind dead gap
+        /// (in_dead_gap) it is geometric, so it works for any wire angle and
+        /// across the face boundary.  Set once per job by
+        /// MultiAlgBlobClustering::load_grouping from its "dead_region" config
+        /// key.  Null (default) = no region, every test is the legacy path.
+        void set_dead_region(IFiducial::pointer fid) { m_dead_region = fid; }
+        bool in_dead_region(const geo_point_t& point) const {
+            return m_dead_region && m_dead_region->contained(point);
+        }
 
         // Return a value representing the content of this grouping.
         size_t hash() const;

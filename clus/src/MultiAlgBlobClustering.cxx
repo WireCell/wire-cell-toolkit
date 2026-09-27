@@ -288,6 +288,16 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                   "metric (doc pdvd/36) on every grouping loaded by this node");
     }
 
+    // doc icarus/04 sec 8: a 3-D dead region set on every grouping this node
+    // loads (load_grouping).  Absent/empty key => no region, legacy path.
+    m_dead_region_tn = get(cfg, "dead_region", m_dead_region_tn);
+    m_dead_region = nullptr;
+    if (!m_dead_region_tn.empty()) {
+        m_dead_region = Factory::find_tn<IFiducial>(m_dead_region_tn);
+        log->info("dead_region ON: {} counts as dead on all planes on every grouping "
+                  "loaded by this node (doc icarus/04 sec 8)", m_dead_region_tn);
+    }
+
     for (auto jtn : cfg["pipeline"]) {
         std::string tn = jtn.asString();
         SPDLOG_LOGGER_DEBUG(log, "configuring clustering method: {}", tn);
@@ -544,6 +554,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
 
     cfg["dead_live_overlap_offset"] = m_dead_live_overlap_offset;
     cfg["ctpc_aniso_metric"] = m_ctpc_aniso_metric;  // doc pdvd/36: false = legacy isotropic ctpc metric
+    cfg["dead_region"] = m_dead_region_tn;  // doc icarus/04 sec 8: "" = no 3-D dead region
 
     cfg["use_config_rse"] = false;  // By default, don't use configured RSE
     cfg["runNo"] = m_runNo;
@@ -3866,6 +3877,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
     grouping->set_ctpc_aniso_metric(m_ctpc_aniso_metric);  // doc pdvd/36
+    grouping->set_dead_region(m_dead_region);              // doc icarus/04 sec 8 (null = none)
     check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
 }

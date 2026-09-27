@@ -13,6 +13,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 #include "WireCellIface/ITerminal.h"
 
 #include "WireCellUtil/Bee.h"
@@ -851,6 +852,15 @@ namespace WireCell::Clus {
          * (~0.67) and uBooNE (0.73), so it must stay OFF outside PDVD.
          */
         bool m_ctpc_aniso_metric{false};
+
+        /** Config: "dead_region" (doc icarus/04 sec 8).  type:name of an
+         * IFiducial (e.g. a BoxFiducial) whose volume has no data: set on
+         * every grouping this node loads (Grouping::set_dead_region), where
+         * it counts as dead on all planes in the good-point / dead-channel
+         * tests.  Default "" = no region, byte-identical legacy path.
+         */
+        std::string m_dead_region_tn{""};
+        IFiducial::pointer m_dead_region{nullptr};
 
         // Keep track of configured clustering methods with their metadata to
         // assist in debugging/logging.

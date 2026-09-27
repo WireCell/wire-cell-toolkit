@@ -397,9 +397,10 @@ static std::map<int, Cluster *> Separate_overclustering(
                     if (!cluster->grouping()->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face()))
                         ++num_bad;
                 }
-                else {
+                else if (!cluster->grouping()->in_dead_region(test_p)) {
                     // Point is between APA volumes — treat as a bad step so the
                     // bad-step fraction is not artificially diluted (B.2 fix).
+                    // (doc icarus/04 sec 8: unless inside a 3-D dead region.)
                     ++num_bad;
                 }
                 // doc 78 round 1 (mirrors connect_graph_relaxed): num_bad > 7
