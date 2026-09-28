@@ -289,6 +289,19 @@ namespace WireCell::Clus::Facade {
                                        const std::vector<int>& cc,
                                        const std::string& pcname = "perblob");
 
+    // Make the grouping's "cluster_scalar" PCs serializable when
+    // separate(tag_family=true) tagged only some clusters with "sep_family".
+    // TensorDM::as_tensors appends same-named local PCs in child order and
+    // Dataset::append throws when the FIRST cluster_scalar carries a key a
+    // later one lacks ("missing keys in append: 1 missing: sep_family"); in
+    // the opposite order it silently drops the key.  This fills sep_family =
+    // 0 ("no family", what connect1 reads for an absent key) into every later
+    // cluster_scalar lacking it, and ONLY when the first cluster_scalar has
+    // the key -- exactly the inputs that throw today -- so every input that
+    // serializes today is untouched.  Returns the number of clusters filled
+    // (wcp-porting-img wcfm/docs/13).
+    size_t fill_sep_family_before_serialize(Grouping& grouping);
+
 
 
     /**
