@@ -2,10 +2,13 @@ import torch
 import scripts.roi_metrics as roi_metrics
 import numpy as np
 
-def get_with_chan_range(y, labels, chan_range):
+config.setdefault('threshold', 0.5)
+
+def get_with_chan_range(y, labels, chan_range, threshold=0.5):
     res  = roi_metrics.roi_metrics(
         y[chan_range[0]:chan_range[1]],
-        labels[chan_range[0]:chan_range[1]]
+        labels[chan_range[0]:chan_range[1]],
+        threshold=0.5
     )
     return res
 
@@ -26,9 +29,11 @@ chan_ranges = {
 }
 
 rule roi_eff_pur:
+    params:
+        # threshold=float(wildcards.threshold)
     run:
         y, labels = load_y_labels(input[0])
-        res = get_with_chan_range(y, labels, chan_ranges[wildcards.plane])
+        res = get_with_chan_range(y, labels, chan_ranges[wildcards.plane], threshold=float(wildcards.threshold))
         eff, pur = res['efficiency'].item(), res['purity'].item()
         print(eff,pur)
         import numpy as np
@@ -38,7 +43,32 @@ use rule roi_eff_pur as angled_roi_eff_pur with:
     input:
         "<results>/xvu-test_line_{plane}plane_{angles}.pt"
     output:
-        temp("<results>/xvu-roi_effs_purs_{plane}plane_{angles}.npz")
+        temp("<results>/threshold-{threshold}-xvu-roi_effs_purs_{plane}plane_{angles}.npz")
+
+rule pixel_eff_pur:
+    params:
+        # threshold=float(wildcards.threshold)
+        # chan_range=chan_ranges
+    run:
+        import torch
+        import numpy as np
+        t = torch.load(input[0])
+        labels = t['labels'][0].detach().cpu()
+        y = t['y'][0].detach().cpu()
+        this_range=chan_ranges[wildcards.plane] #params.chan_range
+        real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+        threshold = float(wildcards.threshold)
+        eff = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/labels[this_range[0]:this_range[1]].sum()
+        pur = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/(y[this_range[0]:this_range[1]] > threshold).sum()
+
+        np.savez(output[0], effs=np.array([eff]), purs=np.array([pur]))
+
+use rule pixel_eff_pur as pixel_eff_pur_xvu_line with:
+    input:
+        '<results>/xvu-test_line_{plane}plane_{angles}.pt'
+    output:
+        '<results>/threshold-{threshold}-xvu-pixel_effs_purs_{plane}plane_{angles}.npz'
+
 
 def load(filename, k='y'):
     t = torch.load(filename)
@@ -149,36 +179,57 @@ rule aggregate_scan:
         )
 
 
-def fbeta(R, P, beta=1.0):
-    return (1+beta*beta)*(R*P)/(beta*beta*P + R)
+# def fbeta(R, P, beta=1.0):
+#     return (1+beta*beta)*(R*P)/(beta*beta*P + R)
+
+rule compute_fbeta:
+    input:
+        'aggregated_scan_{type}_plane_{plane}.npz'
+    output:
+        'fbeta_aggregated_scan_{type}_plane_{plane}_{beta}.npz'
+    run:
+        t = np.load(input[0])
+        R = t['n_recos_matched_summed']/t['n_trues_summed']
+        P = t['n_trues_matched_summed']/t['n_recos_summed']
+        beta = float(wildcards.beta)
+        fbeta = (1+beta*beta)*(R*P)/(beta*beta*P + R)
+        maxloc = t['thresholds'][np.argmax(fbeta)]
+        maxval = np.max(fbeta)
+        np.savez(
+            output[0],
+            thresholds=t['thresholds'],
+            beta=beta,
+            fbeta=fbeta,
+            maxloc=maxloc,
+            maxval=maxval,
+        )
+
 
 rule plot_fbeta_scan:
     output:
-        'aggregated_scan_{type}_plane_{plane}_fbetas.png'
+        png='aggregated_scan_{type}_plane_{plane}_fbetas.png',
     input:
-        'aggregated_scan_{type}_plane_{plane}.npz'
+        expand('fbeta_aggregated_scan_{{type}}_plane_{{plane}}_{beta}.npz',  beta=[0.50, 0.75, 1.00, 1.25, 1.50, 2.00])
     run:
         import matplotlib.pyplot as plt
-        t = np.load(input[0])
-        
-        betas = np.array([0.50, 0.75, 1.00, 1.25, 1.50, 2.00]).reshape(-1,1)
+        for ii, i in enumerate(input):
+            t = np.load(i)
+            maxloc = t['maxloc']
+            maxval = t['maxval']
+            plt.plot(t['thresholds'], t['fbeta'], label=r"$\beta$"+f"={t['beta']:.2f} | max = {maxloc:.2f}")
+            plt.scatter(maxloc, maxval)
 
-
-        R = t['n_recos_matched_summed']/t['n_trues_summed']
-        P = t['n_trues_matched_summed']/t['n_recos_summed']
-        fbeta = (1+betas*betas)*(R*P)/(betas*betas*P + R)
-        for i, fb in enumerate(fbeta):
-          maxloc =t['thresholds'][np.argmax(fb)]
-          themax = np.max(fb)
-          plt.plot(t['thresholds'], fb, label=r"$\beta$"+f"={betas[i][0]:.2f} | max = {maxloc:.2f}")
-          plt.scatter(maxloc, themax)
         plt.legend()
-        plt.savefig(output[0])
+        plt.savefig(output.png)
+
 
 
 config.setdefault('device', 'cpu')
 config.setdefault('app', 'xvunet')
 config.setdefault('nevents', 10)
+config.setdefault('paths','')
+config.setdefault('model_file','')
+config.setdefault('cfg','')
 rule run_n:
     resources:
         gpu = 1 if ('gpu' in config['device'] or 'cuda' in config['device']) else 0
@@ -187,7 +238,7 @@ rule run_n:
     params:
         paths=config['paths'],
         model_file=config['model_file'],
-        device=config['device'],
+        device=('cuda' if 'gpu' in config['device'] else config['device']),
         config=config['cfg'],
         app=config['app'],
         nevents=config['nevents'],
@@ -224,29 +275,29 @@ wangles=uangles
 use rule merge_roi_eff_pur as merge_vplane_roi_eff_purs with:
     input:
         expand(
-            '<results>/xvu-roi_effs_purs_vplane_{angles}.npz',
+            '<results>/threshold-{{threshold}}-xvu-{{type}}_effs_purs_vplane_{angles}.npz',
             angles=vangles
         )
     output:
-        "<results>/xvu-merged_roi_effs_purs_vplane_high_end.npz"
+        "<results>/threshold-{threshold}-xvu-merged_{type}_effs_purs_vplane_high_end.npz"
 
 use rule merge_roi_eff_pur as merge_uplane_roi_eff_purs with:
     input:
         expand(
-            '<results>/xvu-roi_effs_purs_uplane_{angles}.npz',
+            '<results>/threshold-{{threshold}}-xvu-{{type}}_effs_purs_uplane_{angles}.npz',
             angles=uangles
         )
     output:
-        "<results>/xvu-merged_roi_effs_purs_uplane_high_end.npz"
+        "<results>/threshold-{threshold}-xvu-merged_{type}_effs_purs_uplane_high_end.npz"
 
 use rule merge_roi_eff_pur as merge_wplane_roi_eff_purs with:
     input:
         expand(
-            '<results>/xvu-roi_effs_purs_wplane_{angles}.npz',
+            '<results>/threshold-{{threshold}}-xvu-{{type}}_effs_purs_wplane_{angles}.npz',
             angles=wangles
         )
     output:
-        "<results>/xvu-merged_roi_effs_purs_wplane_high_end.npz"
+        "<results>/threshold-{threshold}-xvu-merged_{type}_effs_purs_wplane_high_end.npz"
 
 
 rule plot_merged_roi_eff_pur:
@@ -294,9 +345,9 @@ use rule plot_merged_roi_eff_pur as plot_merged_roi_eff_pur_uplane with:
     params:
         xlabels=lambda w : [f'{u},{v}' for u,v in get_angles(w)]
     input:
-        "<results>/xvu-merged_roi_effs_purs_{plane}plane_high_end.npz"
+        "<results>/threshold-{threshold}-xvu-merged_{type}_effs_purs_{plane}plane_high_end.npz"
     output:
-        '<results>/xvu-all_roi_eff_pur_{plane}plane.png'
+        '<results>/threshold-{threshold}-xvu-all_{type}_eff_pur_{plane}plane.png'
 
 rule all_roi_tables:
     input:
@@ -337,3 +388,171 @@ use rule roi_lengths as true_w_roi_lengths with:
         expand("<results>/xvu-{{type}}_roi_table_wplane_{angles}-thresh-0.5.pt", angles=wangles)
     output: "<results>/xvu-{type}_roi_table_info_wplane-thresh-0.5.npz"
 
+
+
+
+import numpy as np
+import torch
+import h5py as h5
+
+def dosum(inp):
+  return np.sum(np.all(inp, axis=-1))
+
+
+rule trios_cross_plane:
+  run:
+    ftrio = h5.File(input.trios)
+    f = torch.load(input.run_one, map_location='cpu')
+
+    trios = ftrio['0']['trio_uvwt'][...]
+    labels = f['labels'][0]
+    y = f['y'][0]
+
+    trio_us = labels[trios[:,0], trios[:,-1]]
+    trio_vs = labels[trios[:,1], trios[:,-1]]
+    trio_ws = labels[trios[:,2], trios[:,-1]]
+
+    all_trios = np.stack((trio_us, trio_vs, trio_ws), axis=-1)
+    validity = np.where(np.all(all_trios > 0., axis=1))
+
+    valid_trios = trios[validity]
+
+    print(valid_trios)
+    y_us = y[valid_trios[:,0], valid_trios[:,-1]] > float(params.threshold)
+    y_vs = y[valid_trios[:,1], valid_trios[:,-1]] > float(params.threshold)
+    y_ws = y[valid_trios[:,2], valid_trios[:,-1]] > float(params.threshold)
+
+    ys = np.stack((y_us, y_vs, y_ws), axis=-1)
+    n_valid = len(ys)
+    uvw = dosum(ys)*1./n_valid
+    print(f'U & V & W -- {uvw:.3f}')
+
+    ys[:,2] = ~ys[:,2]
+    uv = dosum(ys)*1./n_valid 
+    print(f'U & V & !W -- {uv:.3f}')
+    ys[:,2] = ~ys[:,2]
+
+    ys[:,0] = ~ys[:,0]
+    vw = dosum(ys)*1./n_valid
+    print(f'!U & V & W -- {vw:.3f}')
+    ys[:,0] = ~ys[:,0]
+
+    ys[:,1] = ~ys[:,1]
+    wu = dosum(ys)*1./n_valid
+    print(f'U & !V & W -- {wu:.3f}')
+
+    ys[:,2] = ~ys[:,2]
+    just_u = dosum(ys)*1./n_valid
+    print(f'U & !V & !W -- {just_u:.3f}')
+    ys[:,0] = ~ys[:,0]
+    ys[:,1] = ~ys[:,1]
+    just_v = dosum(ys)*1./n_valid
+    print(f'!U & V & !W -- {just_v:.3f}')
+
+    ys[:,2] = ~ys[:,2]
+    ys[:,1] = ~ys[:,1]
+    just_w = dosum(ys)*1./n_valid
+    print(f'!U & !V & W -- {just_w:.3f}')
+
+    np.savez(
+      output[0],
+      uvw=uvw,
+      uv=uv,
+      vw=vw,
+      wu=wu,
+      just_u=just_u,
+      just_v=just_v,
+      just_w=just_w,
+      ys=ys,
+      valid_trios=valid_trios,
+    )
+
+use rule trios_cross_plane as trios_cross_plane_line with:
+  input:
+    run_one="<results>/xvu-test_line_{plane}plane_{angles}.pt",
+    trios=lambda w: "linedepos-pdhd-{plane}plane-"+ w.angles.replace("t1-", "t1_").replace("t2-", "t2_") + "-g4-trio.h5"
+  params:
+    threshold=lambda w : w.threshold
+  output:
+    "threshold-{threshold}-xvu-trio-crossplane-{plane}plane-{angles}-g4-trio.npz"
+
+rule merge_trio_cross_plane:
+    run:
+        import numpy as np
+        uvw, uv, vw, wu, just_u, just_v, just_w, ys, valid_trios = [], [], [], [], [], [], [], [], [],
+        for f in input:
+            t = np.load(f)
+            uvw += [t['uvw']]
+            uv += [t['uv']]
+            vw += [t['vw']]
+            wu += [t['wu']]
+            just_u += [t['just_u']]
+            just_v += [t['just_v']]
+            just_w += [t['just_w']]
+            ys += [t['ys']]
+            valid_trios += [t['valid_trios']]
+
+        np.savez(
+            output[0],
+            uvw=np.array(uvw),
+            uv=np.array(uv),
+            vw=np.array(vw),
+            wu=np.array(wu),
+            just_u=np.array(just_u),
+            just_v=np.array(just_v),
+            just_w=np.array(just_w),
+            # ys=np.array(ys),
+            # valid_trios=np.array(valid_trios),
+        )
+
+use rule merge_trio_cross_plane as merge_vplane_trio_cross_planes with:
+    input:
+        expand(
+            "threshold-{{threshold}}-xvu-trio-crossplane-vplane-{angles}-g4-trio.npz",
+            angles=vangles
+        )
+    output:
+        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_vplane_high_end.npz"
+
+use rule merge_trio_cross_plane as merge_uplane_trio_cross_planes with:
+    input:
+        expand(
+            "threshold-{{threshold}}-xvu-trio-crossplane-uplane-{angles}-g4-trio.npz",
+            angles=uangles
+        )
+    output:
+        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_uplane_high_end.npz"
+use rule merge_trio_cross_plane as merge_wplane_trio_cross_planes with:
+    input:
+        expand(
+            "threshold-{{threshold}}-xvu-trio-crossplane-wplane-{angles}-g4-trio.npz",
+            angles=wangles
+        )
+    output:
+        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_wplane_high_end.npz"
+
+
+rule plot_trio_rates:
+    input:
+        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_{plane}plane_high_end.npz"
+    output:
+        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_{plane}plane_high_end.png"
+    run:
+        import matplotlib.pyplot as plt
+        import numpy
+
+        t = np.load(input[0])
+
+        fig, ax = plt.subplots()
+        bottom = np.zeros(len(t['uvw']))
+
+        combos = ['uvw', 'uv', 'vw', 'wu', 'just_u', 'just_v', 'just_w']
+
+        for combo in combos:
+            p = ax.bar(np.arange(len(combos)), t[combo], label=combo, bottom=bottom)
+            bottom += t[combo]
+
+            # ax.bar_label(p, label_type='center')
+
+        ax.legend()
+        plt.savefig(output[0])

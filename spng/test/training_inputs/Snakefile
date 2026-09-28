@@ -217,72 +217,80 @@ use rule spng_mpsigproc as spng_mpsigproc_target with:
     output:
         temp("sigproc-spng-mp-target-{target}_{sample}.tar")
 
-rule spng_mpsigproc_lines:
+use rule spng_mpsigproc as spng_msigproc_lines with:
     resources:
         gpu = 1 if config['device'] == 'gpu' else 0
     input:
         'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
         temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
-    params:
-        jsonnet=config['mpsigproc_training_js'],
-        tpcid=config['tpcid'],
-        detname=config['detname'],
-        device=config['device'],
-    shadow: "minimal"
-    envmodules:
-      "wire-cell-toolkit/spng-gcc-11.5.0-fk4b2v4"
-    shell:
-        """
-        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
-            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
-            -A "device={params.device}"
-        # tar the output files
-        tar -cf {output} dnnroi-training-truth.npz \
-        dnnroi-training-fodder.npz
-        """
+
+#rule spng_mpsigproc_lines:
+#    resources:
+#        gpu = 1 if config['device'] == 'gpu' else 0
+#    input:
+#        'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
+#    output:
+#        temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
+#    params:
+#        jsonnet=config['mpsigproc_training_js'],
+#        tpcid=config['tpcid'],
+#        detname=config['detname'],
+#        device=config['device'],
+#    shadow: "minimal"
+#    envmodules:
+#      "wire-cell-toolkit/spng-gcc-11.5.0-fk4b2v4"
+#    shell:
+#        """
+#        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
+#            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
+#            -A "device={params.device}"
+#        # tar the output files
+#        tar -cf {output} dnnroi-training-truth.npz \
+#        dnnroi-training-fodder.npz
+#        """
 
 
-config.setdefault('external_loc', '')
+# config.setdefault('external_loc', '')
 
-rule spng_densesigproc:
-    input:
-        #TODO Remove external loc
-        os.path.join(config['external_loc'], "cosmics_{sample}_wct-depos.npz"),
-    output:
-        temp("sigproc-spng-dense-cosmics_{sample}.tar")
-        # "sigproc-spng-dense-{name}.tar"
-    shadow: "minimal"
-    params:
-        jsonnet='dnnroi-training-dense-only.jsonnet',
-        detname=config['detname'],
-    shell:
-        """
-        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
-            -A "tpcid=0" -A "detname={params.detname}"
-        # tar the output files
-        tar -cf {output} dnnroi-training-truth.npz \
-        dnnroi-training-fodder.npz
-        """
+# rule spng_densesigproc:
+#     input:
+#         #TODO Remove external loc
+#         os.path.join(config['external_loc'], "cosmics_{sample}_wct-depos.npz"),
+#     output:
+#         temp("sigproc-spng-dense-cosmics_{sample}.tar")
+#         # "sigproc-spng-dense-{name}.tar"
+#     shadow: "minimal"
+#     params:
+#         jsonnet='dnnroi-training-dense-only.jsonnet',
+#         detname=config['detname'],
+#     shell:
+#         """
+#         wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+#             -A "tpcid=0" -A "detname={params.detname}"
+#         # tar the output files
+#         tar -cf {output} dnnroi-training-truth.npz \
+#         dnnroi-training-fodder.npz
+#         """
 
-rule spng_densesigproc_lines:
-    input:
-        #TODO Remove external loc
-        os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
-    output:
-        temp("sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
-    shadow: "minimal"
-    params:
-        jsonnet='dnnroi-training-dense-only.jsonnet',
-        detname=config['detname'],
-    shell:
-        """
-        wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
-            -A "tpcid=0" -A "detname={params.detname}"
-        # tar the output files
-        tar -cf {output} dnnroi-training-truth.npz \
-        dnnroi-training-fodder.npz
-        """
+# rule spng_densesigproc_lines:
+#     input:
+#         #TODO Remove external loc
+#         os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
+#     output:
+#         temp("sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
+#     shadow: "minimal"
+#     params:
+#         jsonnet='dnnroi-training-dense-only.jsonnet',
+#         detname=config['detname'],
+#     shell:
+#         """
+#         wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
+#             -A "tpcid=0" -A "detname={params.detname}"
+#         # tar the output files
+#         tar -cf {output} dnnroi-training-truth.npz \
+#         dnnroi-training-fodder.npz
+#         """
 
 rule convert_trio:
     input:
@@ -295,7 +303,12 @@ rule convert_trio:
       python  {SRC_DIR}/scripts/trios_npz_to_h5.py \
         dnnroi-training-trio.npz -o {output}
       """
-  
+
+use rule convert_trio as convert_trio_line with:
+  input:
+     "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+  output:
+     "linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-trio.h5"
 
 ## For more flexibility, create a separate rule to unpack into hdf5 for each plane
 for i in range(3):
@@ -341,23 +354,22 @@ for i in range(3):
         script:
             "scripts/convert_to_h5mpSnake.py"
     
+def get_input_by_plane(plane):
+    angles = get_angles_by_plane(wildcards.plane)
+    return [
+        f'test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
+    ]
 
-# seeds = []
-# import random
-# config.setdefault('nseeds', 1)
-# for i in range(int(config['nseeds'])):
 
-#     these_seeds = '.'.join([str(random.randint(0,100)) for j in range(5)])
-#     seeds.append(these_seeds)
+# rule high_end_mp_hdf5:
+#     input:
+#         rec0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         rec1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         rec2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
 
-rule high_end_mp_hdf5:
-    input:
-        rec0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
-        tru0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
-        rec1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
-        tru1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
-        rec2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
-        tru2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
 
 
 
@@ -445,6 +457,13 @@ def get_angles_by_plane(plane):
         raise RuntimeError(f'Unknown plane {plane}')
     return angles
 
+rule high_end_mp_hdf5:
+    input:
+        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-{i}.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane) for i in range(3)],
+
+rule high_end_mp_hdf5_trios:
+    input:
+        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-trio.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane)],
 
 #
 # Run an a reco/true h5 pair through a model
@@ -460,7 +479,7 @@ rule run_one:
     #benchmark:
     #    '<benchmarks>/run_one_{t1}_{t2}_{plane}'
     output:
-        temp('<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt')
+        '<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
     params:
         device=config['device'],
         model=config['model'],
@@ -494,7 +513,7 @@ use rule run_one as run_one_xvu with:
         rec=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-rec-{i}.h5' for i in range(3)],
         tru=[f'linedepos-pdhd-{{plane}}plane-t1_{{t1}}-t2_{{t2}}-g4-tru-{i}.h5' for i in range(3)],
     output:
-        temp('<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt')
+        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
 
 use rule run_one_xvu as run_one_xvu_epoch with:
     pathvars:
@@ -514,47 +533,57 @@ def get_input_by_plane_xvu(wildcards):
         f'<results>/xvu-test_line_{wildcards.plane}plane_t1-{t1}-t2-{t2}.pt' for t1,t2 in angles
     ]
 
-rule pixel_eff_pur:
-    params:
-        # threshold=0.5,
-        chan_range=(0, 800),
-    run:
-        import torch
-        import numpy as np
-        t = torch.load(input[0])
-        labels = t['labels'][0].detach().cpu()
-        y = t['y'][0].detach().cpu()
-        this_range=params.chan_range
-        real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
-        threshold = float(wildcards.threshold)
-        eff = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/labels[this_range[0]:this_range[1]].sum()
-        pur = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/(y[this_range[0]:this_range[1]] > threshold).sum()
+# rule high_end_mp_hdf5:
+#     input:
+#         rec0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru0 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-0.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         rec1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru1 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-1.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         rec2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-rec-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
+#         tru2 = [expand("linedepos-pdhd-{plane}plane" +f"-t1_{t1}-t2_{t2}-g4-tru-2.h5", plane=['u', 'v', 'w']) for t1, t2 in high_end_xzu_xzv_deg],
 
-        np.savez(output[0], eff=eff, pur=pur)
 
-use rule pixel_eff_pur as pixel_eff_pur_xvu_line with:
-    input:
-        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
-    output:
-        '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}-eff-pur-t{threshold}.npz'
+# rule pixel_eff_pur:
+#     params:
+#         # threshold=0.5,
+#         chan_range=(0, 800),
+#     run:
+#         import torch
+#         import numpy as np
+#         t = torch.load(input[0])
+#         labels = t['labels'][0].detach().cpu()
+#         y = t['y'][0].detach().cpu()
+#         this_range=params.chan_range
+#         real_pixels = torch.where(labels[this_range[0]:this_range[1]] > 0)
+#         threshold = float(wildcards.threshold)
+#         eff = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/labels[this_range[0]:this_range[1]].sum()
+#         pur = (y[this_range[0]:this_range[1]][real_pixels] > threshold).sum()/(y[this_range[0]:this_range[1]] > threshold).sum()
+
+#         np.savez(output[0], eff=eff, pur=pur)
+
+# use rule pixel_eff_pur as pixel_eff_pur_xvu_line with:
+#     input:
+#         '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
+#     output:
+#         '<results>/xvu-test_line_{plane}plane_t1-{t1}-t2-{t2}-eff-pur-t{threshold}.npz'
     # params:
     #     threshold=wildcards.threshold
 
-rule eff_pur_scan:
-    input:
-        expand('<results>/xvu-test_line_uplane_t1-75-t2-75-eff-pur-t{threshold}.npz',
-               threshold=np.arange(0.05,1.0,0.05))
-    output:
-        '<results>/test_scan.npz'
-    run:
-        import numpy as np
-        effs = []
-        purs = []
-        for inp in input:
-            t = np.load(inp)
-            effs.append(t['eff'])
-            purs.append(t['pur'])
-        np.savez(output[0], effs=effs, purs=purs)
+# rule eff_pur_scan:
+#     input:
+#         expand('<results>/xvu-test_line_uplane_t1-75-t2-75-eff-pur-t{threshold}.npz',
+#                threshold=np.arange(0.05,1.0,0.05))
+#     output:
+#         '<results>/test_scan.npz'
+#     run:
+#         import numpy as np
+#         effs = []
+#         purs = []
+#         for inp in input:
+#             t = np.load(inp)
+#             effs.append(t['eff'])
+#             purs.append(t['pur'])
+#         np.savez(output[0], effs=effs, purs=purs)
 
 
 rule plot_eff_pur:
@@ -564,7 +593,8 @@ rule plot_eff_pur:
         png='<results>/all_eff_pur_{plane}plane.png',
         npz='<results>/all_eff_pur_{plane}plane.npz',
     params:
-        test_tpcs = [int(i) for i in config['test_tpcs']] #This is a bad name for this but oh well
+        test_tpcs = [int(i) for i in config['test_tpcs']], #This is a bad name for this but oh well
+        threshold=0.5,
     #benchmark:
     #    '<benchmarks>/{plane}_plot_eff_pur'
     run:
@@ -760,17 +790,7 @@ def glob_epochs(w):
 
 rule all_epochs_xvu:
     input: glob_epochs
-        
 
-#rule run_checkpoints:
-#    input:
-#    	f'{config["cpt_dir"]}/checkpoint_0_0_{{epoch}}.pt'
-#    output:
-#        'epoch_{epoch}/blah.txt'
-#    shell:
-#        '''
-#        echo blah > {output}
-#	'''
 
 def get_epochs(wildcards):
     from glob import glob
