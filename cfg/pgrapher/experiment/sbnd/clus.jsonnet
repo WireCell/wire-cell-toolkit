@@ -3003,6 +3003,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     [if event_from_ident then 'rse_from_ensemble']: true,
                 },
             },
+            // ai-helper issue 33: the tagger verdict Bee sets (tagger_stm / _tgm /
+            // _fc / _lm) from INSIDE the PR MABC -- the toolkit port of the
+            // larwirecell labeler_tagger's tagger branch, so a standalone PR job
+            // (wct-pr.jsonnet) writes them.  Same content: the beam-window main
+            // candidates, the clustering Bee coordinates the labeler is handed
+            // (bee_coords), cluster_id = verdict.  Needs the shared bee_sink.  Run
+            // it after the taggers.  Only active when named in pipeline_names, so
+            // the 1-step chain (whose labeler_tagger writes these) is unchanged.
+            tagger_bee: {
+                type: 'TaggerBeeVisitor',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    bee_sink: (assert bee_sink != null : 'tagger_bee needs a bee_sink'; wc.tn(bee_sink)),
+                    detector: 'sbnd',
+                    beam_window: beam_window,
+                    coords: common_corr_coords(pos_offset_on, use_sce),
+                },
+            },
         },
         local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
         // The taggers' configs only name the recombination/particle-dataset

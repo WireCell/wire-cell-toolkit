@@ -32,7 +32,16 @@
 //   xtpc_sc1_light_gate,  the QLMatching scenario-1 light gate + over-prediction ceiling
 //   xtpc_sc1_overpred_max (doc 123 sec 19; ON in the standalone Q/L job since 2026-09-25,
 //                         wct-clus-matching-perevt.jsonnet); null => key omitted => C++ default OFF
-function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null)
+//   stage                 '1step' (default): the full chain with PR in-process (the jobs above).
+//                         'ql': STEP 1 of the 2-step split (ai-helper issue 33) -- the graph
+//                         ends after clus_all_apa -> labeler_truth -> truth attacher, whose
+//                         ITensorSet (the matched bundles + light + CTPC + metadata + the MC
+//                         truth tables) goes to a TensorFileSink
+//                         (qlpctree.tar.gz, every event of the lar job in one file).  Step 2,
+//                         wct-pr.jsonnet, runs the SAME PR stage (sbnd-pr-stage.jsonnet) on it.
+//                         Top-level job: wcls-img-clus-matching.jsonnet.
+function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step')
+assert stage == '1step' || stage == 'ql' : "stage must be '1step' or 'ql'";
 local g = import "pgraph.jsonnet";
 local wc = import "wirecell.jsonnet";
 
@@ -163,7 +172,7 @@ local clus = import 'pgrapher/experiment/sbnd/clus.jsonnet';
 // rse_from_ident: each frame's tensor ident carries the real event id, so the
 // Bee display is labelled with the true event number (matches Xin's chain).
 // rse_from_metadata=true: every MABC prefers the run/subrun/event carried in
-// its input tensor-set metadata, stamped by the wclsTensorSetMetadataAttacher
+// its input tensor-set metadata, stamped by the wclsTruthInformationAttacher
 // nodes below.  rse_from_ident stays on as the fallback for any node whose
 // input carries no metadata (C++ precedence: metadata > ident > config), so
 // nothing regresses if an attacher is removed.
@@ -175,7 +184,9 @@ local bee_shared = {
     name: 'mabc_shared',
     data: { outname: 'mabc.zip', initial_index: 0 },
 };
-// ---- RSE metadata attachers (larwirecell wclsTensorSetMetadataAttacher) ----
+// ---- RSE + truth attachers (larwirecell wclsTruthInformationAttacher) ----
+// (ai-helper issue 33: replaces wclsTensorSetMetadataAttacher, of which it is a
+// superset -- truth=false is exactly the old RSE-only node.)
 // The WCT graph cannot otherwise know the art run/subrun: a tensor ident is the
 // EVENT number alone (CookedFrameSource -> SimpleFrame(event.event(), ...)),
 // which is why MABC's rse_from_ident writes run=subrun=0.  These nodes stamp
@@ -194,16 +205,30 @@ local bee_shared = {
 // art::Event; it warns and passes through rather than stamping 0/0/0.
 local rse_attach = [
     g.pnode({
-        type: 'wclsTensorSetMetadataAttacher',
+        type: 'wclsTruthInformationAttacher',
         name: 'rse_apa%d' % n,
-        data: {},
+        data: { truth: false },
     }, nin=1, nout=1)
     for n in std.range(0, nanode - 1)
 ];
 local rse_all_apa = g.pnode({
-    type: 'wclsTensorSetMetadataAttacher',
+    type: 'wclsTruthInformationAttacher',
     name: 'rse_all_apa',
-    data: {},
+    data: { truth: false },
+}, nin=1, nout=1);
+// The truth instance, right after labeler_truth (both stages): on MC it appends
+// the truth_nu / truth_pf tables (the neutrino interactions, and the particle
+// flow with the labeler's Bee "mc" selection -- same pf_ke_min), which the PR
+// MABC publishes to its visitors (SbndPrMagnifyTrackingVisitor writes
+// T_truth_nu / T_truth_pf) and, in stage 'ql', travel in qlpctree.tar.gz.  On
+// data (no neutrino MCTruth) it stamps the RSE only.  MC product labels are the
+// component defaults, the same as the labeler's (generator / largeant /
+// ionandscint:priorSCE).
+local truth_pf_ke_min = 10 * wc.MeV;
+local truth_attach = g.pnode({
+    type: 'wclsTruthInformationAttacher',
+    name: 'truth',
+    data: { truth: true, pf_ke_min: truth_pf_ke_min },
 }, nin=1, nout=1);
 
 // save_assoc_id=true: the per-APA clustering_isolated pass writes the isolated-
@@ -322,15 +347,17 @@ local clus_all_apa = clus_maker.all_apa(tools.anodes, dump=false, eb_fast=true,
 // ==== follow-up tail (moved out of clus.jsonnet into this entry config) ====
 //   clus_all_apa (MABC) -> pr_node (STM/TGM/FC taggers) -> labeler -> tail_dump
 
-// Beam gate shared by the tagger PR pass AND the labeler's tagger-Bee cluster_id
-// encoding (which uses it to tell "beam-window candidate" mains from out-of-
-// window mains) -- ONE source so the two never drift.
-local beam_window = [0.2 * wc.us, 2.2 * wc.us];
+// The PR stage (beam gate, 15-visitor pipeline, pr() call) is ONE definition
+// shared with the standalone step-2 job wct-pr.jsonnet: sbnd-pr-stage.jsonnet.
+// The beam gate is shared by the tagger PR pass AND the labeler's tagger-Bee
+// cluster_id encoding (which uses it to tell "beam-window candidate" mains from
+// out-of-window mains) -- ONE source so the two never drift.
+local pr_stage = import 'pgrapher/experiment/sbnd/sbnd-pr-stage.jsonnet';
+local beam_window = pr_stage.beam_window;
 
 // PR tagger pass: SBND production operating point (clus_maker.pr defaults),
 // running the nusel tagger visitors so each cluster carries flag_STM/TGM/FC for
 // the labeler to read.  dump=false -> a pass-through tensor node.
-local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
 // enable_tracking_root: emit tracking-pr.root (tracking_visitor + tagger_output).
 //
 // MUST be false when running more than one event per lar process.  Both
@@ -350,51 +377,19 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
 local enable_tracking_root =
     if std.extVar('enable_tracking_root') == 'false' then false else true;
 
-
-
-local pr_pipeline_names =
-    ['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
-     'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm', 'tagger_check_fc',
-     'protect_bundle', 'steiner_refresh', 'tagger_check_neutrino',
-     'numu_bdt_scorer', 'nue_bdt_scorer']
-    + (if enable_tracking_root then ['tracking_visitor', 'tagger_output'] else []);
-
 // doc sbnd_xin/120 sec 4: ONE call, no mode switch and no mirror.  pr()'s own
 // defaults ARE the SBND production operating point now, so naming no knobs here
 // is what gets production -- and a knob added to the PR job can no longer fail
 // to reach this chain, because there is no second list for it to be missing
 // from.  Gate: two_chain_gate.py, which compiles this file and the local PR job
 // and requires their shared components to agree key for key.
-local pr_node =
-        clus_maker.pr(
-        tools.anodes, dump=false,
-        // Share the ONE Bee zip.  Without this the PR display layers
-        // (track_fit / shower_track / vertices -- the only place the fitted
-        // trajectory, per-particle shower/track colouring and reconstructed
-        // vertices appear) go to mabc-pr.zip, which the bulk harness deletes.
-        // Sharing renames this node's two colliding sets to clustering-pr /
-        // mc-pr; see clus.jsonnet.
-        bee_sink=bee_shared,
-        // FULL 15-stage SBND production PR chain, matching sbnd_xin's
-        // run_pr_chain_batch.sh PIPELINE string exactly (docs/5-pr-chain-in-1step).
-        // Ordering is load-bearing, not stylistic:
-        //   * protect_bundle + steiner_refresh sit AFTER the cosmic taggers (uboone
-        //     takes cosmic verdicts on UNSPLIT clusters, wire-cell-prod-stm.cxx:806)
-        //     and BEFORE tagger_check_neutrino (Protect_Over_Clustering exists only
-        //     in the nue executable, wire-cell-prod-nue.cxx:1322).  SBND production
-        //     default since 2026-08-02.
-        //   * steiner_refresh must immediately follow protect_bundle: it rebuilds
-        //     only the steiner products the split purged.
-        //   * nue_bdt_scorer after numu_bdt_scorer.
-        //   * tagger_output after tracking_visitor -- it reopens tracking-pr.root
-        //     in UPDATE mode.
-        // The last four need the WireCellRoot plugin (both fcls load it).
-        pipeline_names=['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
-                        'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm', 'tagger_check_fc',
-                        'protect_bundle', 'steiner_refresh', 'tagger_check_neutrino',
-                        'numu_bdt_scorer', 'nue_bdt_scorer']
-                       + (if enable_tracking_root then ['tracking_visitor', 'tagger_output'] else []),
-        particle_dataset=pds.particle_dataset, extra_uses=pds.all, beam_window=beam_window);
+// Share the ONE Bee zip.  Without this the PR display layers (track_fit /
+// shower_track / vertices -- the only place the fitted trajectory, per-particle
+// shower/track colouring and reconstructed vertices appear) go to mabc-pr.zip,
+// which the bulk harness deletes.  Sharing renames this node's two colliding
+// sets to clustering-pr / mc-pr; see clus.jsonnet.  The pipeline (15 stages,
+// ordering load-bearing) is documented in sbnd-pr-stage.jsonnet.
+local pr_node = pr_stage.node(clus_maker, tools.anodes, bee_shared, enable_tracking_root);
         // doc sbnd_xin/120 sec 4.5: `iso_endpoint=true` used to be passed here, to
         // match the 2-step job (apc doc pr/24 sec 16).  It is NOT a pr() parameter
         // -- it is a tcn_knobs bag key -- so this call could never have compiled.
@@ -441,7 +436,7 @@ local labeler_common = {
     sce_field: wc.tn(clus_maker.sce_field_fwd),
     sce_correction: true,
     n_sample_truth_depo_sce: 1,
-    pf_ke_min: 10 * wc.MeV,
+    pf_ke_min: truth_pf_ke_min,
     pf_fiducial: wc.tn(lbl_fv),
     pf_nu_only: true,
     truth_tracks_nu_only: true,
@@ -506,19 +501,31 @@ local tail_dump = g.pnode({
     },
 }, nin=1, nout=0);
 
+// stage='ql' (2-step split, step 1): the terminal sink right after labeler_truth.
+// dump_mode=false -> real tensors.  One file for the whole lar job: TensorFileSink
+// appends every event's set, keyed by the set ident (the art event number), with
+// the set metadata (runNo/subRunNo/eventNo from the RSE attachers, the labeler's
+// nu_* keys and, in sim, bee_pf_truth -- the truth particle tree the PR MABC merges
+// into its Bee "mc" node).  prefix 'clustering_' is what wct-pr.jsonnet (and Xin's
+// wct-pr-perevt.jsonnet) read back.
+local ql_sink = g.pnode({
+    type: 'TensorFileSink',
+    name: 'ql_pctree',
+    data: {
+        outname: 'qlpctree.tar.gz',
+        prefix: 'clustering_',
+        dump_mode: false,
+    },
+}, nin=1, nout=0);
+
 // ---- assemble the graph ----
 //  sigs ─FrameFanout─┬─ img[0] ─(live,dead)─ clus[0] ─ flash_attach[0] ─┐
 //                    └─ img[1] ─(live,dead)─ clus[1] ─ flash_attach[1] ─┤
 //  light[n] (opflash source, or ophit source -> flash finder) ─(port1) flash_attach[n]
 //        flash_attach[n] ─(port n)─ matching_joint ─ rse_all_apa ─ clus_all_apa (all-APA MABC)
-//        clus_all_apa ─ labeler_truth ─ pr_node (taggers) ─ labeler_tagger ─ tail_dump
-local graph = g.intern(
-    innodes=[wcls_input.sigs],
-    centernodes=[frame_fan] + img_pipes + clus_pipes + flash_attach
-                + [matching_joint] + light_nodes
-                + [rse_all_apa, clus_all_apa, labeler_truth, pr_node, labeler_tagger],
-    outnodes=[tail_dump],
-    edges=
+//        clus_all_apa ─ labeler_truth ─ truth_attach ─┬─ pr_node (taggers) ─ labeler_tagger ─ tail_dump   (stage '1step')
+//                                                     └─ ql_sink (qlpctree.tar.gz)                         (stage 'ql')
+local head_edges =
         [g.edge(wcls_input.sigs, frame_fan, 0, 0)]
         + [g.edge(frame_fan, img_pipes[n], n, 0) for n in std.range(0, nanode - 1)]
         + [g.edge(img_pipes[n], clus_pipes[n], 0, 0) for n in std.range(0, nanode - 1)]   // live / active
@@ -529,10 +536,24 @@ local graph = g.intern(
         + [g.edge(matching_joint, rse_all_apa, 0, 0)]
         + [g.edge(rse_all_apa, clus_all_apa, 0, 0)]
         + [g.edge(clus_all_apa, labeler_truth, 0, 0)]
-        + [g.edge(labeler_truth, pr_node, 0, 0)]
-        + [g.edge(pr_node, labeler_tagger, 0, 0)]
-        + [g.edge(labeler_tagger, tail_dump, 0, 0)]
-);
+        + [g.edge(labeler_truth, truth_attach, 0, 0)];
+local head_nodes = [frame_fan] + img_pipes + clus_pipes + flash_attach
+                   + [matching_joint] + light_nodes
+                   + [rse_all_apa, clus_all_apa, labeler_truth, truth_attach];
+local graph =
+    if stage == 'ql' then g.intern(
+        innodes=[wcls_input.sigs],
+        centernodes=head_nodes,
+        outnodes=[ql_sink],
+        edges=head_edges + [g.edge(truth_attach, ql_sink, 0, 0)])
+    else g.intern(
+        innodes=[wcls_input.sigs],
+        centernodes=head_nodes + [pr_node, labeler_tagger],
+        outnodes=[tail_dump],
+        edges=head_edges
+            + [g.edge(truth_attach, pr_node, 0, 0)]
+            + [g.edge(pr_node, labeler_tagger, 0, 0)]
+            + [g.edge(labeler_tagger, tail_dump, 0, 0)]);
 
 local app = {
   type: 'Pgrapher',

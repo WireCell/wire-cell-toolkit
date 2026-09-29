@@ -228,6 +228,12 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     // sbnd_xin/docs/110 -- restart the shower-id counter per event (see the header).
     m_reset_shower_ids_per_event = get(cfg, "reset_shower_ids_per_event", m_reset_shower_ids_per_event);
 
+    // issue 33 -- the auxiliary (truth) tensors published + forwarded (see the header).
+    if (cfg.isMember("aux_datatypes")) {
+        m_aux_datatypes.clear();
+        for (const auto& dt : cfg["aux_datatypes"]) m_aux_datatypes.push_back(dt.asString());
+    }
+
     // Same, but keep the configured run/subrun -- with an optional per-ident
     // override table, because a group of events can span several runs.
     m_event_from_ident = get(cfg, "event_from_ident", m_event_from_ident);
@@ -552,6 +558,8 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["rse_from_ident"] = m_rse_from_ident;
     cfg["event_from_ident"] = m_event_from_ident;
     cfg["reset_shower_ids_per_event"] = m_reset_shower_ids_per_event;  // sbnd_xin/docs/110
+    cfg["aux_datatypes"] = Json::arrayValue;  // issue 33
+    for (const auto& dt : m_aux_datatypes) cfg["aux_datatypes"].append(dt);
     // UNION, not either/or: upstream's ident-based sources and our
     // metadata-based source coexist (issue 13 G3).  The 1-step LArSoft chain
     // gets its RSE from wclsTensorSetMetadataAttacher; the standalone driver
@@ -3991,6 +3999,21 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     ensemble.set_scalar<int>("subRunNo", m_subRunNo);
     ensemble.set_scalar<int>("eventNo", m_eventNo);
 
+    // issue 33: auxiliary per-event tensors (the truth tables) -> the Ensemble
+    // for the visitors, and kept for forwarding to the output set below.
+    ITensor::vector aux_out;
+    if (!m_aux_datatypes.empty()) {
+        for (const auto& ten : *ints->tensors()) {
+            const auto dt = ten->metadata()["datatype"].asString();
+            if (std::find(m_aux_datatypes.begin(), m_aux_datatypes.end(), dt) == m_aux_datatypes.end()) continue;
+            ensemble.set_aux_tensor(dt, ten);
+            aux_out.push_back(ten);
+        }
+        if (!aux_out.empty()) {
+            SPDLOG_LOGGER_DEBUG(log, "ident {}: {} auxiliary tensor(s) published and forwarded", ident, aux_out.size());
+        }
+    }
+
     for (const auto& gname : m_groupings) {
         const auto datapath = inpath(gname, ident);
         load_grouping(ensemble, gname, datapath, ints);
@@ -4355,6 +4378,7 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // Forward the input set metadata (RSE from an upstream attacher/labeler,
     // and anything else a producer put there).  Without this the chain only
     // works when an art-aware node sits IMMEDIATELY upstream of each consumer.
+    outtens.insert(outtens.end(), aux_out.begin(), aux_out.end());   // issue 33
     outts = as_tensorset(outtens, ident, m_in_metadata);
 
     perf("done");

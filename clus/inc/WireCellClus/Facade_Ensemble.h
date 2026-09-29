@@ -5,6 +5,10 @@
 #include "WireCellClus/Facade_Util.h"
 
 #include "WireCellUtil/PointTree.h"
+#include "WireCellIface/ITensor.h"
+
+#include <map>
+#include <string>
 
 
 namespace WireCell::Clus::Facade {
@@ -64,6 +68,22 @@ namespace WireCell::Clus::Facade {
             m_runNo = run; m_subRunNo = subrun; m_eventNo = event; m_rse_valid = true;
         }
 
+        /// Auxiliary per-event tensors that ride along with the point-cloud
+        /// tree without being part of it, keyed by the tensor's metadata
+        /// "datatype".  MultiAlgBlobClustering fills this from its input set
+        /// (config "aux_datatypes", default the truth tables "truth_nu" /
+        /// "truth_pf" of larwirecell's wclsTruthInformationAttacher) and
+        /// forwards the same tensors to its output.  IEnsembleVisitor::visit()
+        /// receives only the Ensemble, so this is how a visitor (e.g.
+        /// SbndPrMagnifyTrackingVisitor's truth trees) sees them.
+        /// aux_tensor() returns nullptr when the event carries none.
+        void set_aux_tensor(const std::string& datatype, ITensor::pointer ten) { m_aux[datatype] = ten; }
+        ITensor::pointer aux_tensor(const std::string& datatype) const {
+            auto it = m_aux.find(datatype);
+            return it == m_aux.end() ? nullptr : it->second;
+        }
+        const std::map<std::string, ITensor::pointer>& aux_tensors() const { return m_aux; }
+
         /// Return false if no child Groupings have the name, else true.
         bool has(const std::string& name) const;
 
@@ -94,6 +114,7 @@ namespace WireCell::Clus::Facade {
         int m_runNo{0};
         int m_subRunNo{0};
         int m_eventNo{0};
+        std::map<std::string, ITensor::pointer> m_aux;
     };
 }
 #endif

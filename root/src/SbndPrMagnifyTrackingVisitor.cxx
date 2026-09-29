@@ -8,6 +8,7 @@
 
 #include <cctype>
 #include <cmath>
+#include <set>
 #include <vector>
 
 #include "TFile.h"
@@ -220,6 +221,7 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     if (m_nu_provenance) {
         write_nu_census(output_tf, grouping);
     }
+    write_truth(output_tf, ensemble);
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -231,6 +233,63 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     delete output_tf;
 
     log->debug("SbndPrMagnifyTrackingVisitor: wrote {}", outname);
+}
+
+namespace {
+    /// One truth table (a 2D double tensor, column names in its metadata
+    /// "columns") as a flat TTree: one entry per row, the event's run/subrun/
+    /// event, then one branch per column -- Int_t for the identifier columns,
+    /// Double_t for the rest.  Units are the table's (LArSoft: cm, ns, GeV).
+    void write_truth_table(TFile* output_tf, const char* tname, const WireCell::ITensor::pointer& ten,
+                           int runNo, int subRunNo, int eventNo, const Log::logptr_t& log)
+    {
+        const auto& md = ten->metadata();
+        const auto shape = ten->shape();
+        if (shape.size() != 2 || ten->element_type() != typeid(double)) {
+            log->warn("{}: truth table must be a 2D double tensor, skipping", tname);
+            return;
+        }
+        const size_t nrows = shape[0], ncols = shape[1];
+        std::vector<std::string> cols;
+        for (const auto& c : md["columns"]) cols.push_back(c.asString());
+        if (cols.size() != ncols) {
+            log->warn("{}: {} column names for {} columns, skipping", tname, cols.size(), ncols);
+            return;
+        }
+        static const std::set<std::string> int_cols = {
+            "nu_idx", "pdg", "ccnc", "mode", "int_type", "flavor",
+            "nu_row", "trackid", "parent_trackid", "mother_trackid", "process"};
+        TTree* tree = new TTree(tname, tname);
+        tree->SetDirectory(output_tf);
+        tree->Branch("runNo", &runNo, "runNo/I");
+        tree->Branch("subRunNo", &subRunNo, "subRunNo/I");
+        tree->Branch("eventNo", &eventNo, "eventNo/I");
+        std::vector<double> dval(ncols, 0);
+        std::vector<int> ival(ncols, 0);
+        for (size_t c = 0; c < ncols; ++c) {
+            if (int_cols.count(cols[c])) tree->Branch(cols[c].c_str(), &ival[c], (cols[c] + "/I").c_str());
+            else tree->Branch(cols[c].c_str(), &dval[c], (cols[c] + "/D").c_str());
+        }
+        const double* data = reinterpret_cast<const double*>(ten->data());
+        for (size_t r = 0; r < nrows; ++r) {
+            for (size_t c = 0; c < ncols; ++c) {
+                dval[c] = data[r * ncols + c];
+                ival[c] = static_cast<int>(std::lround(dval[c]));
+            }
+            tree->Fill();
+        }
+    }
+}
+
+void Root::SbndPrMagnifyTrackingVisitor::write_truth(TFile* output_tf, const Clus::Facade::Ensemble& ensemble) const
+{
+    const auto nu = ensemble.aux_tensor("truth_nu");
+    if (!nu) return;
+    write_truth_table(output_tf, "T_truth_nu", nu, m_evt_runNo, m_evt_subRunNo, m_evt_eventNo, log);
+    if (const auto pf = ensemble.aux_tensor("truth_pf")) {
+        write_truth_table(output_tf, "T_truth_pf", pf, m_evt_runNo, m_evt_subRunNo, m_evt_eventNo, log);
+    }
+    log->debug("SbndPrMagnifyTrackingVisitor: truth trees written");
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus::Facade::Grouping& grouping,
