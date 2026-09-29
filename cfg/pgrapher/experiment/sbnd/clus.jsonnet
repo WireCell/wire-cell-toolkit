@@ -2143,6 +2143,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
            long_muon_stub_bridge_len: 7.5,
            main_vertex_candidate_flag: true,
            main_vertex_graph_audit: true,
+           // sbnd_xin/docs/128 sec 10.5: SBND PRODUCTION ON 2026-09-29 (owner
+           // chose option A, apply the traditional path's swap, over the
+           // clean discard).
+           main_vertex_swap_apply: true,
            main_vertex_require_descriptor: true,
            mcs_bridged_members: true,
            mcs_cathode_x: 0,

@@ -3002,11 +3002,14 @@ function(
     // See sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
     // swap decision instead of silently discarding it (a latent bug: the
-    // decision fires today but never reaches the caller).  DEFAULT OFF
-    // pending owner review.  Validation: -A main_vertex_swap_apply=true (or
-    // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
-    // byte-identical.
-    main_vertex_swap_apply = false,
+    // decision fires today but never reaches the caller, and the discard
+    // leaves other_clusters and the main flags edited -- sbnd_xin/docs/128
+    // sec 9.5).  SBND PRODUCTION ON 2026-09-29: the owner chose this
+    // (option A) over main_vertex_swap_discard_clean (option B), doc 128
+    // sec 10.5.  --tla-code main_vertex_swap_apply=false (or
+    // SBND_MAIN_VERTEX_SWAP_APPLY=false) omits the key => the pre-flip
+    // config, byte-identical.
+    main_vertex_swap_apply = true,
     // sbnd_xin/docs/128 sec 10 -- when the traditional path's swap is NOT
     // applied, undo its side effects (other_clusters regains the swap target
     // and loses the duplicated main; Flags::main_cluster restored).  Fixes the
