@@ -37,6 +37,25 @@ namespace {
         return path;
     }
 
+    // Light travel-time inputs for the 8 test OpDets: box 0 = coated 0-2 + uncoated 3, box 1 =
+    // coated 4-6 + uncoated 7; curve ratio 0.1 -> 190 cm ... 1.0 -> 10 cm (linear); SBND D, v.
+    std::string lt_file()
+    {
+        static std::string path;
+        if (path.empty()) {
+            auto p = std::filesystem::temp_directory_path() / "doctest_sbndopflashfinder_lt.json";
+            std::ofstream f(p);
+            f << "{\"drift_cm\":201.3,\"v_vuv_cm_per_ns\":13.5,\"v_vis_cm_per_ns\":23.99,\"opdets\":[";
+            for (int od = 0; od < 8; ++od) {
+                if (od) f << ",";
+                f << "{\"opdet\":" << od << ",\"type\":" << (od % 4 == 3 ? 2 : 1) << ",\"box\":" << od / 4 << "}";
+            }
+            f << "],\"curves\":{\"test\":{\"ratio\":[0.1,1.0],\"x_cm\":[190.0,10.0]}}}";
+            path = p.string();
+        }
+        return path;
+    }
+
     // One ophit row: channel, time, width, area, amplitude, PE, start, flash id, fast/total.
     using Row = std::array<double, 9>;
     Row hit(int ch, double t, double pe) { return {double(ch), t, 30.0, pe, pe, pe, t - 10.0, -1.0, 0.0}; }
@@ -63,6 +82,8 @@ namespace {
     struct Out {
         std::vector<double> time, pe;
         std::vector<int> flash_of;  // per input row
+        std::vector<std::array<double, 4>> drift;  // "flash_drift" rows, if written
+        bool have_drift{false};
     };
     // A fresh instance per call (factory instances are cached by type:name).
     std::string fresh_name()
@@ -107,6 +128,11 @@ namespace {
             }
             if (name == "ophits")
                 for (size_t r = 0; r < ten->shape()[0]; ++r) o.flash_of.push_back(int(d[r * 9 + 7]));
+            if (name == "flash_drift") {
+                o.have_drift = true;
+                for (size_t r = 0; r < ten->shape()[0]; ++r)
+                    o.drift.push_back({d[r * 4], d[r * 4 + 1], d[r * 4 + 2], d[r * 4 + 3]});
+            }
         }
         return o;
     }
@@ -136,6 +162,31 @@ TEST_CASE("sbndopflashfinder prompt time falls back to the brightest bin")
     auto o = run(Configuration{}, rows);
     REQUIRE(o.time.size() == 1);
     CHECK(o.time[0] == doctest::Approx(1000.0));
+}
+
+TEST_CASE("sbndopflashfinder a single-PMT fake hit cannot set the prompt time")
+{
+    // as the r713_s52_e6 flash: a giant one-hit fake on one PMT well after the real prompt light
+    std::vector<Row> rows;
+    add_prompt(rows, 1000.0);
+    add_tail(rows, 1100.0, 100, 40.0);
+    rows.push_back(hit(0, 4000.0, 1000.0));
+    auto o = run(Configuration{}, rows);
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.pe[0] == doctest::Approx(1380.0));  // the fake hit is still in the flash PE
+    CHECK(o.time[0] == doctest::Approx(1001.5));
+    // without the coincidence rule the brightest bin (the fake) sets the time
+    o = run(only({{"prompt_min_hits", 1}, {"prompt_min_pe", 0.0}}), rows);
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.time[0] == doctest::Approx(4000.0));
+    // >= 5 OpDets: no bin qualifies -> brightest bin of all
+    o = run(only({{"prompt_min_opdets", 5}}), rows);
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.time[0] == doctest::Approx(4000.0));
+    // >= 4 OpDets: the 4-PMT prompt bin still qualifies
+    o = run(only({{"prompt_min_opdets", 4}}), rows);
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.time[0] == doctest::Approx(1001.5));
 }
 
 TEST_CASE("sbndopflashfinder pulse split separates a second pulse in the same bin")
@@ -305,4 +356,132 @@ TEST_CASE("sbndopflashfinder quality cut and bad config")
     cfg = cf->default_configuration();
     cfg["join_glow"] = "sometimes";
     CHECK_THROWS(cf->configure(cfg));
+}
+
+namespace {
+    // One flash: prompt hits on coated 0, 1, 2 (60/50/40 PE) and uncoated 3 (upe PE, none if 0);
+    // prompt time 1001.5 ns as in the first test.
+    std::vector<Row> lt_rows(double upe)
+    {
+        std::vector<Row> rows = {hit(0, 1000, 60), hit(1, 1003, 50), hit(2, 1006, 40)};
+        rows.push_back(upe > 0 ? hit(3, 1008, upe) : hit(4, 1008, 30));
+        return rows;
+    }
+    Configuration lt_cfg(int tpc, const char* fail = "wires")
+    {
+        return only({{"light_travel", true}, {"light_travel_file", lt_file()}, {"light_travel_curve", "test"},
+                     {"light_travel_fail", fail}, {"tpc", tpc}});
+    }
+}
+
+TEST_CASE("sbndopflashfinder light travel off: time and tensors unchanged")
+{
+    auto o = run(Configuration{}, lt_rows(30));
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.time[0] == doctest::Approx(1001.5));
+    CHECK_FALSE(o.have_drift);
+}
+
+TEST_CASE("sbndopflashfinder light travel: X from the PMT ratio, VUV branch")
+{
+    // ratio = 30 / 150 x 3 lit coated = 0.6 -> |X| = 190 - 180 x 0.5 / 0.9 = 90 cm > kink 44.0 cm
+    // -> travel (201.3 - 90) / 13.5 = 8.2444 ns
+    auto o = run(lt_cfg(0), lt_rows(30));
+    REQUIRE(o.time.size() == 1);
+    REQUIRE(o.drift.size() == 1);
+    CHECK(o.drift[0][0] == doctest::Approx(-90.0));  // TPC 0: negative
+    CHECK(o.drift[0][1] == doctest::Approx(111.3 / 13.5));
+    CHECK(o.drift[0][2] == doctest::Approx(1001.5));
+    CHECK(o.drift[0][3] == 1.0);
+    CHECK(o.time[0] == doctest::Approx(1001.5 - 111.3 / 13.5));
+    CHECK(run(lt_cfg(1), lt_rows(30)).drift[0][0] == doctest::Approx(90.0));
+}
+
+TEST_CASE("sbndopflashfinder light travel: near the cathode, visible-light branch")
+{
+    // ratio = 50 / 150 x 3 = 1.0 -> |X| = 10 cm < kink -> 10 / 13.5 + 201.3 / 23.99 ns
+    auto o = run(lt_cfg(1), lt_rows(50));
+    REQUIRE(o.drift.size() == 1);
+    CHECK(o.drift[0][0] == doctest::Approx(10.0));
+    CHECK(o.drift[0][1] == doctest::Approx(10.0 / 13.5 + 201.3 / 23.99));
+    CHECK(o.drift[0][2] == doctest::Approx((1000.0 + 1003.0 + 1008.0) / 3));  // 60+50+50 PE > 60 %
+    CHECK(o.time[0] == doctest::Approx(o.drift[0][2] - 10.0 / 13.5 - 201.3 / 23.99));
+}
+
+TEST_CASE("sbndopflashfinder light travel: X fails without uncoated light")
+{
+    // wires: the ratio -> 0 end of the curve, 190 cm -> 11.3 / 13.5 ns; X written 0, ok 0
+    auto o = run(lt_cfg(0), lt_rows(0));
+    REQUIRE(o.drift.size() == 1);
+    CHECK(o.drift[0][0] == 0.0);
+    CHECK(o.drift[0][3] == 0.0);
+    CHECK(o.drift[0][1] == doctest::Approx(11.3 / 13.5));
+    CHECK(o.time[0] == doctest::Approx(1001.5 - 11.3 / 13.5));
+    // none: no correction
+    auto n = run(lt_cfg(0, "none"), lt_rows(0));
+    CHECK(n.drift[0][1] == 0.0);
+    CHECK(n.time[0] == doctest::Approx(1001.5));
+}
+
+TEST_CASE("sbndopflashfinder light travel bad config")
+{
+    auto cf = Factory::lookup_tn<IConfigurable>(fresh_name());
+    auto cfg = cf->default_configuration();
+    cfg["light_travel"] = true;
+    CHECK_THROWS(cf->configure(cfg));  // no file
+    cfg["light_travel_file"] = lt_file();
+    cfg["light_travel_curve"] = "test";
+    cfg["light_travel_fail"] = "sometimes";
+    CHECK_THROWS(cf->configure(cfg));
+    cfg["light_travel_fail"] = "wires";
+    cfg["light_travel_curve"] = "nope";
+    CHECK_THROWS(cf->configure(cfg));
+}
+
+TEST_CASE("sbndopflashfinder fake_veto drops single-PMT fake hits after a bright pulse")
+{
+    // bright real pulse on ch0 (8000 PE, one 4.4 us wide hit) with the other PMTs, slow tail,
+    // then on ch0 alone a 3000 PE fake at 4000 ns (the tail gives the other PMTs 8 PE around it)
+    std::vector<Row> rows;
+    add_prompt(rows, 1000.0);
+    Row wide = hit(0, 1001.0, 8000.0);
+    wide[2] = 4400.0;
+    const size_t iwide = rows.size();
+    rows.push_back(wide);
+    add_tail(rows, 1100.0, 100, 40.0);
+    rows.push_back(hit(0, 4000.0, 3000.0));
+    const size_t ifake = rows.size() - 1;
+    auto narrow = rows;  // the same, but the bright hit only 2.5 us wide: a split saturated pulse
+    narrow[iwide][2] = 2500.0;
+    auto o = run(Configuration{}, rows);  // off by default
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.pe[0] == doctest::Approx(11380.0));
+    CHECK(o.flash_of[ifake] == 0);
+
+    o = run(only({{"fake_veto", true}}), rows);
+    REQUIRE(o.time.size() == 1);
+    CHECK(o.pe[0] == doctest::Approx(8380.0));
+    CHECK(o.flash_of[ifake] == -1);
+    CHECK(o.flash_of[0] == 0);        // the bright pulse itself is kept
+    CHECK(o.time[0] == doctest::Approx(1001.0));
+
+    // the same late hit with light on the other PMTs (3 x 150 PE) is real and kept
+    auto seen = rows;
+    for (int ch = 1; ch < 4; ++ch) seen.push_back(hit(ch, 4010.0, 150.0));
+    o = run(only({{"fake_veto", true}}), seen);
+    REQUIRE(o.time.size() >= 1);
+    CHECK(o.flash_of[ifake] >= 0);
+    // after a 2.5 us bright hit the late hit is the second piece of a saturated pulse: kept...
+    o = run(only({{"fake_veto", true}}), narrow);
+    CHECK(o.flash_of[ifake] == 0);
+    // ...unless it is too bright for one PMT alone
+    o = run(only({{"fake_veto", true}, {"fake_big_pe", 2000.0}}), narrow);
+    CHECK(o.flash_of[ifake] == -1);
+    // nor is a lone bright hit with no bright hit before it on its PMT
+    std::vector<Row> lone;
+    add_prompt(lone, 1000.0);
+    add_tail(lone, 1100.0, 100, 40.0);
+    lone.push_back(hit(0, 4000.0, 3000.0));
+    o = run(only({{"fake_veto", true}}), lone);
+    CHECK(o.flash_of.back() >= 0);
 }
