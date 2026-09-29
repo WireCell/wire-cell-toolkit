@@ -7,13 +7,17 @@
 // heap-dependent decision that showed up as run-to-run V-plane-only
 // differences in SBND DetSim gauss/wiener (wcp-porting-img sbnd_xin/docs/127).
 //
-// The legacy behaviour is kept by default; set_erase_stale_contained(true)
-// enables the fix.  Both are pinned here.  The stale key is only ever
+// ROI_refinement itself defaults to the legacy behaviour and
+// set_erase_stale_contained(true) enables the fix; both are pinned here.
+// OmnibusSigProc (its only user) turns the fix on by default via its
+// r_erase_stale_contained knob, pinned by the last test case.  The stale key is only ever
 // compared, never dereferenced, so the check below is safe on freed memory.
 
 #include "WireCellUtil/doctest.h"
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/Waveform.h"
+
+#include "WireCellSigProc/OmnibusSigProc.h"
 
 #include "../src/ROI_formation.h"
 #include "../src/ROI_refinement.h"
@@ -101,4 +105,12 @@ TEST_CASE("ROI_refinement CleanUpInductionROIs contained_rois stale keys")
         CHECK(stale_u_keys(rr) == 0);
         CHECK(rr.get_contained_rois().empty());
     }
+}
+
+TEST_CASE("OmnibusSigProc r_erase_stale_contained defaults to true")
+{
+    WireCell::SigProc::OmnibusSigProc osp;
+    auto cfg = osp.default_configuration();
+    REQUIRE(cfg.isMember("r_erase_stale_contained"));
+    CHECK(cfg["r_erase_stale_contained"].asBool() == true);
 }

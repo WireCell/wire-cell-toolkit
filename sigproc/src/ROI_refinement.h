@@ -75,8 +75,9 @@ namespace WireCell {
             // stale key; the U plane is refined before V on this same object, so
             // a fresh V ROI allocated at a reused U address inherits U's tight
             // ROIs (heap-dependent, hence run-to-run V-plane differences in
-            // gauss/wiener; wcp-porting-img sbnd_xin/docs/127).  Default false
-            // keeps the legacy behaviour.
+            // gauss/wiener; wcp-porting-img sbnd_xin/docs/127).  This class
+            // defaults to the legacy false; OmnibusSigProc always sets it from
+            // its r_erase_stale_contained knob, which defaults to true.
             void set_erase_stale_contained(bool flag) { m_erase_stale_contained = flag; }
 
             // Read-only view of the loose->tight containment map (for tests).
