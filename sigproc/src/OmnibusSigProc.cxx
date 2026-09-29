@@ -143,6 +143,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         m_r_break_roi_loop_planes.clear();
         for (auto v : config["r_break_roi_loop_planes"]) m_r_break_roi_loop_planes.push_back(v.asInt());
     }
+    m_r_erase_stale_contained = get(config, "r_erase_stale_contained", m_r_erase_stale_contained);
     m_r_th_peak = get(config, "r_th_peak", m_r_th_peak);
     m_r_sep_peak = get(config, "r_sep_peak", m_r_sep_peak);
     m_r_low_peak_sep_threshold_pre = get(config, "r_low_peak_sep_threshold_pre", m_r_low_peak_sep_threshold_pre);
@@ -366,6 +367,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_fake_signal_high_th_ind_factor"] = m_r_fake_signal_high_th_ind_factor;
     cfg["r_pad"] = m_r_pad;
     cfg["r_break_roi_loop"] = m_r_break_roi_loop;
+    cfg["r_erase_stale_contained"] = m_r_erase_stale_contained;
     cfg["r_th_peak"] = m_r_th_peak;
     cfg["r_sep_peak"] = m_r_sep_peak;
     cfg["r_low_peak_sep_threshold_pre"] = m_r_low_peak_sep_threshold_pre;
@@ -1964,6 +1966,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
     // knobs used for every plane, bit-identical legacy behaviour).
     if (!m_r_th_factor_planes.empty()) roi_refine.set_th_factor_planes(m_r_th_factor_planes);
     if (!m_r_pad_planes.empty()) roi_refine.set_pad_planes(m_r_pad_planes);
+    if (m_r_erase_stale_contained) roi_refine.set_erase_stale_contained(true);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};
