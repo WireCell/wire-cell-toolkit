@@ -2340,7 +2340,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // Observation only: fill_kine_tree records the links in memory either
        // way; this only books them.  C++ default false; key omitted when off
        // => byte-identical pre-knob config AND tracking-pr.root.
-       root_particle_links=false,
+       root_particle_links=true,  // SBND PRODUCTION -- doc sbnd_xin/128 sec 10.1
        provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every

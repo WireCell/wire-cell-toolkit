@@ -1428,9 +1428,12 @@ function(
     // sbnd_xin/docs/128-129: book the particle links -- T_kine per-row
     // identity, a T_segment tree (one row per PR-graph segment per candidate:
     // in_enu, kine_index, shower_id, ...) and per-cluster counts on the
-    // T_tagger roster.  Observation only.  C++ default false; key omitted when
-    // off => byte-identical config AND tracking-pr.root.
-    root_particle_links = false,
+    // T_tagger roster.  Observation only.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-09-29 on the owner's word (doc 128 sec 10.1): on
+    // 67 sbnd_xin data events the knob adds only T_segment + 6 T_kine + 3
+    // T_tagger branches, every existing branch and archive identical (doc 128
+    // sec 9.3).  -A root_particle_links=false restores the pre-flip file.
+    root_particle_links = true,
     // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
     // physical beam flash seen by both drift volumes (same flash_group), keeping
     // the longest selected activity.  This MOVES the selection -- it removes
