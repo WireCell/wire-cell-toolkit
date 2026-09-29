@@ -44,6 +44,12 @@
       uncer_cut         (1e11) activity entries with larger uncertainty (dummy / masked) are ignored
       ident_base        (1 << 20) first ident of the output blobs
       dump_dir          ("" = off) write one npz per level and event (graph arrays, logits, decisions)
+      iso_fallback      (absent / null = off) the dense-ambiguous-slice fallback of the final keep set (wcfm doc 17):
+                        {nmin: 500, mmin: 4, amin: 0.8, t_keep: -1.5, amb_lo: -3, amb_hi: 0.5}, missing members take
+                        these values.  After the repair, in every (face, slice) of the final level with >= nmin nodes,
+                        >= mmin nodes per charged wire of the slice and a fraction >= amin of nodes with
+                        amb_lo < logit < amb_hi, the nodes with logit >= t_keep are kept too
+                        (Img::Cascade::iso_fallback).  For near-isochronous showers the model cannot resolve.
       nthreads          (1) threads for the C++ level work that splits into independent parts -- the bisection of
                         the survivors to the next width, the node features and the cross-slice bb search -- run over contiguous
                         blocks and merged in order, so the output does not depend on it (wcfm doc 15 round 3;
@@ -109,6 +115,8 @@ namespace WireCell::Img {
         int m_ident_base{1 << 20};
         std::string m_dump_dir{""};
         int m_nthreads{1};
+        bool m_iso{false};
+        double m_iso_nmin{500}, m_iso_mmin{4}, m_iso_amin{0.8}, m_iso_t{-1.5}, m_iso_amb_lo{-3.0}, m_iso_amb_hi{0.5};
         size_t m_count{0};
     };
 

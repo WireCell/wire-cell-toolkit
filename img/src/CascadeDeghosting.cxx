@@ -55,6 +55,7 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["ident_base"] = m_ident_base;
     cfg["dump_dir"] = m_dump_dir;
     cfg["nthreads"] = m_nthreads;
+    cfg["iso_fallback"] = Json::nullValue;   // off; see the header for the members
     return cfg;
 }
 
@@ -76,6 +77,18 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     m_ident_base = get(cfg, "ident_base", m_ident_base);
     m_dump_dir = get(cfg, "dump_dir", m_dump_dir);
     m_nthreads = std::max(1, get(cfg, "nthreads", m_nthreads));
+    const auto& jiso = cfg["iso_fallback"];
+    m_iso = jiso.isObject();
+    if (m_iso) {
+        m_iso_nmin = get(jiso, "nmin", m_iso_nmin);
+        m_iso_mmin = get(jiso, "mmin", m_iso_mmin);
+        m_iso_amin = get(jiso, "amin", m_iso_amin);
+        m_iso_t = get(jiso, "t_keep", m_iso_t);
+        m_iso_amb_lo = get(jiso, "amb_lo", m_iso_amb_lo);
+        m_iso_amb_hi = get(jiso, "amb_hi", m_iso_amb_hi);
+        log->debug("iso_fallback on: nmin={} mmin={} amin={} t_keep={} amb=({}, {})", m_iso_nmin, m_iso_mmin, m_iso_amin,
+                   m_iso_t, m_iso_amb_lo, m_iso_amb_hi);
+    }
 
     m_levels.clear();
     for (const auto& jl : cfg["levels"]) {
@@ -373,6 +386,20 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
                 par.budget = m_repair_budget;
                 srep = Cascade::steiner_repair(N, edges, logit, qhat, keep, par);
                 keep = srep.keep;
+            }
+            if (m_iso) {   // wcfm doc 17: dense ambiguous slices keep their cells down to t_keep
+                std::vector<int> fc(N);
+                for (size_t i = 0; i < N; ++i) fc[i] = cur[i]->face()->which();
+                Cascade::IsoParams ip;
+                ip.nmin = (int) m_iso_nmin;
+                ip.mmin = m_iso_mmin;
+                ip.amin = m_iso_amin;
+                ip.t_keep = m_iso_t;
+                ip.amb_lo = m_iso_amb_lo;
+                ip.amb_hi = m_iso_amb_hi;
+                const auto ir = Cascade::iso_fallback(fc, lev.sidx, lev.wq, lev.wsidx, logit, keep, ip);
+                log->debug("call={} cluster={} iso_fallback slices={} added={}", m_count, in->ident(), ir.nslices,
+                           ir.nadded);
             }
             for (size_t i = 0; i < N; ++i) {
                 decision[i] = keep[i] ? 1 : 0;

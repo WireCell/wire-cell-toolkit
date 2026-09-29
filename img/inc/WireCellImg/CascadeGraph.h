@@ -139,6 +139,28 @@ namespace WireCell::Img::Cascade {
     /// every (super-)wire they touch keeps another surviving node.  Returns the pruned mask.
     std::vector<bool> guard_prune(const Level& lev, const std::vector<int>& cand_order, size_t& nguarded);
 
+    /// The dense-ambiguous-slice fallback of the final keep set (wcfm doc 17, default off in CascadeDeghosting).
+    /// A (face, slice) group of level nodes is an ambiguous dense slab when it has >= nmin nodes, >= mmin nodes per
+    /// charged wire node of its slice (wq > 0, all planes, both faces: wire nodes carry no face) and a fraction
+    /// >= amin of its nodes with amb_lo < logit < amb_hi; there every node with logit >= t_keep is also kept.
+    /// Truth-free, order-independent (wcfm scripts/d17_shower.py iso_fallback is the offline twin).
+    struct IsoParams {
+        int nmin{500};
+        double mmin{4};
+        double amin{0.8};
+        double t_keep{-1.5};
+        double amb_lo{-3.0};
+        double amb_hi{0.5};
+    };
+    struct IsoResult {
+        size_t nslices{0};   // triggered (face, slice) groups
+        size_t nadded{0};    // nodes kept by the fallback that the keep set did not hold
+    };
+    /// face, sidx: per node; wq, wsidx: per wire node (slice index as sidx); keep is extended in place.
+    IsoResult iso_fallback(const std::vector<int>& face, const std::vector<int>& sidx, const std::vector<float>& wq,
+                           const std::vector<int>& wsidx, const std::vector<float>& logit, std::vector<bool>& keep,
+                           const IsoParams& par);
+
 }  // namespace WireCell::Img::Cascade
 
 #endif

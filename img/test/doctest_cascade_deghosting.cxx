@@ -344,6 +344,58 @@ TEST_CASE("coverage guard keeps a wire's last explanation")
     CHECK(ng == 2);
 }
 
+TEST_CASE("iso fallback: dense ambiguous slices keep down to t_keep, others untouched")
+{
+    // slice 0 face 0: 12 nodes over 2 charged wires (6 per wire), 11 ambiguous -> triggers
+    // slice 0 face 1: 12 nodes but only 6 ambiguous -> no trigger
+    // slice 1 face 0: 12 ambiguous nodes over 12 charged wires (1 per wire) -> no trigger
+    std::vector<int> face, sidx;
+    std::vector<float> logit;
+    for (int i = 0; i < 12; ++i) { face.push_back(0); sidx.push_back(0); logit.push_back(i == 0 ? 2.0f : -1.0f - 0.1f * i); }
+    for (int i = 0; i < 12; ++i) { face.push_back(1); sidx.push_back(0); logit.push_back(i < 6 ? -1.0f : -5.0f); }
+    for (int i = 0; i < 12; ++i) { face.push_back(0); sidx.push_back(1); logit.push_back(-1.0f); }
+    std::vector<float> wq{10, 20, 0, 0};            // slice 0: 2 charged wires (+2 empty)
+    std::vector<int> wsidx{0, 0, 0, 0};
+    for (int w = 0; w < 12; ++w) { wq.push_back(5); wsidx.push_back(1); }
+    const size_t N = logit.size();
+    std::vector<bool> keep0(N, false);
+    for (size_t i = 0; i < N; ++i) keep0[i] = logit[i] >= -0.1877f;
+
+    Cascade::IsoParams p;
+    p.nmin = 10; p.mmin = 4; p.amin = 0.8; p.t_keep = -1.5;
+    auto keep = keep0;
+    auto r = Cascade::iso_fallback(face, sidx, wq, wsidx, logit, keep, p);
+    CHECK(r.nslices == 1);
+    // slice 0 face 0: logits -1.1 .. -2.1; kept those >= -1.5 (i = 1..5), node 0 was kept already
+    for (int i = 0; i < 12; ++i) CHECK(keep[i] == (i <= 5));
+    CHECK(r.nadded == 5);
+    for (size_t i = 12; i < N; ++i) CHECK(keep[i] == keep0[i]);
+
+    // nmin above the group size, or mmin above the density: nothing changes
+    for (auto q : {10000.0, 7.0}) {
+        auto p2 = p;
+        if (q > 100) p2.nmin = (int) q; else p2.mmin = q;
+        auto k2 = keep0;
+        auto r2 = Cascade::iso_fallback(face, sidx, wq, wsidx, logit, k2, p2);
+        CHECK(r2.nslices == 0);
+        CHECK(r2.nadded == 0);
+        CHECK(k2 == keep0);
+    }
+
+    // node order does not matter: reverse every node array
+    std::vector<int> rf(face.rbegin(), face.rend()), rs(sidx.rbegin(), sidx.rend());
+    std::vector<float> rl(logit.rbegin(), logit.rend());
+    std::vector<bool> rk(keep0.rbegin(), keep0.rend());
+    auto rr = Cascade::iso_fallback(rf, rs, wq, wsidx, rl, rk, p);
+    CHECK(rr.nslices == r.nslices);
+    CHECK(rr.nadded == r.nadded);
+    for (size_t i = 0; i < N; ++i) CHECK(rk[N - 1 - i] == keep[i]);
+
+    // size mismatch throws
+    std::vector<bool> bad(N - 1, false);
+    CHECK_THROWS(Cascade::iso_fallback(face, sidx, wq, wsidx, logit, bad, p));
+}
+
 TEST_CASE("steiner repair: bridge within budget, not beyond, weak island dropped")
 {
     auto chain = [](size_t n) {

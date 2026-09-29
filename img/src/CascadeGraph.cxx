@@ -676,3 +676,45 @@ void Cascade::parallel_blocks(size_t n, int nthreads, const std::function<void(s
         }
     });
 }
+
+Cascade::IsoResult Cascade::iso_fallback(const std::vector<int>& face, const std::vector<int>& sidx,
+                                         const std::vector<float>& wq, const std::vector<int>& wsidx,
+                                         const std::vector<float>& logit, std::vector<bool>& keep,
+                                         const IsoParams& par)
+{
+    IsoResult res;
+    const size_t N = logit.size();
+    if (face.size() != N || sidx.size() != N || keep.size() != N || wsidx.size() != wq.size()) {
+        THROW(ValueError() << errmsg{"Cascade::iso_fallback: array sizes differ"});
+    }
+    // charged wire nodes per slice index
+    std::map<int, size_t> nch;
+    for (size_t w = 0; w < wq.size(); ++w) {
+        if (wq[w] > 0) ++nch[wsidx[w]];
+    }
+    // (face, slice) groups: node count and ambiguous count
+    std::map<std::pair<int, int>, std::pair<size_t, size_t>> grp;
+    for (size_t i = 0; i < N; ++i) {
+        auto& g = grp[{face[i], sidx[i]}];
+        ++g.first;
+        const double l = logit[i];
+        if (l > par.amb_lo && l < par.amb_hi) ++g.second;
+    }
+    std::map<std::pair<int, int>, bool> trig;
+    for (const auto& [key, g] : grp) {
+        auto it = nch.find(key.second);
+        const double nw = std::max<double>(1.0, it == nch.end() ? 0.0 : (double) it->second);
+        const double n = (double) g.first;
+        const bool t = g.first >= (size_t) std::max(0, par.nmin) && n >= par.mmin * nw && (double) g.second >= par.amin * n;
+        trig[key] = t;
+        if (t) ++res.nslices;
+    }
+    for (size_t i = 0; i < N; ++i) {
+        if (keep[i] || (double) logit[i] < par.t_keep) continue;
+        if (trig[{face[i], sidx[i]}]) {
+            keep[i] = true;
+            ++res.nadded;
+        }
+    }
+    return res;
+}
