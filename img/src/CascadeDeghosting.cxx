@@ -12,6 +12,7 @@
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IWirePlane.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/MemUsage.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
 #include "WireCellUtil/cnpy.h"
@@ -53,6 +54,7 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["uncer_cut"] = m_uncer_cut;
     cfg["ident_base"] = m_ident_base;
     cfg["dump_dir"] = m_dump_dir;
+    cfg["nthreads"] = m_nthreads;
     return cfg;
 }
 
@@ -73,6 +75,7 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     m_uncer_cut = get(cfg, "uncer_cut", m_uncer_cut);
     m_ident_base = get(cfg, "ident_base", m_ident_base);
     m_dump_dir = get(cfg, "dump_dir", m_dump_dir);
+    m_nthreads = std::max(1, get(cfg, "nthreads", m_nthreads));
 
     m_levels.clear();
     for (const auto& jl : cfg["levels"]) {
@@ -102,17 +105,44 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
         desc += String::format(" [width=%d k=%d thr=%.4f %s]", lc.width, lc.superwire, lc.threshold,
                                lc.forward_tn.c_str());
     }
-    log->debug("levels:{} cut max_depth={} min_length={} guard={} max_level_nodes={} repair={} budget={:.4f} policy={} charge_scale={}", desc,
-               m_cut_max_depth, m_cut_min_length, m_guard, m_max_level_nodes, m_repair, m_repair_budget, m_policy, m_charge_scale);
+    log->debug("levels:{} cut max_depth={} min_length={} guard={} max_level_nodes={} repair={} budget={:.4f} policy={} charge_scale={} nthreads={}", desc,
+               m_cut_max_depth, m_cut_min_length, m_guard, m_max_level_nodes, m_repair, m_repair_budget, m_policy, m_charge_scale,
+               m_nthreads);
 }
 
 namespace {
     using Cascade::Level;
 
+    // A non-owning ITensor over one of the level's arrays (wcfm doc 15 round 4).  The forward only reads its inputs
+    // (the ITensorForward contract; TorchTensorSetService wraps them with torch::from_blob, no copy) and the Level
+    // outlives the call, so the level graph is no longer duplicated into SimpleTensor stores during the forward
+    // (0.22 GB of the 587/2 4-wire peak, jemalloc profile).
+    template <typename T>
+    class ViewTensor : public ITensor {
+      public:
+        ViewTensor(const std::vector<T>& v, const ITensor::shape_t& shape)
+          : m_data(v.empty() ? nullptr : reinterpret_cast<const std::byte*>(v.data()))
+          , m_nbytes(v.size() * sizeof(T))
+          , m_shape(shape)
+        {
+        }
+        virtual ~ViewTensor() {}
+        virtual const std::type_info& element_type() const { return typeid(T); }
+        virtual size_t element_size() const { return sizeof(T); }
+        virtual shape_t shape() const { return m_shape; }
+        virtual const std::byte* data() const { return m_data; }
+        virtual size_t size() const { return m_nbytes; }
+
+      private:
+        const std::byte* m_data;
+        size_t m_nbytes;
+        shape_t m_shape;
+    };
+
     template <typename T>
     ITensor::pointer tens(const std::vector<T>& v, const ITensor::shape_t& shape)
     {
-        return std::make_shared<Aux::SimpleTensor>(shape, v.empty() ? (const T*) nullptr : v.data());
+        return std::make_shared<ViewTensor<T>>(v, shape);
     }
 
     // (logit, qhat) of every node of the level
@@ -244,9 +274,13 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
             cur.clear();
             break;
         }
-        auto lev = Cascade::build_level(cur, sc, uni, lc.superwire, m_policy);
+        auto lev = Cascade::build_level(cur, sc, uni, lc.superwire, m_policy, m_nthreads);
+        const auto tb = clock::now();
+        const double rss_build = memusage_resident();
         std::vector<float> logit, qhat;
         run_forward(lc.forward, lev, in->ident(), logit, qhat);
+        const auto tf = clock::now();
+        const double rss_fwd = memusage_resident();
         const size_t N = lev.nnodes();
         std::vector<char> decision(N, 1);
         size_t nguard = 0, ncand = 0, ncap = 0;
@@ -279,7 +313,19 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
             std::vector<Kid> kids;
             size_t nnext = 0;
             const int width = m_levels[li + 1].width;
-            for (int i : order) {
+            // the bisection of every survivor that needs it, first (a pure function of the shape; nthreads blocks),
+            // then consumed in `order` exactly as before (doc 15 round 3)
+            std::vector<std::vector<std::pair<RayGrid::Blob, int>>> cut(order.size());
+            Cascade::parallel_blocks(order.size(), m_nthreads, [&](size_t k0, size_t k1) {
+                for (size_t k = k0; k < k1; ++k) {
+                    const auto& b = cur[order[k]];
+                    if (Cascade::needs_cutting(b->shape(), width)) {
+                        cut[k] = Cascade::cut_shape(b->face()->raygrid(), b->shape(), depth[order[k]], width, cpar);
+                    }
+                }
+            });
+            for (size_t ko = 0; ko < order.size(); ++ko) {
+                const int i = order[ko];
                 Kid k{i, {}, {}};
                 const auto& b = cur[i];
                 if (!Cascade::needs_cutting(b->shape(), width)) {   // passes through (as BlobCutting does)
@@ -287,7 +333,7 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
                     k.depth.push_back(depth[i]);
                 }
                 else {
-                    auto leaves = Cascade::cut_shape(b->face()->raygrid(), b->shape(), depth[i], width, cpar);
+                    auto leaves = std::move(cut[ko]);
                     const float value = b->value() / leaves.size();   // BlobCutting: parent charge shared equally
                     for (auto& [shape, d] : leaves) {
                         k.blobs.push_back(std::make_shared<Aux::SimpleBlob>(next_ident++, value, b->uncertainty(), shape,
@@ -333,12 +379,20 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
                 if (keep[i]) kept.push_back(cur[i]);
             }
         }
-        const double dt = std::chrono::duration<double>(clock::now() - tl).count();
+        const auto te = clock::now();
+        const double dt = std::chrono::duration<double>(te - tl).count();
         size_t nsurv = std::count(decision.begin(), decision.end(), 1);
         log->debug("call={} cluster={} level={} k={} nodes={} wires={} bw={} bb={} bb_in={} ww={} cand={} guarded={} "
                    "capped={} survive={} next={} t={:.2f}s",
                    m_count, in->ident(), li, lev.k, N, lev.wq.size(), lev.bw_src.size(), lev.bb.size() / 2,
                    lev.bb_in.size() / 2, lev.ww.size() / 2, ncand, nguard, ncap, nsurv, next.size(), dt);
+        // wcfm doc 15: wall per phase (build = wires+features / bb / bb_in / ww), resident memory after each (MB)
+        log->debug("call={} cluster={} level={} phases build={:.2f}s ({:.2f} {:.2f} {:.2f} {:.2f}) forward={:.2f}s "
+                   "select={:.2f}s rss after build={:.0f} forward={:.0f} select={:.0f} MB",
+                   m_count, in->ident(), li, std::chrono::duration<double>(tb - tl).count(), lev.tpart[0],
+                   lev.tpart[1], lev.tpart[2], lev.tpart[3], std::chrono::duration<double>(tf - tb).count(),
+                   std::chrono::duration<double>(te - tf).count(), rss_build / 1024, rss_fwd / 1024,
+                   memusage_resident() / 1024);
 
         if (!m_dump_dir.empty()) {
             const std::string fn = String::format("%s/cascade-%d-L%d.npz", m_dump_dir.c_str(), in->ident(), (int) li);

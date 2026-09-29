@@ -11,9 +11,13 @@
 #include "WireCellUtil/Exceptions.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <set>
+#include <atomic>
+#include <thread>
 
 using namespace WireCell;
 using namespace WireCell::Img;
@@ -251,8 +255,11 @@ std::vector<std::array<int64_t, 2>> Cascade::inslice_pairs(const std::vector<int
 }
 
 Cascade::Level Cascade::build_level(const std::vector<IBlob::pointer>& blobs, const SliceCharge& sc,
-                                    const Universe& uni, int k, const std::string& policy)
+                                    const Universe& uni, int k, const std::string& policy, int nthreads)
 {
+    using clock = std::chrono::steady_clock;
+    auto t0 = clock::now();
+    auto t1 = t0;
     Level lev;
     lev.k = std::max(k, 1);
     lev.blobs = blobs;
@@ -292,83 +299,87 @@ Cascade::Level Cascade::build_level(const std::vector<IBlob::pointer>& blobs, co
     lev.wq.resize(NB);
     for (size_t b = 0; b < NB; ++b) lev.wq[b] = (float) wq[b];
 
-    // ---- node features and bw edges
+    // ---- node features and bw edges: nodes in contiguous blocks (nthreads), each block writes its xb rows and
+    // appends its own bw edges; the blocks' edges are concatenated in node order (the arrays do not depend on it)
     lev.xb.assign(N * 15, 0.0f);
-    for (size_t i = 0; i < N; ++i) {
-        const auto ch = blob_channels(blobs[i]);
-        const int s = lev.sidx[i];
-        double sums[3] = {0, 0, 0};
-        for (int p = 0; p < 3; ++p) {
-            double sq = 0;
-            int npx = 0;
-            int last_bin = -1;
-            for (int c : ch[p]) {
-                const int u = uni.index(p, s, c);
-                if (u < 0) {
-                    THROW(ValueError() << errmsg{"CascadeGraph: a blob channel is outside the wire universe"});
+    // 8 blocks per thread (dynamic, parallel_blocks) for balance; 1 block when single-threaded
+    const int nfb = nthreads <= 1 ? 1 : (int) std::max<size_t>(1, std::min<size_t>((size_t) nthreads * 8, N));
+    struct BwPart {
+        std::vector<int64_t> src, dst;
+        std::vector<float> w;
+    };
+    std::vector<BwPart> bwp(nfb);
+    parallel_blocks(nfb, nfb, [&](size_t fb0, size_t fb1) {
+      for (size_t fb = fb0; fb < fb1; ++fb) {
+        auto& part = bwp[fb];
+        for (size_t i = N * fb / nfb; i < N * (fb + 1) / nfb; ++i) {
+            const auto ch = blob_channels(blobs[i]);
+            const int s = lev.sidx[i];
+            double sums[3] = {0, 0, 0};
+            for (int p = 0; p < 3; ++p) {
+                double sq = 0;
+                int npx = 0;
+                int last_bin = -1;
+                for (int c : ch[p]) {
+                    const int u = uni.index(p, s, c);
+                    if (u < 0) {
+                        THROW(ValueError() << errmsg{"CascadeGraph: a blob channel is outside the wire universe"});
+                    }
+                    const float q = uni.q[u];
+                    sq += q;
+                    npx += (q > 0);
+                    const int b = ubin[u];
+                    if (b != last_bin) {
+                        part.src.push_back((int64_t) i);
+                        part.dst.push_back(b);
+                        part.w.push_back(1.0f);
+                        last_bin = b;
+                    }
+                    else {
+                        part.w.back() += 1.0f;
+                    }
                 }
-                const float q = uni.q[u];
-                sq += q;
-                npx += (q > 0);
-                const int b = ubin[u];
-                if (b != last_bin) {
-                    lev.bw_src.push_back((int64_t) i);
-                    lev.bw_dst.push_back(b);
-                    lev.bw_w.push_back(1.0f);
-                    last_bin = b;
-                }
-                else {
-                    lev.bw_w.back() += 1.0f;
-                }
+                const size_t nch = ch[p].size();
+                float* x = &lev.xb[i * 15 + 4 * p];
+                x[0] = (float) nch;
+                x[1] = (float) npx;
+                x[2] = (float) std::log1p(sq);
+                x[3] = nch > 0 ? (float) std::log1p(sq / nch) : 0.0f;
+                sums[p] = std::log1p(sq);
             }
-            const size_t nch = ch[p].size();
-            float* x = &lev.xb[i * 15 + 4 * p];
-            x[0] = (float) nch;
-            x[1] = (float) npx;
-            x[2] = (float) std::log1p(sq);
-            x[3] = nch > 0 ? (float) std::log1p(sq / nch) : 0.0f;
-            sums[p] = std::log1p(sq);
+            lev.xb[i * 15 + 12] = (float) (sums[0] - sums[1]);
+            lev.xb[i * 15 + 13] = (float) (sums[0] - sums[2]);
+            lev.xb[i * 15 + 14] = (float) (sums[1] - sums[2]);
         }
-        lev.xb[i * 15 + 12] = (float) (sums[0] - sums[1]);
-        lev.xb[i * 15 + 13] = (float) (sums[0] - sums[2]);
-        lev.xb[i * 15 + 14] = (float) (sums[1] - sums[2]);
+      }
+    });
+    {
+        size_t ne = 0;
+        for (const auto& part : bwp) ne += part.src.size();
+        lev.bw_src.reserve(ne);
+        lev.bw_dst.reserve(ne);
+        lev.bw_w.reserve(ne);
+        for (auto& part : bwp) {
+            lev.bw_src.insert(lev.bw_src.end(), part.src.begin(), part.src.end());
+            lev.bw_dst.insert(lev.bw_dst.end(), part.dst.begin(), part.dst.end());
+            lev.bw_w.insert(lev.bw_w.end(), part.w.begin(), part.w.end());
+            part = BwPart();
+        }
     }
 
-    // ---- bb: Img::geom_clustering (the BlobClustering rule) over per-slice blob sets in time order
+    // ---- bb: the Img::geom_clustering (BlobClustering) pairs over per-slice blob sets in time order
+    t1 = clock::now();
+    lev.tpart[0] = std::chrono::duration<double>(t1 - t0).count();
     {
-        const size_t NS = sc.slice_of.size();
-        std::vector<IBlob::vector> per(NS);
-        for (size_t i = 0; i < N; ++i) per[lev.sidx[i]].push_back(blobs[i]);
-        IBlobSet::vector sets;
-        for (size_t s = 0; s < NS; ++s) {
-            if (per[s].empty()) continue;
-            sets.push_back(std::make_shared<Aux::SimpleBlobSet>((int) s, sc.slice_of[s], per[s]));
-        }
-        cluster_indexed_graph_t grind;
-        for (auto it = sets.begin(); it != sets.end(); ++it) {
-            Img::geom_clustering(grind, it, sets.end(), policy);
-        }
-        std::unordered_map<const IBlob*, int64_t> bidx;  // lookup only
-        bidx.reserve(N);
-        for (size_t i = 0; i < N; ++i) bidx[blobs[i].get()] = (int64_t) i;
-        std::vector<std::array<int64_t, 2>> bb;
-        const auto& g = grind.graph();
-        for (auto e : boost::make_iterator_range(boost::edges(g))) {
-            const auto& na = g[boost::source(e, g)];
-            const auto& nb = g[boost::target(e, g)];
-            if (na.code() != 'b' || nb.code() != 'b') continue;
-            const int64_t a = bidx.at(std::get<IBlob::pointer>(na.ptr).get());
-            const int64_t b = bidx.at(std::get<IBlob::pointer>(nb.ptr).get());
-            if (a == b) continue;
-            bb.push_back({std::min(a, b), std::max(a, b)});
-        }
-        std::sort(bb.begin(), bb.end());
-        bb.erase(std::unique(bb.begin(), bb.end()), bb.end());
+        const auto bb = geom_pairs(blobs, lev.sidx, sc.slice_of, policy, nthreads);
+        lev.bb.reserve(2 * bb.size());
         for (const auto& p : bb) {
             lev.bb.push_back(p[0]);
             lev.bb.push_back(p[1]);
         }
     }
+    t0 = clock::now();
+    lev.tpart[1] = std::chrono::duration<double>(t0 - t1).count();
 
     // ---- bb_in: same face and slice, overlap or abut on all three planes
     {
@@ -383,6 +394,8 @@ Cascade::Level Cascade::build_level(const std::vector<IBlob::pointer>& blobs, co
             lev.bb_in.push_back(p[1]);
         }
     }
+    t1 = clock::now();
+    lev.tpart[2] = std::chrono::duration<double>(t1 - t0).count();
 
     // ---- ww: the universe's wire-wire pairs, binned
     {
@@ -400,7 +413,194 @@ Cascade::Level Cascade::build_level(const std::vector<IBlob::pointer>& blobs, co
             lev.ww.push_back(p[1]);
         }
     }
+    lev.tpart[3] = std::chrono::duration<double>(clock::now() - t1).count();
     return lev;
+}
+
+namespace {
+    // Img::geom_clustering's policy table (GeomClusteringUtil.cxx): max relative slice distance and the wire
+    // tolerance per relative distance
+    void geom_policy(const std::string& policy, int& max_rel_diff, std::map<int, int>& gap_tol)
+    {
+        static const std::set<std::string> known = {"simple", "uboone", "uboone_local", "dead_clus"};
+        if (!known.count(policy)) {
+            THROW(ValueError() << errmsg{"CascadeGraph: geom_clustering policy \"" + policy + "\" not implemented"});
+        }
+        max_rel_diff = 2;
+        gap_tol = {{1, 2}, {2, 1}};
+        if (policy == "uboone_local") {
+            gap_tol = {{1, 2}, {2, 2}};
+        }
+        if (policy == "simple") {
+            max_rel_diff = 1;
+            gap_tol = {{1, 0}};
+        }
+    }
+
+    // GeomClusteringUtil.cxx rel_time_diff
+    int rel_time_diff(const ISlice::pointer& one, const ISlice::pointer& two)
+    {
+        return std::round((two->start() - one->start()) / one->span());
+    }
+
+    // per slice index, the node indices (ascending); the non-empty ones in slice-index (time) order
+    std::vector<std::vector<int64_t>> slice_sets(const std::vector<int>& sidx, size_t nslices, std::vector<int>& set_slice)
+    {
+        std::vector<std::vector<int64_t>> per(nslices);
+        for (size_t i = 0; i < sidx.size(); ++i) per[sidx[i]].push_back((int64_t) i);
+        std::vector<std::vector<int64_t>> sets;
+        set_slice.clear();
+        for (size_t s = 0; s < nslices; ++s) {
+            if (per[s].empty()) continue;
+            sets.push_back(std::move(per[s]));
+            set_slice.push_back((int) s);
+        }
+        return sets;
+    }
+}  // namespace
+
+std::vector<std::array<int64_t, 2>> Cascade::geom_pairs_graph(const std::vector<IBlob::pointer>& blobs,
+                                                              const std::vector<int>& sidx,
+                                                              const std::vector<ISlice::pointer>& slice_of,
+                                                              const std::string& policy)
+{
+    const size_t N = blobs.size();
+    std::vector<int> set_slice;
+    const auto per = slice_sets(sidx, slice_of.size(), set_slice);
+    IBlobSet::vector sets;
+    for (size_t k = 0; k < per.size(); ++k) {
+        IBlob::vector v;
+        for (auto i : per[k]) v.push_back(blobs[i]);
+        sets.push_back(std::make_shared<Aux::SimpleBlobSet>(set_slice[k], slice_of[set_slice[k]], v));
+    }
+    cluster_indexed_graph_t grind;
+    for (auto it = sets.begin(); it != sets.end(); ++it) {
+        Img::geom_clustering(grind, it, sets.end(), policy);
+    }
+    std::unordered_map<const IBlob*, int64_t> bidx;  // lookup only
+    bidx.reserve(N);
+    for (size_t i = 0; i < N; ++i) bidx[blobs[i].get()] = (int64_t) i;
+    std::vector<std::array<int64_t, 2>> bb;
+    const auto& g = grind.graph();
+    for (auto e : boost::make_iterator_range(boost::edges(g))) {
+        const auto& na = g[boost::source(e, g)];
+        const auto& nb = g[boost::target(e, g)];
+        if (na.code() != 'b' || nb.code() != 'b') continue;
+        const int64_t a = bidx.at(std::get<IBlob::pointer>(na.ptr).get());
+        const int64_t b = bidx.at(std::get<IBlob::pointer>(nb.ptr).get());
+        if (a == b) continue;
+        bb.push_back({std::min(a, b), std::max(a, b)});
+    }
+    std::sort(bb.begin(), bb.end());
+    bb.erase(std::unique(bb.begin(), bb.end()), bb.end());
+    return bb;
+}
+
+// Img::geom_clustering (GeomClusteringUtil.cxx L40-104) without the cluster graph.  For a "beg" blob set and each
+// later set ("test") within max_rel_diff slices, RayGrid::associate(test, beg, ...) pairs a test blob a with a beg
+// blob b when RayGrid::overlap finds b through the projections of the wire layers nlayers-1 .. 2 (nlayers = the
+// strips of beg's first blob).  At each layer overlap selects the projected blobs occupying a grid index g with
+// max(0, a.lo - tol) <= g < min(proj.size(), a.hi + tol); b occupies g for b.lo <= g < b.hi, and b.hi <= proj.size().
+// So b is found iff, on every one of those layers, max(a.lo - tol, b.lo) < min(a.hi + tol, b.hi) (b.lo >= 0).
+// The edge is made only between blobs of one face.  The layer nlayers-1 test goes through a projection of beg by
+// grid index (as RayGrid::projection), the lower layers through the interval test.
+std::vector<std::array<int64_t, 2>> Cascade::geom_pairs(const std::vector<IBlob::pointer>& blobs,
+                                                        const std::vector<int>& sidx,
+                                                        const std::vector<ISlice::pointer>& slice_of,
+                                                        const std::string& policy, int nthreads)
+{
+    int max_rel_diff = 2;
+    std::map<int, int> gap_tol;
+    geom_policy(policy, max_rel_diff, gap_tol);
+    const size_t N = blobs.size();
+    std::vector<int> set_slice;
+    const auto sets = slice_sets(sidx, slice_of.size(), set_slice);
+
+    // per node: face, and the bounds of every strip by strip index (as RayGrid::overlap reads
+    // blob->strips()[layer]), flat: node i's strip L is bnd[off[i] + L]
+    using pairii = std::pair<int, int>;
+    std::vector<const IAnodeFace*> face(N);
+    std::vector<size_t> off(N + 1, 0);
+    for (size_t i = 0; i < N; ++i) {
+        face[i] = blobs[i]->face().get();
+        off[i + 1] = off[i] + blobs[i]->shape().strips().size();
+    }
+    std::vector<pairii> bnd(off[N]);
+    for (size_t i = 0; i < N; ++i) {
+        size_t k = off[i];
+        for (const auto& st : blobs[i]->shape().strips()) bnd[k++] = {st.bounds.first, st.bounds.second};
+    }
+
+    // beg sets handed out one at a time to nthreads workers (the work per set is very uneven), one output per worker,
+    // each sorted unique by its worker, then merged (the pair set does not depend on which worker took which set)
+    const size_t nsets = sets.size();
+    const int nblk = std::max(1, std::min<int>(nthreads, (int) nsets));
+    std::vector<std::vector<std::array<int64_t, 2>>> outs(nblk);
+    std::atomic<size_t> next_set{0};
+    auto work = [&](int blk) {
+        {
+            auto& out = outs[blk];
+            std::vector<std::vector<int64_t>> proj;
+            for (size_t ib = next_set.fetch_add(1); ib < nsets; ib = next_set.fetch_add(1)) {
+                const auto& beg = sets[ib];
+                const auto& sbeg = slice_of[set_slice[ib]];
+                const int top = (int) (off[beg[0] + 1] - off[beg[0]]) - 1;   // nlayers - 1 of beg's first blob
+                bool projected = false;
+                for (size_t it = ib + 1; it < nsets; ++it) {
+                    const int rel = rel_time_diff(sbeg, slice_of[set_slice[it]]);
+                    if (rel > max_rel_diff) break;
+                    auto gt = gap_tol.find(rel);
+                    if (gt == gap_tol.end()) continue;
+                    const int tol = gt->second;
+                    if (top < 2) continue;   // RayGrid::overlap never reaches a wire layer
+                    if (!projected) {        // RayGrid::projection(references(beg), top)
+                        proj.clear();
+                        for (auto b : beg) {
+                            const auto& bd = bnd[off[b] + top];
+                            for (int g = bd.first; g < bd.second; ++g) {
+                                if ((int) proj.size() <= g) proj.resize(g + 1);
+                                proj[g].push_back(b);
+                            }
+                        }
+                        projected = true;
+                    }
+                    for (auto a : sets[it]) {
+                        const pairii* ab = &bnd[off[a]];
+                        const int lo = std::max(0, ab[top].first - tol);
+                        const int hi = std::min((int) proj.size(), ab[top].second + tol);
+                        for (int g = lo; g < hi; ++g) {
+                            for (auto b : proj[g]) {
+                                const pairii* bb = &bnd[off[b]];
+                                // b sits in the buckets [b.lo, b.hi): take it once, at its first bucket in [lo, hi)
+                                if (g != std::max(lo, bb[top].first)) continue;
+                                if (face[a] != face[b]) continue;
+                                bool ok = true;
+                                for (int L = top - 1; L >= 2 && ok; --L) {
+                                    ok = std::max(ab[L].first - tol, bb[L].first) < std::min(ab[L].second + tol, bb[L].second);
+                                }
+                                if (ok) out.push_back({std::min(a, b), std::max(a, b)});
+                            }
+                        }
+                    }
+                }
+            }
+            std::sort(out.begin(), out.end());
+            out.erase(std::unique(out.begin(), out.end()), out.end());
+        }
+    };
+    parallel_workers(nblk, work);
+    std::vector<std::array<int64_t, 2>> out;
+    size_t tot = 0;
+    for (const auto& o : outs) tot += o.size();
+    out.reserve(tot);
+    for (auto& o : outs) {
+        const size_t mid = out.size();
+        out.insert(out.end(), o.begin(), o.end());
+        std::vector<std::array<int64_t, 2>>().swap(o);
+        std::inplace_merge(out.begin(), out.begin() + mid, out.end());
+    }
+    out.erase(std::unique(out.begin(), out.end()), out.end());
+    return out;
 }
 
 std::vector<bool> Cascade::guard_prune(const Level& lev, const std::vector<int>& cand_order, size_t& nguarded)
@@ -431,4 +631,48 @@ std::vector<bool> Cascade::guard_prune(const Level& lev, const std::vector<int>&
         pruned[b] = true;
     }
     return pruned;
+}
+
+void Cascade::parallel_workers(int nthreads, const std::function<void(int)>& f)
+{
+    const int nw = std::max(1, nthreads);
+    if (nw == 1) {
+        f(0);
+        return;
+    }
+    std::vector<std::thread> th;
+    std::vector<std::exception_ptr> err(nw);
+    for (int w = 0; w < nw; ++w) {
+        th.emplace_back([&, w]() {
+            try {
+                f(w);
+            }
+            catch (...) {
+                err[w] = std::current_exception();
+            }
+        });
+    }
+    for (auto& t : th) t.join();
+    for (auto& e : err) {
+        if (e) std::rethrow_exception(e);
+    }
+}
+
+void Cascade::parallel_blocks(size_t n, int nthreads, const std::function<void(size_t, size_t)>& f)
+{
+    const size_t nw = std::min<size_t>(n, (size_t) std::max(1, nthreads));
+    if (nw <= 1) {
+        f(0, n);
+        return;
+    }
+    // dynamic: ~32 chunks per thread handed out by an atomic counter (the work per item is uneven: an event's
+    // activity sits in a narrow range of slices); callers write per-item or per-block slots, so the result does not
+    // depend on which thread ran which chunk
+    const size_t chunk = std::max<size_t>(1, n / (nw * 32));
+    std::atomic<size_t> next{0};
+    parallel_workers((int) nw, [&](int) {
+        for (size_t c0 = next.fetch_add(chunk); c0 < n; c0 = next.fetch_add(chunk)) {
+            f(c0, std::min(n, c0 + chunk));
+        }
+    });
 }

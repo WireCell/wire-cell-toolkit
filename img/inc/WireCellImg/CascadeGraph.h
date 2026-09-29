@@ -29,6 +29,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -88,13 +89,35 @@ namespace WireCell::Img::Cascade {
         std::vector<int64_t> bw_src, bw_dst;
         std::vector<float> bw_w;
         std::vector<int64_t> bb, bb_in, ww;    // flattened (i, j) pairs, each pair once
+        std::array<double, 4> tpart{};         // build wall seconds: wires + features, bb, bb_in, ww (logging only)
         size_t nnodes() const { return blobs.size(); }
         size_t nedges() const { return bw_src.size() + bb.size() / 2 + bb_in.size() / 2; }
     };
 
     /// Build one level.  k = super-wire size (1 = real wires).  policy = the geom_clustering policy.
+    /// nthreads: threads for the node features / bw edges and the bb search (the result does not depend on it).
     Level build_level(const std::vector<IBlob::pointer>& blobs, const SliceCharge& sc, const Universe& uni,
-                      int k, const std::string& policy);
+                      int k, const std::string& policy, int nthreads = 1);
+
+    /// Run f(begin, end) over disjoint chunks covering [0, n), handed out dynamically to at most nthreads
+    /// std::threads (nthreads <= 1 or n <= 1: f(0, n) in the calling thread); the first exception is rethrown.
+    /// f must write only slots of its own items (the result must not depend on the schedule).
+    void parallel_blocks(size_t n, int nthreads, const std::function<void(size_t, size_t)>& f);
+    /// Run f(worker) on nthreads std::threads (1: in the calling thread); the first exception is rethrown.
+    void parallel_workers(int nthreads, const std::function<void(int)>& f);
+
+    /// Cross-slice blob pairs (i < j, sorted unique) that Img::geom_clustering with `policy` makes between the
+    /// given blobs grouped into one blob set per slice index (sidx[i] indexes slice_of, time order).
+    /// geom_pairs computes them directly: the same slice-pair loop and tolerances, and the RayGrid::overlap rule
+    /// written as an interval test per wire layer (wcfm doc 15 round 1).  geom_pairs_graph is the reference, the
+    /// same pairs read back from a cluster graph filled by Img::geom_clustering itself (doc 14's code path).
+    std::vector<std::array<int64_t, 2>> geom_pairs(const std::vector<IBlob::pointer>& blobs, const std::vector<int>& sidx,
+                                                   const std::vector<ISlice::pointer>& slice_of,
+                                                   const std::string& policy, int nthreads = 1);
+    std::vector<std::array<int64_t, 2>> geom_pairs_graph(const std::vector<IBlob::pointer>& blobs,
+                                                         const std::vector<int>& sidx,
+                                                         const std::vector<ISlice::pointer>& slice_of,
+                                                         const std::string& policy);
 
     /// In-slice adjacency (gnn_dataset.inslice_adjacency) of blobs given (group key, u0,u1,v0,v1,w0,w1).
     std::vector<std::array<int64_t, 2>> inslice_pairs(const std::vector<int64_t>& group,

@@ -44,6 +44,10 @@
       uncer_cut         (1e11) activity entries with larger uncertainty (dummy / masked) are ignored
       ident_base        (1 << 20) first ident of the output blobs
       dump_dir          ("" = off) write one npz per level and event (graph arrays, logits, decisions)
+      nthreads          (1) threads for the C++ level work that splits into independent parts -- the bisection of
+                        the survivors to the next width, the node features and the cross-slice bb search -- run over contiguous
+                        blocks and merged in order, so the output does not depend on it (wcfm doc 15 round 3;
+                        the forward's threads are libtorch's own, OMP_NUM_THREADS)
  */
 #ifndef WIRECELLIMG_CASCADEDEGHOSTING
 #define WIRECELLIMG_CASCADEDEGHOSTING
@@ -104,6 +108,7 @@ namespace WireCell::Img {
         double m_uncer_cut{1e11};
         int m_ident_base{1 << 20};
         std::string m_dump_dir{""};
+        int m_nthreads{1};
         size_t m_count{0};
     };
 

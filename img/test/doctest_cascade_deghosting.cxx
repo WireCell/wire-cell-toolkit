@@ -2,11 +2,13 @@
 
     - build_level: the node features, bw / bw_w edges and bins follow gnn_dataset / contract_level;
     - inslice_pairs: overlap or abut on all three planes, within a (face, slice) group only;
+    - geom_pairs (the direct cross-slice builder, doc 15) gives exactly Img::geom_clustering's pairs, for tiled and
+      cut blobs, slice gaps of 1, 2 and 3 spans and every policy;
     - guard_prune: a candidate that is a wire's last explanation is kept;
     - steiner_repair: a gap of low-P cells between two confident fragments is bridged within the budget, a
       longer gap is not, a weak island is dropped;
     - the whole cascade with a keep-everything forward reproduces direct BlobCutting to 4 wires (same set of
-      (slice, wire bounds)), and two runs give identical output graphs.
+      (slice, wire bounds)), and two runs give identical output graphs, also with nthreads 4 (doc 15 round 3).
 
     The forward is an in-test ITensorForward (no model file, no torch): it checks the input schema and returns
     logits from a rule.
@@ -205,6 +207,18 @@ TEST_CASE("cascade level graph: features, bw weights, bins")
         REQUIRE(lev.bb.size() > 0);
         for (size_t e = 0; e < lev.bb.size(); e += 2) CHECK(lev.sidx[lev.bb[e]] != lev.sidx[lev.bb[e + 1]]);
         for (size_t e = 0; e < lev.bb_in.size(); e += 2) CHECK(lev.sidx[lev.bb_in[e]] == lev.sidx[lev.bb_in[e + 1]]);
+        // threads (doc 15): every array identical
+        for (int nt : {2, 5}) {
+            auto lt = Cascade::build_level(blobs, sc, uni, k, "uboone", nt);
+            CHECK(lt.xb == lev.xb);
+            CHECK(lt.wq == lev.wq);
+            CHECK(lt.bw_src == lev.bw_src);
+            CHECK(lt.bw_dst == lev.bw_dst);
+            CHECK(lt.bw_w == lev.bw_w);
+            CHECK(lt.bb == lev.bb);
+            CHECK(lt.bb_in == lev.bb_in);
+            CHECK(lt.ww == lev.ww);
+        }
     }
 }
 
@@ -227,6 +241,77 @@ TEST_CASE("frame charge: scale x the sum over the slice's ticks, all ticks, 0 wi
     CHECK(sc.charge(0, 101) == 0.0f);            // trace starts at tick 6
     CHECK(sc.charge(1, 101) == doctest::Approx(0.25 * 4.0));
     CHECK(sc.charge(1, 999) == 0.0f);
+}
+
+TEST_CASE("geom_pairs equals the geom_clustering graph pairs")
+{
+    auto anodes = Testing::anodes("uboone");
+    REQUIRE(anodes.size() > 0);
+    auto face = anodes[0]->face(0);
+    Img::GridTiling gt;
+    auto gcfg = gt.default_configuration();
+    gcfg["anode"] = "AnodePlane:0";
+    gcfg["face"] = 0;
+    gt.configure(gcfg);
+    auto frame = std::make_shared<Aux::SimpleFrame>(7, 0.0);
+    const double span = 2.0 * units::microsecond;
+    // slice starts in spans (gaps of 1, 2 and 3), active width and position (overlaps vary slice to slice)
+    const int at[7] = {0, 1, 2, 4, 5, 8, 9};
+    const size_t nch[7] = {12, 20, 8, 16, 30, 10, 14};
+    const double first[7] = {0.5, 0.501, 0.4995, 0.5, 0.502, 0.5, 0.5007};
+    std::vector<ISlice::pointer> slice_of;
+    std::vector<IBlob::pointer> uncut;
+    std::vector<int> sidx_uncut;
+    for (int s = 0; s < 7; ++s) {
+        // one band per plane with a dead channel every `gap` channels: tiling splits it into many blobs
+        auto band = make_slice(face, frame, s, at[s] * span, nch[s], first[s]);
+        ISlice::map_t act;
+        std::vector<std::pair<int, IChannel::pointer>> byid;
+        for (const auto& kv : band->activity()) byid.emplace_back(kv.first->ident(), kv.first);
+        std::sort(byid.begin(), byid.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        const int gap = 3 + s % 3;
+        for (size_t i = 0; i < byid.size(); ++i) {
+            if (i % gap == (size_t) gap - 1) continue;
+            act[byid[i].second] = band->activity().at(byid[i].second);
+        }
+        auto sl = std::make_shared<Aux::SimpleSlice>(frame, s, at[s] * span, span, act);
+        slice_of.push_back(sl);
+        IBlobSet::pointer bs;
+        REQUIRE(gt(sl, bs));
+        for (const auto& b : bs->blobs()) {
+            uncut.push_back(b);
+            sidx_uncut.push_back(s);
+        }
+    }
+    REQUIRE(uncut.size() >= 14);
+    // the same blobs cut to 2 wires (more, smaller blobs, abutting and gapped)
+    std::vector<IBlob::pointer> cut;
+    std::vector<int> sidx_cut;
+    Cascade::CutParams cpar;
+    cpar.min_length = 1;
+    int ident = 1000;
+    for (size_t i = 0; i < uncut.size(); ++i) {
+        const auto& b = uncut[i];
+        for (auto& [shape, d] : Cascade::cut_shape(b->face()->raygrid(), b->shape(), 0, 2, cpar)) {
+            cut.push_back(std::make_shared<Aux::SimpleBlob>(ident++, 1.0, 0.0, shape, b->slice(), b->face()));
+            sidx_cut.push_back(sidx_uncut[i]);
+        }
+    }
+    REQUIRE(cut.size() > uncut.size());
+    for (const std::string policy : {"uboone", "uboone_local", "simple", "dead_clus"}) {
+        for (int which = 0; which < 2; ++which) {
+            const auto& bl = which ? cut : uncut;
+            const auto& sx = which ? sidx_cut : sidx_uncut;
+            const auto ref = Cascade::geom_pairs_graph(bl, sx, slice_of, policy);
+            const auto got = Cascade::geom_pairs(bl, sx, slice_of, policy);
+            CAPTURE(policy);
+            CAPTURE(which);
+            CHECK(ref.size() > 0);
+            CHECK(got == ref);
+            for (int nt : {2, 3, 16}) CHECK(Cascade::geom_pairs(bl, sx, slice_of, policy, nt) == ref);
+        }
+    }
+    CHECK_THROWS(Cascade::geom_pairs(uncut, sidx_uncut, slice_of, "nonesuch"));
 }
 
 TEST_CASE("in-slice pairs: overlap or abut on all planes, within a group")
@@ -348,6 +433,28 @@ TEST_CASE("cascade with a keep-everything forward equals BlobCutting to 4 wires;
     CHECK(boost::num_edges(o1->graph()) == boost::num_edges(o2->graph()));
     CHECK(boost::num_vertices(o1->graph()) == boost::num_vertices(o2->graph()));
     CHECK(b1.front()->ident() == (1 << 20));
+
+    // threads: the same output graph, vertex by vertex and edge by edge
+    {
+        auto cfgt = cfg;
+        cfgt["nthreads"] = 4;
+        auto o4 = run(cfgt);
+        const auto& g1 = o1->graph();
+        const auto& g4 = o4->graph();
+        REQUIRE(boost::num_vertices(g1) == boost::num_vertices(g4));
+        REQUIRE(boost::num_edges(g1) == boost::num_edges(g4));
+        for (auto v : boost::make_iterator_range(boost::vertices(g1))) {
+            CHECK(g1[v].code() == g4[v].code());
+            CHECK(g1[v].ident() == g4[v].ident());
+        }
+        std::vector<std::pair<size_t, size_t>> e1, e4;
+        for (auto e : boost::make_iterator_range(boost::edges(g1))) e1.emplace_back(boost::source(e, g1), boost::target(e, g1));
+        for (auto e : boost::make_iterator_range(boost::edges(g4))) e4.emplace_back(boost::source(e, g4), boost::target(e, g4));
+        CHECK(e1 == e4);
+        auto k4 = blobs_of(g4);
+        REQUIRE(k4.size() == b1.size());
+        for (size_t i = 0; i < b1.size(); ++i) CHECK(key_of(k4[i]) == key_of(b1[i]));
+    }
 
     // a pruning forward keeps fewer blobs, and never more than the cut-everything reference
     g_mode = 1;
