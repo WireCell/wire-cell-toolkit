@@ -1966,7 +1966,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
     // knobs used for every plane, bit-identical legacy behaviour).
     if (!m_r_th_factor_planes.empty()) roi_refine.set_th_factor_planes(m_r_th_factor_planes);
     if (!m_r_pad_planes.empty()) roi_refine.set_pad_planes(m_r_pad_planes);
-    if (m_r_erase_stale_contained) roi_refine.set_erase_stale_contained(true);
+    roi_refine.set_erase_stale_contained(m_r_erase_stale_contained);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};

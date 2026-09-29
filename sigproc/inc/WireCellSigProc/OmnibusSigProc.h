@@ -165,9 +165,10 @@ namespace WireCell {
             std::vector<int> m_r_break_roi_loop_planes;
             // Erase a deleted loose ROI's contained_rois entry in
             // CleanUpInductionROIs (ROI_refinement::set_erase_stale_contained).
-            // false (default) keeps the legacy stale key, whose address reuse
-            // makes V-plane gauss/wiener heap-dependent.
-            bool m_r_erase_stale_contained{false};
+            // Default true (owner flip 2026-09-29, wcp-porting-img
+            // sbnd_xin/docs/127); false restores the legacy stale key, whose
+            // address reuse makes V-plane gauss/wiener heap-dependent.
+            bool m_r_erase_stale_contained{true};
             double m_r_th_peak{3.0};
             double m_r_sep_peak{6.0};
             double m_r_low_peak_sep_threshold_pre{1200};
