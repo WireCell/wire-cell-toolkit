@@ -1201,6 +1201,15 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         // shared segment with the same charge function (segment overload,
         // cached 2-D maps only: an empty cache is never filled from here) and
         // report the implied double count.  Silent when nothing is shared.
+        //
+        // sbnd_xin/docs/128 sec 12 (correction): with kine_charge_dedup on,
+        // recompute_shower_kine_charge_final already gives each 2-D charge
+        // cell to ONE shower, so charge-priced rows sharing a segment count it
+        // once between them; only a row priced otherwise (range, dQ/dx) adds a
+        // copy.  est_double_count_mev prices that (kine_overlap_extra_copies);
+        // est_double_count_legacy_mev keeps the sec 10.2 figure, which ignored
+        // the dedup.  Still an estimate: a shower re-priced after the dedup
+        // pass is not visible here.
         if (!ktree.link_seg_n_rows.empty()) {
             std::map<int, SegmentPtr> seg_by_gi;
             for (const auto& s : counted_segs) seg_by_gi[static_cast<int>(s->get_graph_index())] = s;
@@ -1209,17 +1218,19 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (!members[r].is_shower) continue;
                 for (int gi : members[r].graph_indices) shower_rows_of[gi].push_back(static_cast<int>(r));
             }
-            double est_double = 0, shared_charge = 0;
+            double est_double = 0, est_double_legacy = 0, shared_charge = 0;
             int n_shared = 0;
             std::set<int> rows_involved;
             for (const auto& [gi, rows] : shower_rows_of) {
                 if (rows.size() < 2) continue;
                 ++n_shared;
-                int n_charge_rows = 0;
+                int n_charge_rows = 0, n_other_rows = 0;
                 for (int r : rows) {
                     rows_involved.insert(r);
                     if (ktree.kine_energy_info[r] == 2) ++n_charge_rows;
+                    else ++n_other_rows;
                 }
+                const int extra = kine_overlap_extra_copies(n_charge_rows, n_other_rows, m_kine_charge.dedup);
                 double e = -1;
                 auto sit = seg_by_gi.find(gi);
                 if (sit != seg_by_gi.end() && !m_charge_2d_u.empty()) {
@@ -1227,7 +1238,8 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 }
                 if (e > 0) {
                     shared_charge += e;
-                    if (n_charge_rows > 1) est_double += e * (n_charge_rows - 1);
+                    if (n_charge_rows > 1) est_double_legacy += e * (n_charge_rows - 1);
+                    est_double += e * extra;
                 }
                 std::string rs;
                 for (int r : rows) {
@@ -1235,17 +1247,18 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                           std::to_string(ktree.kine_energy_info[r]);
                 }
                 SPDLOG_LOGGER_INFO(s_log,
-                    "kine_overlap_probe: seg={} rows(row:info)=[{}] seg_charge_mev={:.2f}",
-                    kine_seg_display_id(sit != seg_by_gi.end() ? sit->second : SegmentPtr{}), rs, e);
+                    "kine_overlap_probe: seg={} rows(row:info)=[{}] seg_charge_mev={:.2f} extra_copies={}",
+                    kine_seg_display_id(sit != seg_by_gi.end() ? sit->second : SegmentPtr{}), rs, e, extra);
             }
             if (n_shared) {
                 double rows_e = 0;
                 for (int r : rows_involved) rows_e += ktree.kine_energy_particle[r];
                 SPDLOG_LOGGER_INFO(s_log,
                     "kine_overlap_probe: SUMMARY shared_segs={} shower_rows={} rows_mev={:.2f} "
-                    "shared_seg_charge_mev={:.2f} est_double_count_mev={:.2f} Enu={:.2f}",
-                    n_shared, rows_involved.size(), rows_e, shared_charge, est_double,
-                    ktree.kine_reco_Enu);
+                    "shared_seg_charge_mev={:.2f} dedup={} est_double_count_mev={:.2f} "
+                    "est_double_count_legacy_mev={:.2f} Enu={:.2f}",
+                    n_shared, rows_involved.size(), rows_e, shared_charge, m_kine_charge.dedup,
+                    est_double, est_double_legacy, ktree.kine_reco_Enu);
             }
         }
     }

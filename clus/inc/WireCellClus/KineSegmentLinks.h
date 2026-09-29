@@ -62,6 +62,24 @@ namespace WireCell::Clus::PR {
         return out;
     }
 
+    /// sbnd_xin/docs/128 sec 12: how many EXTRA copies of one shared
+    /// segment's charge reach Enu, given the counted shower rows that hold it.
+    ///
+    /// A charge-priced row (kine_energy_info == 2) prices the shower's cloud.
+    /// With kine_charge_dedup on, recompute_shower_kine_charge_final gives
+    /// every 2-D charge cell to exactly one shower, so all charge-priced rows
+    /// holding the segment TOGETHER count its charge once.  Without dedup each
+    /// charge-priced row counts it.  A row priced otherwise (range, dQ/dx:
+    /// info != 2) is not deduplicated, and counts the segment on its own.
+    inline int kine_overlap_extra_copies(int n_charge_rows, int n_other_rows, bool dedup)
+    {
+        if (n_charge_rows < 0) n_charge_rows = 0;
+        if (n_other_rows < 0) n_other_rows = 0;
+        const int charge_copies = dedup ? (n_charge_rows > 0 ? 1 : 0) : n_charge_rows;
+        const int copies = charge_copies + n_other_rows;
+        return copies > 1 ? copies - 1 : 0;
+    }
+
 }  // namespace WireCell::Clus::PR
 
 #endif

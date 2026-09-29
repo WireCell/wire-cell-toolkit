@@ -69,3 +69,22 @@ TEST_CASE("kine segment links: a repeated member within one row counts once; emp
     CHECK(links[0].n_rows == 1);
     CHECK(build_kine_segment_links({}).empty());
 }
+
+TEST_CASE("kine overlap extra copies: kine_charge_dedup counts charge-priced rows once")
+{
+    // Two charge-priced shower rows share a segment.
+    CHECK(kine_overlap_extra_copies(2, 0, true) == 0);
+    CHECK(kine_overlap_extra_copies(2, 0, false) == 1);
+    CHECK(kine_overlap_extra_copies(3, 0, false) == 2);
+    // A charge row and a range-priced row: the range row is not deduplicated.
+    CHECK(kine_overlap_extra_copies(1, 1, true) == 1);
+    CHECK(kine_overlap_extra_copies(1, 1, false) == 1);
+    CHECK(kine_overlap_extra_copies(2, 1, true) == 1);
+    CHECK(kine_overlap_extra_copies(2, 1, false) == 2);
+    // Two non-charge rows count it twice either way.
+    CHECK(kine_overlap_extra_copies(0, 2, true) == 1);
+    // One row, or none: nothing extra.
+    CHECK(kine_overlap_extra_copies(1, 0, true) == 0);
+    CHECK(kine_overlap_extra_copies(0, 1, false) == 0);
+    CHECK(kine_overlap_extra_copies(0, 0, true) == 0);
+}
