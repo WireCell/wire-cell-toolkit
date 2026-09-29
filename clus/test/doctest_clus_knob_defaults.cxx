@@ -1653,3 +1653,14 @@ TEST_CASE("clus knob defaults: TrackFitting proj_skip_unmapped_face is off")
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().proj_skip_unmapped_face == doctest::Approx(0.0));
 }
+
+TEST_CASE("clus knob defaults: ClusteringIsolated merge cuts are the former literals (fdvd_sim doc 04)")
+{
+    auto cfg = defaults_of("ClusteringIsolated");
+    CHECK_KNOB_NUM(cfg, "small_big_dis_cut", 80 * units::cm);
+    CHECK_KNOB_NUM(cfg, "small_chain_dis_cut", 5 * units::cm);
+    CHECK_KNOB_NUM(cfg, "small_small_dis_cut", 50 * units::cm);
+    CHECK_KNOB_NUM(cfg, "big_dis_cut", 3 * units::cm);
+    CHECK_KNOB_NUM(cfg, "big_dis_range_cut", 16 * units::cm);
+    CHECK_KNOB_BOOL(cfg, "bbox_prefilter", false);
+}

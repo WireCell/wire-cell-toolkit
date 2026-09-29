@@ -1357,9 +1357,20 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // the other drift volume, invisible to this per-APA pass.  cathode_x
         // (default null => C++ 0) is the cathode plane position in this
         // pass's raw frame.
+        //
+        // Merge-pass distance cuts (fdvd_sim doc 04; FD-VD MeV events, where
+        // every cluster is small and the small-small pass bundles).  Each is
+        // null => key omitted => the C++ default = the former literal:
+        // small_big_dis_cut 80 cm, small_chain_dis_cut 5 cm (a small joins an
+        // absorbed small), small_small_dis_cut 50 cm (the remaining smalls),
+        // big_dis_cut 3 cm, big_dis_range_cut 16 cm.  bbox_prefilter (C++
+        // default false) skips pairs whose bounding boxes are already >= the
+        // cut apart in the small passes; result-neutral by construction.
         isolated(name="", use_flash_t0=false, flash_t0_window=80*wc.ns, length_cut=null, range_cut=null,
                  save_assoc_id=false, cathode_guard_xcut=null, cathode_x=null,
-                 cathode_guard_dis_floor=null) :: {
+                 cathode_guard_dis_floor=null, small_big_dis_cut=null, small_chain_dis_cut=null,
+                 small_small_dis_cut=null, big_dis_cut=null, big_dis_range_cut=null,
+                 bbox_prefilter=false) :: {
             type: "ClusteringIsolated",
             name: prefix+name,
             data: {
@@ -1373,6 +1384,12 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // null => C++ 0 (no floor): the guard declines regardless of how
                 // close the big cluster is.  Set to keep nearby (< floor) absorbs.
                 [if cathode_guard_dis_floor != null then 'cathode_guard_dis_floor']: cathode_guard_dis_floor,
+                [if small_big_dis_cut != null then 'small_big_dis_cut']: small_big_dis_cut,
+                [if small_chain_dis_cut != null then 'small_chain_dis_cut']: small_chain_dis_cut,
+                [if small_small_dis_cut != null then 'small_small_dis_cut']: small_small_dis_cut,
+                [if big_dis_cut != null then 'big_dis_cut']: big_dis_cut,
+                [if big_dis_range_cut != null then 'big_dis_range_cut']: big_dis_range_cut,
+                [if bbox_prefilter then 'bbox_prefilter']: true,
             } + dv_cfg + scope_cfg,
         },
 
