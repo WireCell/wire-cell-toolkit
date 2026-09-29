@@ -5,6 +5,7 @@
 
 #include "WireCellUtil/Persist.h"
 #include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
+#include <iterator>   // sbnd_xin/docs/128 probe: std::back_inserter
 #include <cmath>      // sbnd_xin/docs/109: std::nan
 #include <functional> // sbnd_xin/docs/109 rev 4: std::greater
 #include <limits>     // sbnd_xin/docs/109 rev 4: infinity
@@ -3791,10 +3792,51 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             // by-value behaviour.
             ClusterVertexMap map_copy = map_cluster_main_vertices;
             Cluster* mc_copy = main_cluster;
+            // sbnd_xin/docs/128 sec 4.6 probe (log only; changes no output):
+            // other_clusters is passed by REFERENCE, not as a copy, so a swap
+            // the knob discards may still leave it edited.  Record its id
+            // SEQUENCE (order too: a swap A->B->A only reorders it) and the
+            // main cluster's flag, and report any change.
+            std::vector<int> probe_ids_before;
+            for (auto* c : other_clusters) probe_ids_before.push_back(c ? c->get_cluster_id() : -1);
+            const bool probe_flag_before = main_cluster->get_flag(Flags::main_cluster);
             final_main_vertex = pattern_algos.determine_overall_main_vertex(
                 *pr_graph, map_copy, mc_copy, other_clusters,
                 vertices_in_long_muon, segments_in_long_muon,
                 *track_fitter, m_dv, particle_data(), m_recomb_model, true);
+            {
+                std::vector<int> probe_ids_after;
+                bool main_in_others = false;
+                for (auto* c : other_clusters) {
+                    probe_ids_after.push_back(c ? c->get_cluster_id() : -1);
+                    if (c == main_cluster) main_in_others = true;
+                }
+                const bool probe_flag_after = main_cluster->get_flag(Flags::main_cluster);
+                if (probe_ids_after != probe_ids_before || probe_flag_after != probe_flag_before) {
+                    std::vector<int> sb = probe_ids_before, sa = probe_ids_after;
+                    std::sort(sb.begin(), sb.end());
+                    std::sort(sa.begin(), sa.end());
+                    std::vector<int> added, removed;
+                    std::set_difference(sa.begin(), sa.end(), sb.begin(), sb.end(), std::back_inserter(added));
+                    std::set_difference(sb.begin(), sb.end(), sa.begin(), sa.end(), std::back_inserter(removed));
+                    auto csv = [](const std::vector<int>& v) {
+                        std::string out;
+                        for (size_t i = 0; i < v.size(); ++i) out += (i ? "," : "") + std::to_string(v[i]);
+                        return out;
+                    };
+                    SPDLOG_LOGGER_INFO(log,
+                        "mvsa_probe: other_clusters edited by determine_overall_main_vertex: "
+                        "main {} -> {} ({}) n {} -> {} added=[{}] removed=[{}] reordered_only={} "
+                        "main_in_others={} main_flag {} -> {}",
+                        main_cluster->get_cluster_id(), mc_copy->get_cluster_id(),
+                        mc_copy == main_cluster ? "no swap"
+                            : (m_main_vertex_swap_apply ? "applied" : "discarded"),
+                        probe_ids_before.size(), probe_ids_after.size(),
+                        csv(added), csv(removed),
+                        (sa == sb) ? 1 : 0, main_in_others ? 1 : 0,
+                        probe_flag_before ? 1 : 0, probe_flag_after ? 1 : 0);
+                }
+            }
             if (mc_copy != main_cluster) {
                 SPDLOG_LOGGER_DEBUG(log,
                     "mvsa: traditional path swapped main cluster {} -> {} ({})",

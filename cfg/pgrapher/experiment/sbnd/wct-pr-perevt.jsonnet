@@ -1425,6 +1425,12 @@ function(
     // match except T_rec_charge.cluster_id (7 files, the column this fixes),
     // the two added branches and the operating-point hash.
     root_point_ids = true,
+    // sbnd_xin/docs/128-129: book the particle links -- T_kine per-row
+    // identity, a T_segment tree (one row per PR-graph segment per candidate:
+    // in_enu, kine_index, shower_id, ...) and per-cluster counts on the
+    // T_tagger roster.  Observation only.  C++ default false; key omitted when
+    // off => byte-identical config AND tracking-pr.root.
+    root_particle_links = false,
     // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
     // physical beam flash seen by both drift volumes (same flash_group), keeping
     // the longest selected activity.  This MOVES the selection -- it removes
@@ -3880,6 +3886,7 @@ function(
                              root_cluster_flags=root_cluster_flags,
                              root_provenance=root_provenance,
                              root_point_ids=root_point_ids,  // sbnd_xin/docs/109 rev 3
+                             root_particle_links=root_particle_links,  // sbnd_xin/docs/128-129
                              provenance_extra=provenance_extra,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,

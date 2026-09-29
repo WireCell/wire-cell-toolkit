@@ -2331,6 +2331,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
        // C++ default false; key omitted when off => byte-identical pre-knob
        // config AND tracking-pr.root.
        root_point_ids=true,  // SBND PRODUCTION -- doc sbnd_xin/120 sec 4
+       // sbnd_xin/docs/128-129: root_particle_links -- which segments and
+       // clusters make kine_reco_Enu.  T_kine gains per-row identity
+       // (kine_particle_id/_is_shower/_cluster_id/_nseg/_pool,
+       // kine_main_vertex_id), a new T_segment tree has one row per PR-graph
+       // segment per candidate (segment_id, in_enu, kine_index, shower_id,
+       // ...), and T_tagger gains act_n_seg/act_n_seg_in_enu/act_in_enu.
+       // Observation only: fill_kine_tree records the links in memory either
+       // way; this only books them.  C++ default false; key omitted when off
+       // => byte-identical pre-knob config AND tracking-pr.root.
+       root_particle_links=false,
        provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
@@ -2958,7 +2968,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                                             neutrino_type_bitmask=neutrino_type_bitmask,
                                             nu_per_bundle=nu_per_bundle,
                                             mcs_output=mcs_enable,
-                                            nu_provenance=root_nu_record),
+                                            nu_provenance=root_nu_record,
+                                            nu_particle_links=root_particle_links),  // sbnd_xin/docs/128-129
             // PR event-display calib dump (docs/pr/26): ONE self-contained JSON per
             // event carrying the PR-graph segments as polylines, the associated
             // track/shower points, the Steiner skeleton with its terminal flag, the

@@ -856,7 +856,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
         // Write T_tagger and T_kine trees into the existing tracking output ROOT file.
         // Must run AFTER numu_bdt_scorer and nue_bdt_scorer (BDT scores must be filled).
         // Must run AFTER UbooneMagnifyTrackingVisitor (file must already exist to UPDATE).
-        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false, nu_provenance=false) :: {
+        tagger_output(name="", output_filename="tracking_proj.root", neutrino_type_bitmask=false, nu_per_bundle=false, mcs_output=false, nu_provenance=false, nu_particle_links=false) :: {
             type: "UbooneTaggerOutputVisitor",
             name: prefix + name,
             data: {
@@ -887,7 +887,14 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // act_is_final; T_kine run/subrun/event, has_vertex).  C++
               // default false = branches not booked; key omitted when off =>
               // byte-identical pre-knob config AND schema.
-              + (if nu_provenance then { nu_provenance: true } else {}),
+              + (if nu_provenance then { nu_provenance: true } else {})
+              // sbnd_xin/docs/128-129: particle links -- T_kine per-row
+              // identity (kine_particle_*, kine_main_vertex_id), a T_segment
+              // tree (one row per PR-graph segment: in_enu, kine_index,
+              // shower_id, ...) and act_n_seg/act_n_seg_in_enu/act_in_enu on
+              // the T_tagger roster.  C++ default false = nothing booked; key
+              // omitted when off => byte-identical pre-knob config AND schema.
+              + (if nu_particle_links then { nu_particle_links: true } else {}),
         },
 
         pointed(name="", groupings=["live"]) :: {

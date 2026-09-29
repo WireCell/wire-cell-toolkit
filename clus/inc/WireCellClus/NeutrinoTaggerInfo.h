@@ -113,6 +113,34 @@ namespace WireCell::Clus::PR {
         float kine_mcs_tracklen{-1};      // MCS trimmed path length [cm]
         float kine_mcs_range_energy{-1};  // MCS's own CSDA range KE [MeV]
         int kine_mcs_segment_id{-1};      // cluster_id*1000 + graph_index join key
+
+        // ---- sbnd_xin/docs/128-129: per-row identity (P1) --------------- //
+        // Parallel to kine_energy_particle: which particle each row is.
+        // Filled unconditionally by fill_kine_tree (in-memory only); booked
+        // as T_kine branches only behind UbooneTaggerOutputVisitor's
+        // nu_particle_links knob, so an off config writes nothing new.
+        // Id encoding = the Bee PF node / calib-dump segment id,
+        // cluster_id*1000 + graph_index (a shower row uses its start segment).
+        std::vector<int> kine_particle_id;
+        std::vector<int> kine_particle_is_shower;  // 1 = shower row
+        std::vector<int> kine_particle_cluster_id; // cluster of the (start) segment
+        std::vector<int> kine_particle_nseg;       // 1 for a track, member count for a shower
+        // Which fill_kine_tree pass pushed the row: 0 main-vertex edge, 1 BFS,
+        // 2 leftover shower, 3 orphan track, 4 guard-freed track,
+        // 5 near cross-cluster track.
+        std::vector<int> kine_particle_pool;
+        int kine_main_vertex_id{-1};               // cluster_id*1000 + graph_index
+
+        // ---- sbnd_xin/docs/128-129: segment -> row links (P2 input) ------ //
+        // One entry per segment whose energy is inside kine_reco_Enu (the
+        // census's counted_segs), sorted by graph_index.  NEVER booked on
+        // T_kine: UbooneTaggerOutputVisitor reads them to fill T_segment.
+        // kine_index = the row the segment fed (a shower row if any, see
+        // build_kine_segment_links); n_rows > 1 = fed more than one row.
+        // All three are empty when the fill self-check fails.
+        std::vector<int> link_seg_graph_index;
+        std::vector<int> link_seg_kine_index;
+        std::vector<int> link_seg_n_rows;
     };
 
 

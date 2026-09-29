@@ -66,6 +66,15 @@ namespace WireCell {
             // C++ default false => branches not booked => schema
             // byte-identical (this writer is shared with PDHD/PDVD).
             bool m_nu_provenance{false};
+            // sbnd_xin/docs/128-129: particle links.  T_kine gains per-row
+            // identity (kine_particle_id/_is_shower/_cluster_id/_nseg/_pool,
+            // kine_main_vertex_id); a new T_segment tree gets one row per
+            // PR-graph segment per candidate (in_enu, kine_index, shower_id,
+            // ...); T_tagger gains act_n_seg/act_n_seg_in_enu/act_in_enu
+            // aligned to act_cluster_id (only where nu_per_bundle books the
+            // roster).  C++ default false => nothing booked => schema
+            // byte-identical (this writer is shared with PDHD/PDVD/uBooNE).
+            bool m_nu_particle_links{false};
         };
 
     }  // namespace Root
