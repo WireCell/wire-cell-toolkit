@@ -1526,6 +1526,9 @@ void ROI_refinement::CleanUpInductionROIs(int plane)
             auto it1 = find(rois_u_loose.at(chid).begin(), rois_u_loose.at(chid).end(), roi);
             if (it1 != rois_u_loose.at(chid).end()) rois_u_loose.at(chid).erase(it1);
 
+            // Without this the deleted ROI stays a key of contained_rois and a
+            // later ROI allocated at the same address inherits its tight ROIs.
+            if (m_erase_stale_contained) contained_rois.erase(roi);
             delete roi;
         }
     }
@@ -1598,6 +1601,9 @@ void ROI_refinement::CleanUpInductionROIs(int plane)
             auto it1 = find(rois_v_loose.at(chid).begin(), rois_v_loose.at(chid).end(), roi);
             if (it1 != rois_v_loose.at(chid).end()) rois_v_loose.at(chid).erase(it1);
 
+            // Without this the deleted ROI stays a key of contained_rois and a
+            // later ROI allocated at the same address inherits its tight ROIs.
+            if (m_erase_stale_contained) contained_rois.erase(roi);
             delete roi;
         }
     }

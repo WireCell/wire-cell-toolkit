@@ -61,6 +61,18 @@ namespace WireCell {
             void BreakROI(SignalROI* roi, float rms);
             void BreakROI1(SignalROI* roi);
 
+            // When true, CleanUpInductionROIs also erases a deleted loose ROI's
+            // contained_rois entry.  Without it the entry outlives the ROI as a
+            // stale key; the U plane is refined before V on this same object, so
+            // a fresh V ROI allocated at a reused U address inherits U's tight
+            // ROIs (heap-dependent, hence run-to-run V-plane differences in
+            // gauss/wiener; wcp-porting-img sbnd_xin/docs/127).  Default false
+            // keeps the legacy behaviour.
+            void set_erase_stale_contained(bool flag) { m_erase_stale_contained = flag; }
+
+            // Read-only view of the loose->tight containment map (for tests).
+            const SignalROIMap& get_contained_rois() const { return contained_rois; }
+
             void ExtendROIs(int plane);
 
             void TestROIs();
@@ -115,6 +127,7 @@ namespace WireCell {
             Log::logptr_t log;
 
             bool isWrapped;
+            bool m_erase_stale_contained{false};
         };
     }  // namespace SigProc
 }  // namespace WireCell

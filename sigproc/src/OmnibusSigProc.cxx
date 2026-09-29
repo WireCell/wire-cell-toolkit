@@ -106,6 +106,7 @@ void OmnibusSigProc::configure(const WireCell::Configuration& config)
         get(config, "r_fake_signal_high_th_ind_factor", m_r_fake_signal_high_th_ind_factor);
     m_r_pad = get(config, "r_pad", m_r_pad);
     m_r_break_roi_loop = get(config, "r_break_roi_loop", m_r_break_roi_loop);
+    m_r_erase_stale_contained = get(config, "r_erase_stale_contained", m_r_erase_stale_contained);
     m_r_th_peak = get(config, "r_th_peak", m_r_th_peak);
     m_r_sep_peak = get(config, "r_sep_peak", m_r_sep_peak);
     m_r_low_peak_sep_threshold_pre = get(config, "r_low_peak_sep_threshold_pre", m_r_low_peak_sep_threshold_pre);
@@ -312,6 +313,7 @@ WireCell::Configuration OmnibusSigProc::default_configuration() const
     cfg["r_fake_signal_high_th_ind_factor"] = m_r_fake_signal_high_th_ind_factor;
     cfg["r_pad"] = m_r_pad;
     cfg["r_break_roi_loop"] = m_r_break_roi_loop;
+    cfg["r_erase_stale_contained"] = m_r_erase_stale_contained;
     cfg["r_th_peak"] = m_r_th_peak;
     cfg["r_sep_peak"] = m_r_sep_peak;
     cfg["r_low_peak_sep_threshold_pre"] = m_r_low_peak_sep_threshold_pre;
@@ -1640,6 +1642,7 @@ bool OmnibusSigProc::operator()(const input_pointer& in, output_pointer& out)
         m_wanmm, m_nwires[0], m_nwires[1], m_nwires[2], m_r_th_factor, m_r_fake_signal_low_th, m_r_fake_signal_high_th,
         m_r_fake_signal_low_th_ind_factor, m_r_fake_signal_high_th_ind_factor, m_r_pad, m_r_break_roi_loop, m_r_th_peak,
         m_r_sep_peak, m_r_low_peak_sep_threshold_pre, m_r_max_npeaks, m_r_sigma, m_r_th_percent, m_isWrapped);  //
+    if (m_r_erase_stale_contained) roi_refine.set_erase_stale_contained(true);
 
     const std::vector<float>* perplane_thresholds[3] = {&roi_form.get_uplane_rms(), &roi_form.get_vplane_rms(),
                                                         &roi_form.get_wplane_rms()};
