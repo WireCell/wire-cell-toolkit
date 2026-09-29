@@ -461,6 +461,8 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/89 Arm C (C2): rule-1 topology term weight/center.
     // doc sbnd_xin/docs/pr/51 round 3: traditional-path swap propagation.
     m_main_vertex_swap_apply  = get(config, "main_vertex_swap_apply",  m_main_vertex_swap_apply);
+    // sbnd_xin/docs/128 sec 10: undo a discarded swap's side effects.
+    m_main_vertex_swap_discard_clean = get(config, "main_vertex_swap_discard_clean", m_main_vertex_swap_discard_clean);
     // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe.
     m_rough_path_probe        = get(config, "rough_path_probe",        m_rough_path_probe);
     // doc sbnd_xin/docs/pr/51 round 5: steiner gap penalty (0 = legacy).
@@ -1070,6 +1072,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dual_chain_allow_cluster_swap"] = m_dual_chain_allow_cluster_swap;  // doc pr/112 sec 5.7.8
     cfg["dual_chain_vtx_weight"]   = m_dual_chain_vtx_weight;   // doc pr/112 sec 11: union-mode proximity term, 0 = none
     cfg["main_vertex_swap_apply"]  = m_main_vertex_swap_apply;  // doc pr/51 round 3: false = legacy (traditional-path swap decision is computed then discarded)
+    cfg["main_vertex_swap_discard_clean"] = m_main_vertex_swap_discard_clean;  // sbnd_xin/docs/128 sec 10: false = legacy (a discarded swap leaves other_clusters/main flags edited)
     cfg["rough_path_probe"]        = m_rough_path_probe;  // doc pr/51 round 4: false = legacy (diagnostic TRACE probe never runs)
     cfg["steiner_gap_penalty"]     = m_steiner_gap_penalty;  // doc pr/51 round 5: 0 = legacy (do_rough_path stays on the unpenalized "steiner_graph")
     cfg["sgp_dead_alpha"]          = m_sgp_dead_alpha;       // doc pr/51 round 5: dead-sample weight in bad_fraction (inert at scale 0)
@@ -3800,6 +3803,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             std::vector<int> probe_ids_before;
             for (auto* c : other_clusters) probe_ids_before.push_back(c ? c->get_cluster_id() : -1);
             const bool probe_flag_before = main_cluster->get_flag(Flags::main_cluster);
+            // sbnd_xin/docs/128 sec 10: main_vertex_swap_discard_clean.  Taken
+            // unconditionally (a copy of a pointer list and its flags: no
+            // output depends on it); used only when the knob is on.
+            const std::vector<Cluster*> clean_others_before = other_clusters;
+            std::vector<std::pair<Cluster*, int>> clean_flags_before;
+            clean_flags_before.emplace_back(main_cluster, main_cluster->get_flag(Flags::main_cluster) ? 1 : 0);
+            for (auto* c : other_clusters) {
+                if (c) clean_flags_before.emplace_back(c, c->get_flag(Flags::main_cluster) ? 1 : 0);
+            }
             final_main_vertex = pattern_algos.determine_overall_main_vertex(
                 *pr_graph, map_copy, mc_copy, other_clusters,
                 vertices_in_long_muon, segments_in_long_muon,
@@ -3845,6 +3857,27 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 if (m_main_vertex_swap_apply) {
                     main_cluster = mc_copy;
                     map_cluster_main_vertices = map_copy;
+                }
+            }
+            // sbnd_xin/docs/128 sec 10: a swap that is NOT applied must not
+            // leave its side effects behind.  swap_main_cluster pushes the old
+            // main into other_clusters, erases the new one and flips both
+            // Flags::main_cluster bits; with the swap discarded, this scope
+            // keeps using the old main, so the rest of the pass would see the
+            // main twice and miss the swap target (confirmed on 6/67 SBND
+            // events by mvsa_probe).  Restore the list and the flags exactly.
+            // Knob off (default) => nothing restored => byte-identical.
+            if (m_main_vertex_swap_discard_clean && !(mc_copy != main_cluster && m_main_vertex_swap_apply)) {
+                const bool changed = (other_clusters != clean_others_before) ||
+                    std::any_of(clean_flags_before.begin(), clean_flags_before.end(), [](const auto& cf) {
+                        return (cf.first->get_flag(Flags::main_cluster) ? 1 : 0) != cf.second;
+                    });
+                if (changed) {
+                    other_clusters = clean_others_before;
+                    for (const auto& [c, f] : clean_flags_before) c->set_flag(Flags::main_cluster, f);
+                    SPDLOG_LOGGER_INFO(log,
+                        "mvsa_clean: discarded swap {} -> {}: other_clusters ({}) and main flags restored",
+                        main_cluster->get_cluster_id(), mc_copy->get_cluster_id(), other_clusters.size());
                 }
             }
             if (final_main_vertex) {
@@ -4803,6 +4836,13 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
     if (!flag_dl_changed) {
         ClusterVertexMap map_copy = map_cluster_main_vertices;
         Cluster* mc_copy = main_cluster;
+        // sbnd_xin/docs/128 sec 10: same clean discard as the main pass.
+        const std::vector<Cluster*> clean_others_before = other_clusters;
+        std::vector<std::pair<Cluster*, int>> clean_flags_before;
+        clean_flags_before.emplace_back(main_cluster, main_cluster->get_flag(Flags::main_cluster) ? 1 : 0);
+        for (auto* c : other_clusters) {
+            if (c) clean_flags_before.emplace_back(c, c->get_flag(Flags::main_cluster) ? 1 : 0);
+        }
         final_main_vertex = pattern_algos.determine_overall_main_vertex(
             *pr_graph, map_copy, mc_copy, other_clusters,
             vertices_in_long_muon, segments_in_long_muon,
@@ -4810,6 +4850,10 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
         if (mc_copy != main_cluster && m_main_vertex_swap_apply) {
             main_cluster = mc_copy;
             map_cluster_main_vertices = map_copy;
+        }
+        else if (m_main_vertex_swap_discard_clean) {
+            other_clusters = clean_others_before;
+            for (const auto& [c, f] : clean_flags_before) c->set_flag(Flags::main_cluster, f);
         }
         if (final_main_vertex) map_cluster_main_vertices[main_cluster] = final_main_vertex;
     }

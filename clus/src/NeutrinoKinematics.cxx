@@ -10,6 +10,8 @@
 #include <cstdlib>
 #include <cstdio>   // doc pr/130 probe: std::fprintf
 #include <iostream>
+#include <map>   // sbnd_xin/docs/128 sec 10.2 probe
+#include <set>
 #include <sstream>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
@@ -1187,6 +1189,63 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 ktree.link_seg_graph_index.push_back(ln.graph_index);
                 ktree.link_seg_kine_index.push_back(ln.kine_index);
                 ktree.link_seg_n_rows.push_back(ln.n_rows);
+            }
+        }
+
+        // sbnd_xin/docs/128 sec 10.2 probe (log only; changes no output): do
+        // two counted SHOWER rows that share a segment both carry its charge?
+        // Shower::add_segment merges each member's "fit" and
+        // "associate_points" clouds into the shower's own cloud, and a
+        // charge-based kine_best (kine_energy_info == 2) is computed from that
+        // cloud -- so a segment in two such rows is priced twice.  Price each
+        // shared segment with the same charge function (segment overload,
+        // cached 2-D maps only: an empty cache is never filled from here) and
+        // report the implied double count.  Silent when nothing is shared.
+        if (!ktree.link_seg_n_rows.empty()) {
+            std::map<int, SegmentPtr> seg_by_gi;
+            for (const auto& s : counted_segs) seg_by_gi[static_cast<int>(s->get_graph_index())] = s;
+            std::map<int, std::vector<int>> shower_rows_of;  // graph_index -> shower rows holding it
+            for (size_t r = 0; r < members.size(); ++r) {
+                if (!members[r].is_shower) continue;
+                for (int gi : members[r].graph_indices) shower_rows_of[gi].push_back(static_cast<int>(r));
+            }
+            double est_double = 0, shared_charge = 0;
+            int n_shared = 0;
+            std::set<int> rows_involved;
+            for (const auto& [gi, rows] : shower_rows_of) {
+                if (rows.size() < 2) continue;
+                ++n_shared;
+                int n_charge_rows = 0;
+                for (int r : rows) {
+                    rows_involved.insert(r);
+                    if (ktree.kine_energy_info[r] == 2) ++n_charge_rows;
+                }
+                double e = -1;
+                auto sit = seg_by_gi.find(gi);
+                if (sit != seg_by_gi.end() && !m_charge_2d_u.empty()) {
+                    e = cal_kine_charge(sit->second, graph, track_fitter, dv) / units::MeV;
+                }
+                if (e > 0) {
+                    shared_charge += e;
+                    if (n_charge_rows > 1) est_double += e * (n_charge_rows - 1);
+                }
+                std::string rs;
+                for (int r : rows) {
+                    rs += (rs.empty() ? "" : ",") + std::to_string(r) + ":" +
+                          std::to_string(ktree.kine_energy_info[r]);
+                }
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_overlap_probe: seg={} rows(row:info)=[{}] seg_charge_mev={:.2f}",
+                    kine_seg_display_id(sit != seg_by_gi.end() ? sit->second : SegmentPtr{}), rs, e);
+            }
+            if (n_shared) {
+                double rows_e = 0;
+                for (int r : rows_involved) rows_e += ktree.kine_energy_particle[r];
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_overlap_probe: SUMMARY shared_segs={} shower_rows={} rows_mev={:.2f} "
+                    "shared_seg_charge_mev={:.2f} est_double_count_mev={:.2f} Enu={:.2f}",
+                    n_shared, rows_involved.size(), rows_e, shared_charge, est_double,
+                    ktree.kine_reco_Enu);
             }
         }
     }

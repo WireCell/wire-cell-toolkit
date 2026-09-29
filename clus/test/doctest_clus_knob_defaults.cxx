@@ -427,6 +427,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 3: op3 satellite-anchor extension + traditional-path
     // swap-apply -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
+    // sbnd_xin/docs/128 sec 10: clean discard of an unapplied swap -- OFF.
+    CHECK_KNOB_BOOL(cfg, "main_vertex_swap_discard_clean", false);
     // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
     CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
     CHECK_KNOB_BOOL(cfg, "sgp_edge_probe", false);   // doc pr/73: per-edge sentinel, log-only

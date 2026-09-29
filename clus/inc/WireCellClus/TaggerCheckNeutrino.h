@@ -520,6 +520,17 @@ public:
         // swap is decided, in both states, so the off-arms self-census how
         // often the traditional path swaps in production today.
         bool   m_main_vertex_swap_apply{false};
+        // sbnd_xin/docs/128 sec 10: the other half of the pr/51 round 3 bug.
+        // With main_vertex_swap_apply false the swap is discarded, but
+        // swap_main_cluster has already pushed the old main into
+        // other_clusters (the caller's real list), erased the swap target
+        // from it and flipped both Flags::main_cluster bits; the rest of the
+        // pass then sees the main twice and misses a companion (6/67 SBND
+        // events, doc 128 sec 9.5).  true = restore other_clusters and the
+        // flags of the main and every companion to their pre-call values
+        // whenever the swap is not applied (both the main pass and the
+        // dual-chain off pass).  false (default) = legacy, byte-identical.
+        bool   m_main_vertex_swap_discard_clean{false};
         // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only TRACE probe for the
         // near-vertex short-cut investigation (owner Bee scan of
         // 131357/268067/285567/506746 -- rounds 2-3's main_vertex_graph_audit

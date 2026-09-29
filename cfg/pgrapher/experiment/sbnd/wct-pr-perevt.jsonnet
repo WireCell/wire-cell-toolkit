@@ -3004,6 +3004,12 @@ function(
     // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
     // byte-identical.
     main_vertex_swap_apply = false,
+    // sbnd_xin/docs/128 sec 10 -- when the traditional path's swap is NOT
+    // applied, undo its side effects (other_clusters regains the swap target
+    // and loses the duplicated main; Flags::main_cluster restored).  Fixes the
+    // half-applied state pr/51 round 3 documented.  C++ default false; key
+    // omitted when off => byte-identical.
+    main_vertex_swap_discard_clean = false,
     // doc pr/51 round 4 -- diagnostic-only rough-path probe for the
     // near-vertex short-cut investigation (path-COST, not graph-shape).
     // No graph/fit/segment content is ever changed; every line is TRACE.
@@ -3723,6 +3729,7 @@ function(
         [if excl_t0_frame then 'excl_t0_frame']: true,
         [if kine_dqdx_skip_zero_dx then 'kine_dqdx_skip_zero_dx']: true,
         [if main_vertex_swap_apply then 'main_vertex_swap_apply']: true,
+        [if main_vertex_swap_discard_clean then 'main_vertex_swap_discard_clean']: true,  // sbnd_xin/docs/128 sec 10
         [if rough_path_probe then 'rough_path_probe']: true,
         [if steiner_gap_penalty != null then 'steiner_gap_penalty']: steiner_gap_penalty,
         [if sgp_dead_alpha != null then 'sgp_dead_alpha']: sgp_dead_alpha,
