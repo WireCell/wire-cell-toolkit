@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include "TFile.h"
+#include "WireCellUtil/Persist.h"
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
@@ -132,6 +133,9 @@ void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) c
         m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
     }
     const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
+    // here rather than require the runner to (PR 535 review).
+    Persist::assuredir(outname);
     TFile* output_tf = TFile::Open(outname.c_str(), "RECREATE");
     if (!output_tf || output_tf->IsZombie()) {
         log->error("SbndMagnifyTrackingVisitor: cannot open {}", outname);

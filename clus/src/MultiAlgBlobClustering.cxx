@@ -607,6 +607,9 @@ void MultiAlgBlobClustering::ensure_own_sink()
         m_sink.close();
     }
     const std::string name = String::format(m_bee_zip, m_eventNo);
+    // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
+    // here rather than require the runner to (PR 535 review).
+    Persist::assuredir(name);
     m_sink.reset(name, m_initial_index);
     m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
     m_bee_zip_open_evt = m_eventNo;
