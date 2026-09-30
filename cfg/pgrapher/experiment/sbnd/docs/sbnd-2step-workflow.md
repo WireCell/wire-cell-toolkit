@@ -50,7 +50,7 @@ The two Bee zips together hold every layer the 1-step chain's single `mabc.zip` 
 | **job** | `sbnd/wcls-img-clus-matching.fcl` (MC), `-data.fcl` (data), in wcp-porting-validation | `cfg/pgrapher/experiment/sbnd/wct-pr.jsonnet` |
 | **config** | `wcls-img-clus-matching.jsonnet` = `wcls-img-clus-matching-pr-lib.jsonnet(flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql')` | TLAs `input`, `reality`, `output_dir` (`.`), `evt_subdir` (`pr_evt%1%`), `enable_tracking_root` (true), `bee_outname` (`mabc-pr.zip`), `pr_tensor_outname` (`''` = no post-PR tar) |
 | **events** | any number per `lar` job, all in one tar | every tensor set in the tar, one `wire-cell` process |
-| **run** | `lar -n <N> --nskip <k> -c wcls-img-clus-matching-data.fcl -s <reco1.root> --no-output` | `mkdir pr_evt<E>` for each event in the tar, then `wire-cell -c pgrapher/experiment/sbnd/wct-pr.jsonnet --tla-str input=qlpctree.tar.gz --tla-str reality=data` |
+| **run** | `lar -n <N> --nskip <k> -c wcls-img-clus-matching-data.fcl -s <reco1.root> --no-output` | `wire-cell -c pgrapher/experiment/sbnd/wct-pr.jsonnet --tla-str input=qlpctree.tar.gz --tla-str reality=data` |
 | **cost (Aurora, 2 cores)** | about 20–40 s per event | about 5–25 s per event |
 
 ## 2. Step 1: `wcls-img-clus-matching.jsonnet`
@@ -166,8 +166,8 @@ flowchart LR
 ```
 
 - **Multi-event:** one process runs every event of the tar.
-  - The per-event outputs go to `output_dir/pr_evt<E>/`, where `<E>` is the set ident. The runner must create those directories.
-  - `reset_shower_ids_per_event` restarts the shower-id counter at each event. Each event's ids then equal a one-event process's, which is required for identity with the 1-step chain.
+  - The per-event outputs go to `output_dir/pr_evt<E>/`, where `<E>` is the set ident. The writers create those directories themselves.
+  - `reset_shower_ids_per_event` restarts the shower-id counter at each event, so each event's ids equal a one-event process's. It is a `pr()` default, so the 1-step chain carries it too; in a one-event process it is a no-op.
 - **RSE:** taken from the step-1 metadata, which MABC ranks above the ident. `event_from_ident` is only the required partner of `evt_subdir`.
 - **Truth:** the MABC publishes the input tensors of datatype `truth_nu` / `truth_pf` on the Ensemble (`Ensemble::aux_tensor`) and forwards them to its output. `SbndPrMagnifyTrackingVisitor` writes them as `T_truth_nu` / `T_truth_pf`: one entry per row, plus `runNo`, `subRunNo` and `eventNo`, with identifier columns as `Int_t`. On data they are absent, so no truth trees are written.
 - **Bee sink:** `BeeSink:mabc_pr` is listed explicitly in the job's config, because `pr()` names its sink without listing it in its `uses`.
