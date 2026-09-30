@@ -144,6 +144,10 @@ namespace WireCell {
             void write_trun(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
             void write_cluster_summary(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
             void write_nu_census(TFile* output_tf, Clus::Facade::Grouping& grouping) const;
+            // ai-helper issue 33: T_truth_nu / T_truth_pf from the Ensemble's
+            // auxiliary truth tables (larwirecell wclsTruthInformationAttacher);
+            // nothing is written when the event carries none (data).
+            void write_truth(TFile* output_tf, const Clus::Facade::Ensemble& ensemble) const;
         };
     }  // namespace Root
 }  // namespace WireCell

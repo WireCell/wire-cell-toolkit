@@ -263,6 +263,9 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
         // actually looking at.
         top["meta"]["eventNo"] = ensemble.ident();
     }
+    // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
+    // here rather than require the runner to (PR 535 review).
+    Persist::assuredir(outname);
     Persist::dump(outname, top, m_pretty);
 
     log->debug("wrote {}: {} segment(s), {} vertex(es), {} shower(s), {} steiner cluster(s), {} proj plane(s)",
