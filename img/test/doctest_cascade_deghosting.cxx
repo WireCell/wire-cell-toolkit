@@ -42,7 +42,7 @@ using namespace WireCell;
 using namespace WireCell::Img;
 
 namespace {
-    int g_mode = 0;   // 0: keep everything; 1: logit = +10 if the node has >= 3 U channels, else -10
+    int g_mode = 0;   // 0: keep everything; 1: logit = +10 if the node has >= 3 U channels, else -10; 2: -10 for all
 
     struct CascadeFakeForward : public ITensorForward {
         virtual ~CascadeFakeForward() {}
@@ -62,7 +62,7 @@ namespace {
             const float* x = reinterpret_cast<const float*>(xb->data());
             std::vector<float> logit(N), qhat(N, 1.0f);
             for (size_t i = 0; i < N; ++i) {
-                logit[i] = (g_mode == 0 || x[i * 15 + 0] >= 3) ? 10.0f : -10.0f;
+                logit[i] = g_mode == 2 ? -10.0f : ((g_mode == 0 || x[i * 15 + 0] >= 3) ? 10.0f : -10.0f);
             }
             ITensor::vector out{std::make_shared<Aux::SimpleTensor>(ITensor::shape_t{N}, logit.data()),
                                 std::make_shared<Aux::SimpleTensor>(ITensor::shape_t{N}, qhat.data())};
@@ -344,6 +344,39 @@ TEST_CASE("coverage guard keeps a wire's last explanation")
     CHECK(ng == 2);
 }
 
+TEST_CASE("final guard: every charged wire keeps its best node; uncharged wires are not guarded")
+{
+    Cascade::Level lev;
+    lev.blobs.resize(4);
+    lev.wq = {1, 1, 0};
+    lev.wplane = {0, 0, 0};
+    // node 0 -> wire 0; node 1 -> wires 0, 1; node 2 -> wire 1; node 3 -> wire 2 (no charge)
+    lev.bw_src = {0, 1, 1, 2, 3};
+    lev.bw_dst = {0, 0, 1, 1, 2};
+    std::vector<float> logit{0.5f, 2.0f, 1.0f, -5.0f};
+    {
+        std::vector<bool> keep(4, false);
+        CHECK(Cascade::final_guard(lev, logit, keep) == 1);     // wire 0 -> node 1 (best), which also covers wire 1
+        CHECK(keep == std::vector<bool>{false, true, false, false});
+    }
+    {
+        std::vector<bool> keep{false, false, true, false};         // wire 1 covered, wire 0 not
+        CHECK(Cascade::final_guard(lev, logit, keep) == 1);
+        CHECK(keep == std::vector<bool>{false, true, true, false});
+    }
+    {
+        std::vector<bool> keep{true, false, true, false};          // already covered: nothing added
+        CHECK(Cascade::final_guard(lev, logit, keep) == 0);
+        CHECK(keep == std::vector<bool>{true, false, true, false});
+    }
+    {
+        std::vector<float> tie{1.0f, 1.0f, 1.0f, 1.0f};              // ties: the lowest node index
+        std::vector<bool> keep(4, false);
+        CHECK(Cascade::final_guard(lev, tie, keep) == 2);          // wire 0 -> node 0, then wire 1 -> node 1
+        CHECK(keep == std::vector<bool>{true, true, false, false});
+    }
+}
+
 TEST_CASE("iso fallback: dense ambiguous slices keep down to t_keep, others untouched")
 {
     // slice 0 face 0: 12 nodes over 2 charged wires (6 per wire), 11 ambiguous -> triggers
@@ -514,5 +547,66 @@ TEST_CASE("cascade with a keep-everything forward equals BlobCutting to 4 wires;
     auto o3 = run(cfg2);
     const size_t n3 = blobs_of(o3->graph()).size();
     CHECK(n3 <= ref.size());
+    g_mode = 0;
+}
+
+TEST_CASE("wcfm doc 22 knobs: keep_slices keeps every emptied slice node; final_guard explains every charged wire")
+{
+    setup_components();
+    auto cl = make_cluster(60);
+    size_t nslice_in = 0;
+    for (auto vtx : boost::make_iterator_range(boost::vertices(cl->graph()))) nslice_in += cl->graph()[vtx].code() == 's';
+    REQUIRE(nslice_in > 1);
+    auto run = [&](Configuration cfg) {
+        Img::CascadeDeghosting cd;
+        cd.configure(cfg);
+        ICluster::pointer out;
+        REQUIRE(cd(CascadeDeghosting::input_tuple_type{cl, nullptr}, out));
+        REQUIRE(out);
+        return out;
+    };
+    auto nslices = [](const ICluster::pointer& c) {
+        size_t n = 0;
+        for (auto vtx : boost::make_iterator_range(boost::vertices(c->graph()))) n += c->graph()[vtx].code() == 's';
+        return n;
+    };
+    auto cfg = cascade_config();
+    cfg["repair"] = false;
+    // the defaults round-trip and are off
+    {
+        Img::CascadeDeghosting cd;
+        auto dc = cd.default_configuration();
+        CHECK(dc["final_guard"].asBool() == false);
+        CHECK(dc["keep_slices"].asBool() == false);
+    }
+
+    // a forward that drops everything: no blob survives; keep_slices keeps every input slice node
+    g_mode = 2;
+    auto off = run(cfg);
+    CHECK(blobs_of(off->graph()).empty());
+    CHECK(nslices(off) == 0);
+    auto cks = cfg;
+    cks["keep_slices"] = true;
+    auto on = run(cks);
+    CHECK(blobs_of(on->graph()).empty());
+    CHECK(nslices(on) == nslice_in);
+
+    // final_guard on the same forward: blobs come back, one or more per charged wire; never more than the cut reference
+    auto cfg_g = cfg;
+    cfg_g["final_guard"] = true;
+    auto og = run(cfg_g);
+    const size_t ng = blobs_of(og->graph()).size();
+    CHECK(ng > 0);
+
+    // a pruning forward: keep_slices changes no blob, only adds slice nodes
+    g_mode = 1;
+    auto p_off = run(cfg);
+    auto p_on = run(cks);
+    auto b_off = blobs_of(p_off->graph());
+    auto b_on = blobs_of(p_on->graph());
+    REQUIRE(b_off.size() == b_on.size());
+    for (size_t i = 0; i < b_off.size(); ++i) CHECK(key_of(b_off[i]) == key_of(b_on[i]));
+    CHECK(nslices(p_on) == nslice_in);
+    CHECK(nslices(p_off) <= nslice_in);
     g_mode = 0;
 }

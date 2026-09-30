@@ -139,6 +139,12 @@ namespace WireCell::Img::Cascade {
     /// every (super-)wire they touch keeps another surviving node.  Returns the pruned mask.
     std::vector<bool> guard_prune(const Level& lev, const std::vector<int>& cand_order, size_t& nguarded);
 
+    /// The coverage guard of the FINAL keep set (wcfm doc 22, default off in CascadeDeghosting): every wire node with
+    /// measured charge (wq > 0) that no kept node touches gets back its highest-logit node (ties: the lowest node
+    /// index), wire nodes visited in index order, so every 2-D measurement keeps at least one 3-D explanation.
+    /// keep is extended in place; returns the number of nodes added.
+    size_t final_guard(const Level& lev, const std::vector<float>& logit, std::vector<bool>& keep);
+
     /// The dense-ambiguous-slice fallback of the final keep set (wcfm doc 17, default off in CascadeDeghosting).
     /// A (face, slice) group of level nodes is an ambiguous dense slab when it has >= nmin nodes, >= mmin nodes per
     /// charged wire node of its slice (wq > 0, all planes, both faces: wire nodes carry no face) and a fraction

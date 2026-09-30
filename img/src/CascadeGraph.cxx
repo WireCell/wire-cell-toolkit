@@ -633,6 +633,43 @@ std::vector<bool> Cascade::guard_prune(const Level& lev, const std::vector<int>&
     return pruned;
 }
 
+size_t Cascade::final_guard(const Level& lev, const std::vector<float>& logit, std::vector<bool>& keep)
+{
+    const size_t N = lev.nnodes();
+    const size_t NW = lev.wq.size();
+    const size_t E = lev.bw_src.size();
+    // per wire node, its nodes (CSR over bw_dst, nodes in edge order = node order)
+    std::vector<size_t> ptr(NW + 1, 0);
+    for (size_t e = 0; e < E; ++e) ptr[lev.bw_dst[e] + 1] += 1;
+    for (size_t w = 0; w < NW; ++w) ptr[w + 1] += ptr[w];
+    std::vector<int64_t> nodes(E);
+    {
+        std::vector<size_t> fill(ptr.begin(), ptr.end() - 1);
+        for (size_t e = 0; e < E; ++e) nodes[fill[lev.bw_dst[e]]++] = lev.bw_src[e];
+    }
+    // per node, its wire nodes (bw_src is non-decreasing by construction)
+    std::vector<size_t> nptr(N + 1, 0);
+    for (size_t e = 0; e < E; ++e) nptr[lev.bw_src[e] + 1] += 1;
+    for (size_t i = 0; i < N; ++i) nptr[i + 1] += nptr[i];
+    std::vector<int> cov(NW, 0);
+    for (size_t e = 0; e < E; ++e) {
+        if (keep[lev.bw_src[e]]) cov[lev.bw_dst[e]] += 1;
+    }
+    size_t nadded = 0;
+    for (size_t w = 0; w < NW; ++w) {
+        if (!(lev.wq[w] > 0) || cov[w] > 0 || ptr[w] == ptr[w + 1]) continue;
+        int64_t best = -1;
+        for (size_t k = ptr[w]; k < ptr[w + 1]; ++k) {
+            const int64_t i = nodes[k];
+            if (best < 0 || logit[i] > logit[best] || (logit[i] == logit[best] && i < best)) best = i;
+        }
+        keep[best] = true;
+        ++nadded;
+        for (size_t e = nptr[best]; e < nptr[best + 1]; ++e) cov[lev.bw_dst[e]] += 1;
+    }
+    return nadded;
+}
+
 void Cascade::parallel_workers(int nthreads, const std::function<void(int)>& f)
 {
     const int nw = std::max(1, nthreads);

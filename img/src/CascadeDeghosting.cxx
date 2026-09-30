@@ -56,6 +56,8 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["dump_dir"] = m_dump_dir;
     cfg["nthreads"] = m_nthreads;
     cfg["iso_fallback"] = Json::nullValue;   // off; see the header for the members
+    cfg["final_guard"] = m_final_guard;
+    cfg["keep_slices"] = m_keep_slices;
     return cfg;
 }
 
@@ -77,6 +79,11 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     m_ident_base = get(cfg, "ident_base", m_ident_base);
     m_dump_dir = get(cfg, "dump_dir", m_dump_dir);
     m_nthreads = std::max(1, get(cfg, "nthreads", m_nthreads));
+    m_final_guard = get(cfg, "final_guard", m_final_guard);
+    m_keep_slices = get(cfg, "keep_slices", m_keep_slices);
+    if (m_final_guard || m_keep_slices) {
+        log->debug("wcfm doc 22 knobs: final_guard={} keep_slices={}", m_final_guard, m_keep_slices);
+    }
     const auto& jiso = cfg["iso_fallback"];
     m_iso = jiso.isObject();
     if (m_iso) {
@@ -401,6 +408,10 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
                 log->debug("call={} cluster={} iso_fallback slices={} added={}", m_count, in->ident(), ir.nslices,
                            ir.nadded);
             }
+            if (m_final_guard) {   // wcfm doc 22: every charged wire node keeps at least one 3-D explanation
+                const size_t ng = Cascade::final_guard(lev, logit, keep);
+                log->debug("call={} cluster={} final_guard added={}", m_count, in->ident(), ng);
+            }
             for (size_t i = 0; i < N; ++i) {
                 decision[i] = keep[i] ? 1 : 0;
                 if (keep[i]) kept.push_back(cur[i]);
@@ -492,6 +503,19 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
     for (auto it = sets.begin(); it != sets.end(); ++it) {
         add_blobs(grind, (*it)->blobs());
         Img::geom_clustering(grind, it, sets.end(), m_policy);
+    }
+    if (m_keep_slices) {   // wcfm doc 22: every input slice node of a time whose blobs were all dropped is kept,
+                           // with its activity (PointTreeBuilding's ctpc reads every s-node), in input vertex order
+        size_t nkept_slices = 0;
+        for (auto vtx : boost::make_iterator_range(boost::vertices(gr))) {
+            if (gr[vtx].code() != 's') continue;
+            const auto& islice = std::get<ISlice::pointer>(gr[vtx].ptr);
+            if (!per[sc.index(islice)].empty() || grind.has(islice)) continue;
+            add_slice(grind, islice);
+            grind.vertex(islice);
+            ++nkept_slices;
+        }
+        log->debug("call={} cluster={} keep_slices: {} blob-less slice nodes kept", m_count, in->ident(), nkept_slices);
     }
     out = std::make_shared<Aux::SimpleCluster>(std::move(grind.graph()), in->ident());
     const double dt = std::chrono::duration<double>(clock::now() - t0).count();

@@ -116,6 +116,9 @@ namespace WireCell::Img {
         std::string m_dump_dir{""};
         int m_nthreads{1};
         bool m_iso{false};
+        // wcfm doc 22 (both default off: absent keys => the doc 14-17 output, byte-identical)
+        bool m_final_guard{false};   // final level: every charged wire node keeps its best node (Cascade::final_guard)
+        bool m_keep_slices{false};   // output: slices whose blobs were all dropped keep their node (activity -> ctpc)
         double m_iso_nmin{500}, m_iso_mmin{4}, m_iso_amin{0.8}, m_iso_t{-1.5}, m_iso_amb_lo{-3.0}, m_iso_amb_hi{0.5};
         size_t m_count{0};
     };
