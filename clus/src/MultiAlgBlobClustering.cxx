@@ -3975,6 +3975,10 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // to know: its own runNo/eventNo come from configure() and are constant for
     // the whole process.
     ensemble.set_ident(ident);
+    // The Bee event index this node writes the event under (flush() of the
+    // previous event has already advanced it), for visitors that write into
+    // the same sink -- one owner of the index.
+    ensemble.set_bee_index((int) m_bee_event_index);
     // Publish the RSE this node resolved (config, auto-increment, ident or
     // rse_map) so the per-event writers downstream stamp THIS event rather than
     // their own configure-time constant.  Only when a multi-event mode is on:

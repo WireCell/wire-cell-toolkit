@@ -13,10 +13,13 @@
 ///     absent), charge = max(blob charge / npoints, 1);
 ///   * cluster_id = 1 (tagged: flag_STM / flag_TGM / flag_FC set, lm_flag == 2)
 ///     or 0, real_cluster_id = 0 (Bee colours by the verdict).
-/// Written to the shared "bee_sink" (the PR MABC's) at this visitor's own event
-/// index, which advances once per visit -- in step with the MABC's own, since
-/// both see every event once (initial_index = the sink's).  The MABC holds the
-/// sink open for the whole job, so this visitor neither acquires nor releases it.
+/// Written to the shared "bee_sink" (the PR MABC's) under the Bee event index the
+/// MABC publishes on the Ensemble (Ensemble::bee_index()) -- the MABC owns the
+/// index, so the two writers cannot drift; an Ensemble without one is an error.
+/// The MABC holds the sink open for the whole job, so this visitor neither
+/// acquires nor releases it.
+/// A blob whose "3d" PC lacks x/y/z (or has them of unequal length) or whose
+/// "scalar" PC lacks "charge" is skipped, with one warning per event.
 /// Must run after the taggers (TaggerCheckSTM/TGM/FC) and QLMatching's lm_flag.
 
 #include "WireCellClus/IEnsembleVisitor.h"
@@ -52,7 +55,6 @@ public:
         cfg["beam_window"][0] = m_bw_low;
         cfg["beam_window"][1] = m_bw_high;
         cfg["coords"] = Json::arrayValue;
-        cfg["initial_index"] = (int)m_initial_index;
         return cfg;
     }
 
@@ -70,11 +72,14 @@ public:
         if (cfg["coords"].isArray() && cfg["coords"].size() == 3) {
             for (const auto& c : cfg["coords"]) m_coords.push_back(c.asString());
         }
-        m_initial_index = get<int>(cfg, "initial_index", (int)m_initial_index);
-        m_index = m_initial_index;
     }
 
     virtual void visit(Ensemble& ensemble) const {
+        const int index = ensemble.bee_index();
+        if (index < 0) {
+            raise<ValueError>("TaggerBeeVisitor: the Ensemble carries no Bee event index "
+                              "(run it inside a MultiAlgBlobClustering pipeline)");
+        }
         const int run = ensemble.rse_valid() ? ensemble.runNo() : ensemble.get_scalar<int>("runNo", 0);
         const int sub = ensemble.rse_valid() ? ensemble.subRunNo() : ensemble.get_scalar<int>("subRunNo", 0);
         const int evt = ensemble.rse_valid() ? ensemble.eventNo() : ensemble.get_scalar<int>("eventNo", 0);
@@ -84,7 +89,7 @@ public:
         Bee::Points lm (m_detector, "tagger_lm");  lm.rse(run, sub, evt);
 
         auto groupings = ensemble.with_name(m_grouping);
-        size_t ncand = 0;
+        size_t ncand = 0, nskip = 0;
         if (!groupings.empty() && groupings.at(0)) {
             auto* gnode = groupings.at(0)->node();
             for (auto* cnode : gnode->children()) {
@@ -114,9 +119,16 @@ public:
                     auto dit = lpcs.find("3d");
                     if (sit == lpcs.end() || dit == lpcs.end() || dit->second.size_major() == 0) continue;
                     auto& d3 = dit->second;
-                    const auto x = d3.get("x")->elements<double>();
-                    const auto y = d3.get("y")->elements<double>();
-                    const auto z = d3.get("z")->elements<double>();
+                    auto ax0 = d3.get("x"), ay0 = d3.get("y"), az0 = d3.get("z");
+                    auto aq = sit->second.get("charge");
+                    if (!ax0 || !ay0 || !az0 || !aq || aq->size_major() == 0
+                        || ay0->size_major() != ax0->size_major() || az0->size_major() != ax0->size_major()) {
+                        ++nskip;
+                        continue;
+                    }
+                    const auto x = ax0->elements<double>();
+                    const auto y = ay0->elements<double>();
+                    const auto z = az0->elements<double>();
                     std::vector<double> txv, tyv, tzv;
                     if (m_coords.size() == 3) {
                         auto ax = d3.get(m_coords[0]), ay = d3.get(m_coords[1]), az = d3.get(m_coords[2]);
@@ -128,7 +140,7 @@ public:
                         }
                     }
                     const bool have_tc = !txv.empty();
-                    const double q = sit->second.get("charge")->elements<double>()[0];
+                    const double q = aq->elements<double>()[0];
                     const double qpp = x.size() ? std::max(q / x.size(), 1.0) : 1.0;
                     for (size_t i = 0; i < x.size(); ++i) {
                         const Point pt = have_tc ? Point(txv[i], tyv[i], tzv[i]) : Point(x[i], y[i], z[i]);
@@ -140,9 +152,11 @@ public:
                 }
             }
         }
-        for (const auto* obj : {&stm, &tgm, &fc, &lm}) m_sink->write(*obj, m_index, run, sub, evt);
-        log->debug("event ({},{},{}) bee index {}: {} beam-window candidate cluster(s)", run, sub, evt, m_index, ncand);
-        ++m_index;
+        if (nskip) {
+            log->warn("event ({},{},{}): skipped {} blob(s) lacking 3d x/y/z or scalar charge", run, sub, evt, nskip);
+        }
+        for (const auto* obj : {&stm, &tgm, &fc, &lm}) m_sink->write(*obj, index, run, sub, evt);
+        log->debug("event ({},{},{}) bee index {}: {} beam-window candidate cluster(s)", run, sub, evt, index, ncand);
     }
 
 private:
@@ -150,7 +164,5 @@ private:
     std::string m_detector{"sbnd"};
     double m_bw_low{0}, m_bw_high{0};
     std::vector<std::string> m_coords;
-    size_t m_initial_index{0};
     IBeeSink::pointer m_sink;
-    mutable size_t m_index{0};
 };

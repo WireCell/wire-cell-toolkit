@@ -84,6 +84,14 @@ namespace WireCell::Clus::Facade {
         }
         const std::map<std::string, ITensor::pointer>& aux_tensors() const { return m_aux; }
 
+        /// The Bee event index under which MultiAlgBlobClustering writes THIS
+        /// event into its (possibly shared) Bee sink, published before the
+        /// pipeline visitors run.  A visitor that writes Bee objects into the
+        /// same sink (TaggerBeeVisitor) must use this index rather than keep a
+        /// counter of its own, so the two writers cannot drift.  -1 = unset.
+        void set_bee_index(int index) { m_bee_index = index; }
+        int bee_index() const { return m_bee_index; }
+
         /// Return false if no child Groupings have the name, else true.
         bool has(const std::string& name) const;
 
@@ -115,6 +123,7 @@ namespace WireCell::Clus::Facade {
         int m_subRunNo{0};
         int m_eventNo{0};
         std::map<std::string, ITensor::pointer> m_aux;
+        int m_bee_index{-1};
     };
 }
 #endif
