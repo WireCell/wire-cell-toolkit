@@ -19,9 +19,13 @@
 // Nothing under sbnd_xin is imported or modified (we import the in-tree canonical
 // pgrapher/experiment/sbnd/{img,clus,qlmatching,cathode_fiducial}.jsonnet directly).
 
-// This file is the IMPLEMENTATION, a jsonnet function; the two top-level jobs are
-//   wcls-img-clus-matching-xin.jsonnet       = (import this)()                  -- reco1 recob::OpFlash light
-//   wcls-img-clus-matching-xin-hits.jsonnet  = (import this)(flash_source='hits', ...)  -- flashes rebuilt from OpHits
+// This file is the IMPLEMENTATION, a jsonnet function (named wcls-img-clus-matching-xin-lib.jsonnet
+// until 2026-09-30).  The top-level jobs are
+//   wcls-img-clus-matching.jsonnet                   = (import this)(flash_source='hits', ..., stage='ql')
+//                                                      -- PRODUCTION: step 1 of the 2-step chain (+ wct-pr.jsonnet)
+//   obsolete/wcls-img-clus-matching-pr-hits.jsonnet  = (import this)(flash_source='hits', ...)  -- 1-step, OpHit flashes
+//   obsolete/wcls-img-clus-matching-pr-flash.jsonnet = (import this)()   -- 1-step, reco1 recob::OpFlash light
+//   wcls-img-clus-matching-xin.jsonnet               -- the upstream name, a shim to the -pr-flash job
 // (doc sbnd_xin/123 sec 16).  With the defaults the compiled config is byte-identical
 // to the pre-split top-level job.
 //   flash_source          'reco1' (wclsOpFlashSource:tpc<N>, the art recob::OpFlash) or

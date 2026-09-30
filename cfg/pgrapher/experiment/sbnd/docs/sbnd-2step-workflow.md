@@ -1,6 +1,6 @@
 # The SBND 2-step workflow: `wcls-img-clus-matching.jsonnet` + `wct-pr.jsonnet`
 
-The LArSoft 1-step chain (`wcls-img-clus-matching-xin-lib.jsonnet`, see [`wcls-img-clus-matching-xin-chain.md`](wcls-img-clus-matching-xin-chain.md)) is split into two jobs (ai-helper issue 33):
+The LArSoft 1-step chain (`wcls-img-clus-matching-pr-lib.jsonnet`, see [`wcls-img-clus-matching-1step-chain.md`](wcls-img-clus-matching-1step-chain.md)) is split into two jobs (ai-helper issue 33):
 
 1. **Step 1, LArSoft (`lar`):** imaging, clustering, charge-light (Q/L) matching and all-APA clustering. It writes the matched bundles, with the light, CTPC, metadata and MC truth, to an ITensorSet tar on disk.
 2. **Step 2, standalone (`wire-cell`, no art):** pattern recognition on that tar. This covers taggers, track/shower separation, trajectory fitting, vertexing, PID, particle flow, energy reconstruction and the numu/nue scores. It can be re-run as often as needed without redoing step 1.
@@ -48,14 +48,14 @@ The two Bee zips together hold every layer the 1-step chain's single `mabc.zip` 
 | | step 1 | step 2 |
 |---|---|---|
 | **job** | `sbnd/wcls-img-clus-matching.fcl` (MC), `-data.fcl` (data), in wcp-porting-validation | `cfg/pgrapher/experiment/sbnd/wct-pr.jsonnet` |
-| **config** | `wcls-img-clus-matching.jsonnet` = `wcls-img-clus-matching-xin-lib.jsonnet(flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql')` | TLAs `input`, `reality`, `output_dir` (`.`), `evt_subdir` (`pr_evt%1%`), `enable_tracking_root` (true), `bee_outname` (`mabc-pr.zip`), `pr_tensor_outname` (`''` = no post-PR tar) |
+| **config** | `wcls-img-clus-matching.jsonnet` = `wcls-img-clus-matching-pr-lib.jsonnet(flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql')` | TLAs `input`, `reality`, `output_dir` (`.`), `evt_subdir` (`pr_evt%1%`), `enable_tracking_root` (true), `bee_outname` (`mabc-pr.zip`), `pr_tensor_outname` (`''` = no post-PR tar) |
 | **events** | any number per `lar` job, all in one tar | every tensor set in the tar, one `wire-cell` process |
 | **run** | `lar -n <N> --nskip <k> -c wcls-img-clus-matching-data.fcl -s <reco1.root> --no-output` | `mkdir pr_evt<E>` for each event in the tar, then `wire-cell -c pgrapher/experiment/sbnd/wct-pr.jsonnet --tla-str input=qlpctree.tar.gz --tla-str reality=data` |
 | **cost (Aurora, 2 cores)** | about 20–40 s per event | about 5–25 s per event |
 
 ## 2. Step 1: `wcls-img-clus-matching.jsonnet`
 
-This is the 1-step graph up to and including the truth attacher: 106 nodes and 118 edges. The per-APA imaging is expanded in `wcls-img-clus-matching-xin-chain.md` section 2. The PR tail (`clus_pr`, `labeler_tagger`, `TensorFileSink:clus_all_apa`, 34 components) is replaced by one `TensorFileSink`.
+This is the 1-step graph up to and including the truth attacher: 106 nodes and 118 edges. The per-APA imaging is expanded in `wcls-img-clus-matching-1step-chain.md` section 2. The PR tail (`clus_pr`, `labeler_tagger`, `TensorFileSink:clus_all_apa`, 34 components) is replaced by one `TensorFileSink`.
 
 ```mermaid
 flowchart TB
@@ -115,7 +115,7 @@ flowchart TB
 ```
 
 - **Colours:** blue marks larwirecell components. These are art-event visitors, so each must be listed in the fcl `inputers`. Orange marks MABC nodes.
-- **Visitor lists:** the three MABCs' EnsembleVisitor lists are the 1-step chain's, in `wcls-img-clus-matching-xin-chain.md` section 3.
+- **Visitor lists:** the three MABCs' EnsembleVisitor lists are the 1-step chain's, in `wcls-img-clus-matching-1step-chain.md` section 3.
 - **`wclsTruthInformationAttacher`** replaces `wclsTensorSetMetadataAttacher`. With `truth: false` it only stamps `runNo` / `subRunNo` / `eventNo` into the set metadata, where each downstream MABC reads them (`rse_from_metadata`).
 - **The `truth` instance** also appends the two MC truth tables described in section 3. On data it stamps the RSE only.
 
@@ -228,7 +228,7 @@ The labeler and the attacher read the same art products with the same particle s
 
 | file | repo | role |
 |---|---|---|
-| `cfg/pgrapher/experiment/sbnd/wcls-img-clus-matching-xin-lib.jsonnet` | toolkit | the chain as a function; `stage='1step'` (full 1-step) or `'ql'` (step 1) |
+| `cfg/pgrapher/experiment/sbnd/wcls-img-clus-matching-pr-lib.jsonnet` | toolkit | the chain as a function; `stage='1step'` (full 1-step) or `'ql'` (step 1) |
 | `cfg/pgrapher/experiment/sbnd/wcls-img-clus-matching.jsonnet` | toolkit | step 1 top-level job |
 | `cfg/pgrapher/experiment/sbnd/wct-pr.jsonnet` | toolkit | step 2 top-level job |
 | `cfg/pgrapher/experiment/sbnd/sbnd-pr-stage.jsonnet` | toolkit | the PR stage, shared by the 1-step and step 2 |

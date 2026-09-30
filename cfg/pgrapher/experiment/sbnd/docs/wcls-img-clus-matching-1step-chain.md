@@ -1,15 +1,15 @@
-# The SBND LArSoft 1-step chain: `wcls-img-clus-matching-xin-lib.jsonnet`
+# The SBND LArSoft 1-step chain: `wcls-img-clus-matching-pr-lib.jsonnet`
 
-This page shows every component that `wcls-img-clus-matching-xin-lib.jsonnet` puts in the Pgrapher graph, and the EnsembleVisitor pipeline of each `MultiAlgBlobClustering` (MABC) node.
+This page shows every component that `wcls-img-clus-matching-pr-lib.jsonnet` puts in the Pgrapher graph, and the EnsembleVisitor pipeline of each `MultiAlgBlobClustering` (MABC) node.
 
-It was generated from the **compiled** configuration, not from reading the jsonnet: `wcsonnet` output of `wcls-img-clus-matching-xin-hits.jsonnet` at toolkit `c7e7775e`, with the sim extVar set of `wcls-img-clus-matching-xin-hits.fcl`. That output has 107 graph nodes, 119 edges and 228 configured components in total.
+It was generated from the **compiled** configuration, not from reading the jsonnet: `wcsonnet` output of `wcls-img-clus-matching-pr-hits.jsonnet` at toolkit `c7e7775e`, with the sim extVar set of `wcls-img-clus-matching-pr-hits.fcl`. That output has 107 graph nodes, 119 edges and 228 configured components in total.
 
 The variants differ only in the light nodes:
 
 | job | light path per TPC | QLMatching |
 |---|---|---|
-| `wcls-img-clus-matching-xin-hits.jsonnet` (`flash_source='hits'`) | `wclsOpHitSource:tpc<N>` → `SBNDOpFlashFinder:tpc<N>` | `xtpc_sc1_light_gate=true`, `xtpc_sc1_overpred_max=2.9` |
-| `wcls-img-clus-matching-xin.jsonnet` (`flash_source='reco1'`, default) | `wclsOpFlashSource:tpc<N>` (art `recob::OpFlash`) | keys omitted (C++ default, gate off) |
+| `wcls-img-clus-matching-pr-hits.jsonnet` (`flash_source='hits'`) | `wclsOpHitSource:tpc<N>` → `SBNDOpFlashFinder:tpc<N>` | `xtpc_sc1_light_gate=true`, `xtpc_sc1_overpred_max=2.9` |
+| `wcls-img-clus-matching-pr-flash.jsonnet` (`flash_source='reco1'`, default) | `wclsOpFlashSource:tpc<N>` (art `recob::OpFlash`) | keys omitted (C++ default, gate off) |
 
 - **sim vs data:** `reality=sim` and `reality=data` compile to the same graph and the same MABC visitor lists.
 - **`enable_tracking_root=false`:** drops the last two PR visitors (`SbndPrMagnifyTrackingVisitor`, `UbooneTaggerOutputVisitor`).
@@ -454,7 +454,7 @@ These are referenced by the graph nodes (`uses`) and are configured but not run 
 
 ## 5. Regenerating
 
-Compile the job inside the SL7 container with the toolkit `cfg` on `WIRECELL_PATH`. The extVar set is the one in `wcls-img-clus-matching-xin-hits.fcl`. An example is `gate-1step-cfg.sh` in wire-cell-toolkit-ai-helper issue 29 scripts, which writes `hits-sim.json`. Then read the Pgrapher edges and each MABC's `pipeline`:
+Compile the job inside the SL7 container with the toolkit `cfg` on `WIRECELL_PATH`. The extVar set is the one in `wcls-img-clus-matching-pr-hits.fcl`. An example is `gate-1step-cfg.sh` in wire-cell-toolkit-ai-helper issue 29 scripts, which writes `hits-sim.json`. Then read the Pgrapher edges and each MABC's `pipeline`:
 
 ```python
 import json

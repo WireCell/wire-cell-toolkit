@@ -8,7 +8,7 @@
 // Step 2 re-runs pattern recognition on it standalone:
 //   wire-cell -c pgrapher/experiment/sbnd/wct-pr.jsonnet --tla-str input=qlpctree.tar.gz ...
 // Light: the SBND standalone production light (hit-rebuilt flashes + the scenario-1
-// light gate), as wcls-img-clus-matching-xin-hits.jsonnet.  Everything up to and
+// light gate), as obsolete/wcls-img-clus-matching-pr-hits.jsonnet.  Everything up to and
 // including the truth attacher is the 1-step chain's own graph (the shared lib).
-(import 'pgrapher/experiment/sbnd/wcls-img-clus-matching-xin-lib.jsonnet')(
+(import 'pgrapher/experiment/sbnd/wcls-img-clus-matching-pr-lib.jsonnet')(
     flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql')

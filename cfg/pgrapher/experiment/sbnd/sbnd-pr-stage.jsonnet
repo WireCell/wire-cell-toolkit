@@ -1,5 +1,5 @@
 // The SBND pattern-recognition (PR) stage, as ONE definition shared by
-//   wcls-img-clus-matching-xin-lib.jsonnet  (the LArSoft 1-step chain: PR runs in-process
+//   wcls-img-clus-matching-pr-lib.jsonnet  (the LArSoft 1-step chain: PR runs in-process
 //                                            after clus_all_apa + labeler_truth)
 //   wct-pr.jsonnet                          (step 2 of the 2-step split: PR re-run
 //                                            standalone from the step-1 ITensorSet tar)
