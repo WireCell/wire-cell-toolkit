@@ -35,6 +35,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <unistd.h>
 
 using namespace WireCell;
 using namespace WireCell::Aux;
@@ -134,9 +135,11 @@ TEST_CASE("L1SPFilterPD dump-mode emits documented NPZ schema") {
     }
     load_plugins();
 
-    // /home/xqian/tmp is the user-blessed scratch area (memory:
-    // feedback_tmp_directory).
-    const std::string tmp = "/home/xqian/tmp/wct_l1sp_dump_test";
+    // The system temp dir (honours TMPDIR), one subdir per process so
+    // concurrent runs do not share it.  A user-specific absolute path
+    // does not exist on other machines, where the dump then fails.
+    const std::string tmp = (std::filesystem::temp_directory_path()
+                             / ("wct_l1sp_dump_test_" + std::to_string(::getpid()))).string();
     std::error_code ec;
     std::filesystem::remove_all(tmp, ec);
 
