@@ -298,6 +298,14 @@ namespace WireCell::Clus {
             // segment_cal_kine_dQdx asks for (PRSegmentFunctions.cxx NOTE).
             double electron_lifetime = 0;
 
+            // wcp-porting-img wcfm/docs/25 -- also correct clusters WITHOUT a
+            // matched flash (light-less simulation, e.g. DUNE FD-HD where every
+            // cluster has cluster_t0 = 0, the true t0, so its T0-corrected x IS
+            // its drift position).  0 = OFF = the flash requirement above holds
+            // (legacy, byte-identical).  Only read when electron_lifetime > 0.
+            // Reported as a double for the set_parameter(name, value) plumbing.
+            double electron_lifetime_allow_unmatched = 0;
+
             // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
             // looks up wpid_offsets/wpid_slopes for the (apa, face) that
             // contained_by() returns and dereferenced a MISSING entry (a volume
@@ -934,6 +942,9 @@ namespace WireCell::Clus {
         // the knob is off, the cluster has no matched flash, or (apa, face) is
         // not a live face) and counts the point as corrected or skipped.
         double electron_lifetime_at(const Facade::Cluster* cluster, const WireCell::Point& p, int apa, int face);
+        // wcfm/docs/25: the same correction for a cluster without a matched
+        // flash (Parameters::electron_lifetime_allow_unmatched on).
+        double electron_lifetime_unmatched_at(const WireCell::Point& p, int apa, int face);
         size_t m_lifetime_ncorr{0};
         size_t m_lifetime_nskip{0};
         // Log and zero the census (knob on only): at each event reset and at

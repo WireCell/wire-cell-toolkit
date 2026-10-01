@@ -254,6 +254,11 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
             SPDLOG_LOGGER_INFO(s_log, "electron_lifetime: tau = {:.4g} ms; fitted dQ of flash-matched clusters is corrected by exp(t_drift/tau)",
                                value / units::ms);
         }
+    } else if (name == "electron_lifetime_allow_unmatched") {   // wcfm/docs/25
+        m_params.electron_lifetime_allow_unmatched = value;
+        if (value != 0) {
+            SPDLOG_LOGGER_INFO(s_log, "electron_lifetime_allow_unmatched: clusters without a matched flash are corrected too (their cluster_t0 is taken as the true t0)");
+        }
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -443,6 +448,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.keep_dqdx_response;
     } else if (name == "electron_lifetime") {           // icarus/docs/04
         return m_params.electron_lifetime;
+    } else if (name == "electron_lifetime_allow_unmatched") {   // wcfm/docs/25
+        return m_params.electron_lifetime_allow_unmatched;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -8820,6 +8827,12 @@ double Clus::TrackFitting::electron_lifetime_factor(double drift_distance, doubl
 double Clus::TrackFitting::electron_lifetime_at(const Facade::Cluster* cluster, const WireCell::Point& p, int apa, int face)
 {
     if (!(m_params.electron_lifetime > 0)) return 1.0;
+    // wcfm/docs/25: a cluster without a matched flash is corrected too when
+    // electron_lifetime_allow_unmatched is on (light-less simulation: its
+    // cluster_t0 is the true t0).  Off => this branch is never taken.
+    if (m_params.electron_lifetime_allow_unmatched != 0 && cluster && !cluster->get_matched_flash()) {
+        return electron_lifetime_unmatched_at(p, apa, face);
+    }
     if (!cluster || apa < 0 || face < 0 || !m_grouping || !cluster->get_matched_flash()) {
         ++m_lifetime_nskip;
         return 1.0;
@@ -8831,6 +8844,25 @@ double Clus::TrackFitting::electron_lifetime_at(const Facade::Cluster* cluster, 
     }
     // Same anode position and drift speed as the fitter's diffusion model
     // (dQ_dx_multi_fit / dQ_dx_fit: drift_distance = |x - xorig|).
+    const double xorig = anode->faces()[face]->planes()[2]->wires().front()->center().x();
+    const double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
+    ++m_lifetime_ncorr;
+    return electron_lifetime_factor(p.x() - xorig, drift_speed, m_params.electron_lifetime);
+}
+
+double Clus::TrackFitting::electron_lifetime_unmatched_at(const WireCell::Point& p, int apa, int face)
+{
+    // wcfm/docs/25: electron_lifetime_at's correction for a cluster without a
+    // matched flash; the same anode position, drift speed and census.
+    if (apa < 0 || face < 0 || !m_grouping) {
+        ++m_lifetime_nskip;
+        return 1.0;
+    }
+    auto anode = m_grouping->get_anode(apa);
+    if (!anode || face >= (int) anode->faces().size() || !anode->faces()[face]) {
+        ++m_lifetime_nskip;
+        return 1.0;
+    }
     const double xorig = anode->faces()[face]->planes()[2]->wires().front()->center().x();
     const double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
     ++m_lifetime_ncorr;

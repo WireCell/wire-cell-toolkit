@@ -76,6 +76,24 @@ static KineT0Shift kine_t0_shift(const SegRange& segs, const IPCTransformSet::po
     return out;
 }
 
+// wcp-porting-img wcfm/docs/25 (KineChargeOptions::all_wires): choose, among every
+// wire of a (wrapped) channel on plane_id, the one whose 2-D point is nearest a
+// cloud point.  dist(face, p2d) returns that distance (1e9 = no point).  face /
+// local_wire hold the legacy first-wire choice on entry and are replaced only by
+// a strictly nearer wire, so ties keep the legacy wire.
+template<typename DistFn>
+static void kine_pick_nearest_wire(const std::vector<std::tuple<int, int, int>>& wires, int plane_id,
+                                   int time_slice, int apa, Facade::Grouping* grouping, DistFn&& dist,
+                                   int& face, int& local_wire)
+{
+    double best = dist(face, grouping->convert_time_wire_2Dpoint(time_slice, local_wire, apa, face, plane_id));
+    for (const auto& [f, plane, wire] : wires) {
+        if (plane != plane_id || (f == face && wire == local_wire)) continue;
+        const double d = dist(f, grouping->convert_time_wire_2Dpoint(time_slice, wire, apa, f, plane_id));
+        if (d < best) { best = d; face = f; local_wire = wire; }
+    }
+}
+
 // Core charge-to-energy conversion given pre-collected 2D charge maps and point clouds.
 // CorrFn: callable with signature double(WireCell::Point&).
 // Both cal_kine_charge overloads and calculate_shower_kinematics use this.
@@ -114,6 +132,25 @@ static double kine_charge_from_maps(
                 if (plane == plane_id) { face = f; local_wire = wire; break; }
             }
             if (face < 0 || local_wire < 0) continue;
+            // wcfm/docs/25: a wrapped channel's first wire may be on the other face.
+            if (kopts.all_wires) {
+                auto dist = [&](int f, const std::pair<double, double>& q) -> double {
+                    double drift = q.first;
+                    if (t0_shift) {
+                        auto sit = t0_shift->find({apa, f});
+                        if (sit == t0_shift->end()) return 1e9;
+                        drift -= sit->second;
+                    }
+                    double d = 1e9;
+                    for (const auto& pc : {pcloud1, pcloud2}) {
+                        if (!pc) continue;
+                        auto res = pc->get_closest_2d_point_info_direct(drift, q.second, plane_id, f, apa);
+                        if (std::get<1>(res) && std::get<0>(res) < d) d = std::get<0>(res);
+                    }
+                    return d;
+                };
+                kine_pick_nearest_wire(wire_it->second, plane_id, time_slice, apa, grouping, dist, face, local_wire);
+            }
 
             // Use local_wire (plane-local index from map_apa_ch_plane_wires), NOT the global
             // channel number. V channels start at ~2400 and W at ~4800, so passing channel
@@ -467,7 +504,8 @@ static void kine_charge_owned_scan(
     const WireMap& map_apa_ch_plane_wires,
     Facade::Grouping* grouping,
     CorrFn&& corr_fn,
-    double dis_cut)
+    double dis_cut,
+    bool all_wires = false)   // wcfm/docs/25 (KineChargeOptions::all_wires); false = legacy
 {
     const ChargeMap* maps[3] = {&charge_2d_u, &charge_2d_v, &charge_2d_w};
 
@@ -485,6 +523,28 @@ static void kine_charge_owned_scan(
                 if (plane == plane_id) { face = f; local_wire = wire; break; }
             }
             if (face < 0 || local_wire < 0) continue;
+            // wcfm/docs/25: a wrapped channel's first wire may be on the other face;
+            // the nearest wire over every context's clouds.
+            if (all_wires) {
+                auto dist = [&](int f, const std::pair<double, double>& q) -> double {
+                    double d = 1e9;
+                    for (const auto& c : ctxs) {
+                        double drift = q.first;
+                        if (c.use_shift) {
+                            auto sit = c.shift.find({apa, f});
+                            if (sit == c.shift.end()) continue;
+                            drift -= sit->second;
+                        }
+                        for (const auto& pc : {c.pcloud1, c.pcloud2}) {
+                            if (!pc) continue;
+                            auto res = pc->get_closest_2d_point_info_direct(drift, q.second, plane_id, f, apa);
+                            if (std::get<1>(res) && std::get<0>(res) < d) d = std::get<0>(res);
+                        }
+                    }
+                    return d;
+                };
+                kine_pick_nearest_wire(wire_it->second, plane_id, time_slice, apa, grouping, dist, face, local_wire);
+            }
 
             auto p2d = grouping->convert_time_wire_2Dpoint(time_slice, local_wire, apa, face, plane_id);
 
@@ -703,7 +763,8 @@ void PatternAlgorithms::recompute_shower_kine_charge_final(IndexedShowerSet& sho
 
     if (m_kine_charge.dedup) {
         kine_charge_owned_scan(ctxs, m_charge_2d_u, m_charge_2d_v, m_charge_2d_w,
-                               m_map_apa_ch_plane_wires, grouping, corr_fn, dis_cut);
+                               m_map_apa_ch_plane_wires, grouping, corr_fn, dis_cut,
+                               m_kine_charge.all_wires);   // wcfm/docs/25
     }
 
     for (size_t t = 0; t < track_segs.size(); ++t) {

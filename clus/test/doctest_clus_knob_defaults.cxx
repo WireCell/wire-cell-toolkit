@@ -223,6 +223,7 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
 
     // doc pr/99 round 3 -- kine-charge ownership + A5 hadronic tag.
     CHECK_KNOB_BOOL(cfg, "kine_charge_dedup", false);                         // pr/99 r3 C1 (168596); false = byte-identical
+    CHECK_KNOB_BOOL(cfg, "kine_charge_all_wires", false);                     // wcfm/docs/25 (FD wrapped channels); false = byte-identical
     CHECK_KNOB_BOOL(cfg, "kine_charge_rebuild", false);                       // pr/99 r3 C1b; false = byte-identical
     // doc pr/101 -- Enu accounting round (K1-K5); all defaults = legacy.
     CHECK_KNOB_BOOL(cfg, "kine_charge_track_ctx", false);                     // pr/101 K1 (37112); false = byte-identical

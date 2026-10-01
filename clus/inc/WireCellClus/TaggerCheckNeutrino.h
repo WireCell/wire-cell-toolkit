@@ -1014,6 +1014,7 @@ public:
         // KineChargeOptions::dedup/rebuild and m_shower_hadronic_* members
         // in NeutrinoPatternBase.h.
         bool   m_kine_charge_dedup{false};                          // doc pr/99 r3 C1 (168596 Enu double count)
+        bool   m_kine_charge_all_wires{false};                      // wcfm/docs/25: wrapped channels over both faces (FD-HD)
         bool   m_kine_charge_rebuild{false};                        // doc pr/99 r3 C1b (prototype cloud-rebuild parity)
         // doc sbnd_xin/docs/pr/101: Enu accounting round.  Design blocks at
         // KineChargeOptions::track_ctx/mass_rules/hadronic_dqdx/long_muon_*/

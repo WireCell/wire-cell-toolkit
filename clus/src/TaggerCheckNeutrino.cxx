@@ -671,6 +671,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_shower_ghost_min_len                      = get(config, "shower_ghost_min_len",                      m_shower_ghost_min_len);
     // doc pr/99 round 3 (C1/C1b/A5)
     m_kine_charge_dedup                         = get(config, "kine_charge_dedup",                         m_kine_charge_dedup);
+    m_kine_charge_all_wires                     = get(config, "kine_charge_all_wires",                     m_kine_charge_all_wires);   // wcfm/docs/25
     m_kine_charge_rebuild                       = get(config, "kine_charge_rebuild",                       m_kine_charge_rebuild);
     // doc pr/101 Enu accounting round (K1-K5)
     m_kine_charge_track_ctx                     = get(config, "kine_charge_track_ctx",                     m_kine_charge_track_ctx);
@@ -1204,6 +1205,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["shower_ghost_dqdx_ratio"]                   = m_shower_ghost_dqdx_ratio;                   // starved gate vs mip median; inert while drop off (doc pr/99 r2)
     cfg["shower_ghost_min_len"]                      = m_shower_ghost_min_len;                      // cm; inert while drop off (doc pr/99 r2)
     cfg["kine_charge_dedup"]                         = m_kine_charge_dedup;                         // doc pr/99 r3 C1; false = legacy ownership-free sum, byte-identical
+    cfg["kine_charge_all_wires"]                     = m_kine_charge_all_wires;                     // wcfm/docs/25; false = legacy first-wire lookup, byte-identical
     cfg["kine_charge_rebuild"]                       = m_kine_charge_rebuild;                       // doc pr/99 r3 C1b; false = legacy add-only clouds, byte-identical
     cfg["kine_charge_track_ctx"]                     = m_kine_charge_track_ctx;                     // doc pr/101 K1; false = showers-only ownership, byte-identical
     cfg["kine_mass_rules"]                           = m_kine_mass_rules;                           // doc pr/101 K2; false = legacy mass branches, byte-identical
@@ -3343,6 +3345,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_kine_charge.shower_pdg_live     = m_kine_shower_pdg_live;
         pattern_algos.m_kine_charge.w_value             = m_kine_w_value;
         pattern_algos.m_kine_charge.dedup               = m_kine_charge_dedup;                          // doc pr/99 r3 C1
+        pattern_algos.m_kine_charge.all_wires           = m_kine_charge_all_wires;                      // wcfm/docs/25
         pattern_algos.m_kine_charge.rebuild             = m_kine_charge_rebuild;                        // doc pr/99 r3 C1b
         pattern_algos.m_kine_charge.track_ctx           = m_kine_charge_track_ctx;                      // doc pr/101 K1
         pattern_algos.m_kine_charge.mass_rules          = m_kine_mass_rules;                            // doc pr/101 K2

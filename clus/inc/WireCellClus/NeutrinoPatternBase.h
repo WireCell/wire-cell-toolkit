@@ -101,6 +101,16 @@ namespace WireCell::Clus::PR {
         /// this is a deliberate divergence in both trees, not a port fix.
         /// Config key kine_charge_dedup; absent => legacy, byte-identical.
         bool dedup{false};
+        /// wcp-porting-img wcfm/docs/25 (kine_charge_all_wires).  A 2-D charge
+        /// cell is keyed by (apa, channel); its geometric point needs ONE wire.
+        /// false = legacy: the channel's FIRST wire on the plane.  On an APA
+        /// whose induction channels wrap over BOTH faces (DUNE FD-HD, both faces
+        /// live) that wire can sit on the other face, so the cell never meets
+        /// the object's cloud and the U/V sums are ~0 (FD event 1311: every
+        /// shower kine_charge 0-3 MeV).  true = try every wire of the channel on
+        /// the plane and use the one whose 2-D point is nearest a cloud point
+        /// (ties -> the legacy first wire).  Absent => legacy, byte-identical.
+        bool all_wires{false};
         /// doc pr/99 round 3 (C1b).  Prototype parity: WCP rebuilds a
         /// shower's point clouds from CURRENT members before every
         /// cal_kine_charge read (NeutrinoID_energy_reco.h:99); the toolkit
