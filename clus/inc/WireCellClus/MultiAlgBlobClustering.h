@@ -633,6 +633,14 @@ namespace WireCell::Clus {
         // process-wide numbering, byte-identical.
         bool m_reset_shower_ids_per_event{false};
 
+        // Auxiliary tensors (ai-helper issue 33): input tensors whose metadata
+        // "datatype" is listed here are published on the Ensemble for the
+        // visitors (Ensemble::aux_tensor) and forwarded unchanged to this node's
+        // output set.  Default: the truth tables of larwirecell's
+        // wclsTruthInformationAttacher.  An input without them => nothing to do,
+        // i.e. byte-identical output for every existing job.
+        std::vector<std::string> m_aux_datatypes{"truth_nu", "truth_pf"};
+
         // Own (non-shared) Bee zip.  A printf conversion in the configured
         // "bee_zip" means one zip per event: the open zip is closed and the
         // next opened when the event number changes.  Without one the zip is

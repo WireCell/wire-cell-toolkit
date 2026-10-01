@@ -865,8 +865,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // one of those would otherwise overwrite one fixed path; setting
 // evt_subdir='pr_evt%1%' makes each event write into output_dir/pr_evt<ID>/,
 // i.e. exactly the layout the one-event-per-process job produces, so every
-// downstream gate and viewer keeps working unchanged.  The runner must create
-// those directories -- the sinks do not.  The conversion is boost::format, so
+// downstream gate and viewer keeps working unchanged.  The per-event
+// writers (the tracking visitors, PrDisplayDump, the MABC's own per-event Bee
+// zip) create that directory themselves (PR 535 review).  The conversion is boost::format, so
 // use %1% (not %d) when the id appears more than once in one name.  Empty by
 // default => the names are literal and production is byte-identical.
 //
@@ -982,6 +983,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     // is off: the op display needs the per-cluster flashpred pcarray, which is
     // consumed by the Q/L job's pre-pipeline op dump and is not in the tarball.
     pr(anodes, dump=true, bee_sink=null, pipeline_names=[], tensor_outname='',
+              // reset_shower_ids_per_event (sbnd_xin/docs/110; PR 535 review): restart
+              // the process-wide PR::Shower id counter at the start of every event, so
+              // every event's shower ids equal a one-event process's whether the job
+              // runs one event (the LArSoft 1-step, per-event PR jobs) or many (the
+              // 2-step wct-pr.jsonnet, group mode).  In a one-event process it resets a
+              // counter that is already 0, so outputs do not change.  The ids label
+              // showers (logs, the PrDisplayDump json) and order ties within an event,
+              // which a per-process offset cannot change.  Default ON so every PR job
+              // built from pr() -- both chains -- is configured the same.
+              reset_shower_ids_per_event=true,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -3018,6 +3029,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     [if event_from_ident then 'rse_from_ensemble']: true,
                 },
             },
+            // ai-helper issue 33: the tagger verdict Bee sets (tagger_stm / _tgm /
+            // _fc / _lm) from INSIDE the PR MABC -- the toolkit port of the
+            // larwirecell labeler_tagger's tagger branch, so a standalone PR job
+            // (wct-pr.jsonnet) writes them.  Same content: the beam-window main
+            // candidates, the clustering Bee coordinates the labeler is handed
+            // (bee_coords), cluster_id = verdict.  Needs the shared bee_sink.  Run
+            // it after the taggers.  Only active when named in pipeline_names, so
+            // the 1-step chain (whose labeler_tagger writes these) is unchanged.
+            tagger_bee: {
+                type: 'TaggerBeeVisitor',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    bee_sink: (assert bee_sink != null : 'tagger_bee needs a bee_sink'; wc.tn(bee_sink)),
+                    detector: 'sbnd',
+                    beam_window: beam_window,
+                    coords: common_corr_coords(pos_offset_on, use_sce),
+                },
+            },
         },
         local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
         // The taggers' configs only name the recombination/particle-dataset
@@ -3061,11 +3091,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 [if rse_from_ident then 'rse_from_ident']: true,
                 [if event_from_ident then 'event_from_ident']: true,
                 [if event_from_ident && std.length(rse_map) > 0 then 'rse_map']: rse_map,
-                // sbnd_xin/docs/110 (owner: ON for SBND group mode).  C++ default
-                // false.  Group run only: restart the shower-id counter at each event
-                // so the calib dump's shower ids match a one-event process.  Key
-                // omitted when event_from_ident is off => per-event job byte-identical.
-                [if event_from_ident then 'reset_shower_ids_per_event']: true,
+                // sbnd_xin/docs/110; see the pr() parameter.  C++ default false.
+                // Group mode (event_from_ident) always needs it.
+                [if reset_shower_ids_per_event || event_from_ident then 'reset_shower_ids_per_event']: true,
                 // rse_from_metadata MUST be here: this is the PR-stage MABC, the node that
                 // stamps tracking-pr.root's Trun in the 1-step LArSoft chain.  With only
                 // rse_from_ident the ident carries the EVENT but run/subrun stay 0, so Trun

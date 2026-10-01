@@ -1,6 +1,7 @@
 #include "WireCellRoot/UbooneTaggerOutputVisitor.h"
 
 #include "TFile.h"
+#include "WireCellUtil/Persist.h"
 #include "TTree.h"
 
 #include "WireCellUtil/NamedFactory.h"
@@ -130,6 +131,9 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // the tracking visitor that RECREATE'd it earlier in the pipeline, so both
     // land on this event's file.
     const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
+    // here rather than require the runner to (PR 535 review).
+    Persist::assuredir(outname);
     TFile* output_tf = TFile::Open(outname.c_str(), "UPDATE");
     if (!output_tf || output_tf->IsZombie()) {
         log->error("UbooneTaggerOutputVisitor: cannot open {} for update", outname);
