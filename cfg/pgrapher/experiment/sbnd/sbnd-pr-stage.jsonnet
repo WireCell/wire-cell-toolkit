@@ -49,8 +49,10 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // shower_track / vertices / mc) go to; it must be non-null for the production
     // Bee content (the "mc" node's merge of the upstream truth tree, the BDT scores
     // in its text) -- see clus.jsonnet pr().
-    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false)::
-        clus_maker.pr(anodes, dump=false, bee_sink=bee_sink,
+    // dl_vtx_dump (ai-helper issue 35): record the DL-vertex network calls into
+    // tracking-pr.root (T_dlvtx_call / T_dlvtx_cloud); recording only, default off.
+    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false)::
+        clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump,
                       pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee),
                       particle_dataset=pds.particle_dataset, extra_uses=pds.all,
                       beam_window=$.beam_window),

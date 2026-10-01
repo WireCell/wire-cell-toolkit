@@ -581,6 +581,11 @@ public:
         // (warned and inert otherwise).  false = legacy => key omitted from
         // compiled config, calib JSON schema unchanged.
         bool   m_dl_vtx_harvest{false};
+        // ai-helper issue 35: record every DL network call (OFF + production
+        // pass: exact input cloud, payload, decision) onto the candidate's
+        // TrackFitting for SbndPrMagnifyTrackingVisitor's T_dlvtx_* trees.
+        // Recording only; default false => byte-identical.
+        bool   m_dl_vtx_dump{false};
         double m_beam_window_low{0};   // beam window [low, high) on cluster_t0 (matched flash time, WCT units).
         double m_beam_window_high{0};  // low >= high (default) disables the gate: uBooNE single-main behavior.
         bool m_nu_skip_cosmic{false};  // if true (beam-gate only), skip in-window mains already tagged

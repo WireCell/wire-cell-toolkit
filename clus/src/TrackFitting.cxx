@@ -666,6 +666,7 @@ void TrackFitting::reset_for_new_event(){
     m_kine_info = PR::KineInfo{};
     m_tagger_info = PR::TaggerInfo{};
     m_vertex_scoreboard.clear();
+    m_dlvtx_calls.clear();   // ai-helper issue 35
 }
 
 

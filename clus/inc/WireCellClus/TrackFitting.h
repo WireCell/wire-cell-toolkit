@@ -7,6 +7,7 @@
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellClus/PRVertexScoreboard.h"
+#include "WireCellClus/PRDlVtxDump.h"
 
 #include <Eigen/IterativeLinearSolvers>
 #include <unordered_map>
@@ -522,6 +523,12 @@ namespace WireCell::Clus {
         /// scoreboard taken", never as "no candidates".
         void set_vertex_scoreboard(PR::VertexScoreboard vsb) { m_vertex_scoreboard = std::move(vsb); }
         const PR::VertexScoreboard& get_vertex_scoreboard() const { return m_vertex_scoreboard; }
+
+        /// The candidate's recorded DL-vertex network calls (ai-helper issue 35,
+        /// TaggerCheckNeutrino dl_vtx_dump): OFF pass first, then production.
+        /// Empty unless the knob was on.  Cleared at the per-event reset.
+        void set_dlvtx_calls(std::vector<PR::DlVtxCall> calls) { m_dlvtx_calls = std::move(calls); }
+        const std::vector<PR::DlVtxCall>& get_dlvtx_calls() const { return m_dlvtx_calls; }
 
         void clear_graph();
 
@@ -1304,6 +1311,7 @@ namespace WireCell::Clus {
         // doc sbnd_xin/docs/pr/75 -- diagnostic only, empty unless the
         // vertex_scoreboard knob was on.
         PR::VertexScoreboard m_vertex_scoreboard{};
+        std::vector<PR::DlVtxCall> m_dlvtx_calls;   // ai-helper issue 35
 
         // =====================================================================
         // HYBRID CACHE IMPLEMENTATION

@@ -4839,6 +4839,37 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                             vec_xyzq[0].size(), cand_vertices.size());
     }
 
+    // ai-helper issue 35 -- dl_vtx_dump: record this network call.  A COPY of
+    // the exact input (SCN_Vertex consumes vec_xyzq below), the traditional
+    // answer the decision is measured against; payload and decision are
+    // filled in below.  Recording only.  No points => the net never runs =>
+    // nothing recorded.
+    int dump_i = -1;
+    if (m_dl_vtx_dump && !vec_xyzq[0].empty()) {
+        DlVtxCall c;
+        c.pass = m_dl_vtx_dump_pass;
+        c.top_k = flag_rerank ? std::max(1, dl_vtx_top_k) : 1;
+        c.rerank = flag_rerank;
+        c.x = vec_xyzq[0];
+        c.y = vec_xyzq[1];
+        c.z = vec_xyzq[2];
+        c.q = vec_xyzq[3];
+        c.n_vertex_rows = static_cast<int>(cand_vertices.size());
+        c.q_scale = dQdx_scale;
+        c.q_offset = dQdx_offset;
+        auto trad_it = map_cluster_main_vertices.find(main_cluster);
+        if (trad_it != map_cluster_main_vertices.end() && trad_it->second) {
+            const auto& tv = trad_it->second;
+            const auto pt = tv->fit().valid() ? tv->fit().point : tv->wcpt().point;
+            c.trad_valid = true;
+            c.trad_x = pt.x() / units::cm;
+            c.trad_y = pt.y() / units::cm;
+            c.trad_z = pt.z() / units::cm;
+        }
+        m_dlvtx_calls.push_back(std::move(c));
+        dump_i = static_cast<int>(m_dlvtx_calls.size()) - 1;
+    }
+
     if (vec_xyzq[0].empty()) {
         // doc pr/75: no point cloud to feed the net -- the DL never ran, which
         // is NOT the same as running and declining.
@@ -4875,6 +4906,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
         }
         MS t_scn_inference(Clock::now() - t0); t0 = Clock::now();
+        if (dump_i >= 0) {   // ai-helper issue 35
+            m_dlvtx_calls[dump_i].payload = dnn_vtx;
+            m_dlvtx_calls[dump_i].payload_from_off = dual_voxels && dual_hint->mode == "voxels";
+        }
 
         // -----------------------------------------------------------------------
         // Shared output variables: determined by either the legacy or rerank path
@@ -5380,6 +5415,17 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
         }
 
+        if (dump_i >= 0) {   // ai-helper issue 35: the decision this call fed
+            auto& c = m_dlvtx_calls[dump_i];
+            c.accepted = flag_pass;
+            c.dual_transferred = dual_transferred;
+            if (flag_pass && min_vertex) {
+                const auto pt = min_vertex->fit().valid() ? min_vertex->fit().point : min_vertex->wcpt().point;
+                c.dl_x = pt.x() / units::cm;
+                c.dl_y = pt.y() / units::cm;
+                c.dl_z = pt.z() / units::cm;
+            }
+        }
         if (flag_pass) {
             flag_change = true;
             SPDLOG_LOGGER_TRACE(s_log,

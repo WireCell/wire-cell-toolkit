@@ -993,6 +993,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // which a per-process offset cannot change.  Default ON so every PR job
               // built from pr() -- both chains -- is configured the same.
               reset_shower_ids_per_event=true,
+              // dl_vtx_dump (ai-helper issue 35): record every DL-vertex network call
+              // (dual-chain OFF + production pass: exact input cloud, payload, decision)
+              // and write T_dlvtx_call / T_dlvtx_cloud into tracking-pr.root, with the
+              // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
+              // Recording only.  Default false => every key omitted => byte-identical.
+              dl_vtx_dump=false,
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -2849,6 +2855,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // doc 77 round 2: these five are read elsewhere in pr() too, so they stay
               // named parameters and join the knob bag here rather than at the job.
               knobs=tcn_knobs + {
+                  [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
                   [if mcs_enable then 'mcs_enable']: true,  // doc 80; sub-knobs arrive via tcn_knobs
@@ -2925,6 +2932,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 data: {
                     grouping: 'live',
                     output_filename: tracking_pr_root,
+                    [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,
@@ -3289,7 +3297,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 ],
                 pipeline: wc.tns(cm_pipeline),
             },
-        }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline + tagger_uses),
+        }, nin=1, nout=1, uses=anodes + [dv, pcts] + cm_pipeline + tagger_uses
+                               + (if dl_vtx_dump then [sce_field_fwd] else [])),   // ai-helper issue 35
         local sink = g.pnode({
             type: 'TensorFileSink',
             name: 'clus_pr',

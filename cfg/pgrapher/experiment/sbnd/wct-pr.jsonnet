@@ -31,7 +31,10 @@ function(input='qlpctree.tar.gz',
          bee_outname='mabc-pr.zip',
          // '' => the terminal sink is a dump_mode no-op; a path => write the
          // post-PR point-cloud tree there.
-         pr_tensor_outname='')
+         pr_tensor_outname='',
+         // ai-helper issue 35: record every DL-vertex network call (exact input,
+         // payload, decision, MC truth vertex) as T_dlvtx_call / T_dlvtx_cloud.
+         dl_vtx_dump=false)
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
@@ -63,7 +66,8 @@ local bee = {
 
 // tagger_bee: the tagger verdict Bee sets (tagger_stm/_tgm/_fc/_lm), which the
 // 1-step's art-side labeler_tagger writes, come from TaggerBeeVisitor here.
-local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true);
+local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true,
+                              dl_vtx_dump=dl_vtx_dump);
 
 local sink = g.pnode({
     type: 'TensorFileSink',
