@@ -127,6 +127,32 @@ Users of this config since 2026-09-24: `wcp-porting-img/wcfm/` (the
 foundation-model campaign: iso-track sim -> NF -> SP -> imaging ->
 clustering on this geometry; `wcfm/docs/02`).
 
+## 3d — 2026-10-01: clustering and neutrino pattern recognition in-tree
+
+Clustering (promoted verbatim from the wcp-porting-validation `wcfm/` workspace, which now re-exports
+these files) and a new neutrino PR job (wcfm/docs/25):
+
+| File | What |
+|---|---|
+| `clus_params.jsonnet` | Clustering / PR constants: drift speed 1.6 mm/us, the per-face FV x extents, overall and active boxes, the two face groups, Bee tag. |
+| `clus.jsonnet`, `wct-clustering.jsonnet` | Imaging archives (`clusters-apa-anode<N>-ms-{active,masked}.tar.gz`) -> per-(anode, face) -> per-face group -> all-TPC clustering; `save_tensors` writes the pctree the PR job reads. |
+| `pr.jsonnet`, `wct-pr-perevt.jsonnet` | Neutrino PR on that pctree: SBND's `TaggerCheckNeutrino` operating point on this geometry; `tracking-pr.root`, `mabc-pr.zip`, `calib-pr-evt<N>.json`. |
+| `dune10kt_track_fitting.json`, `particle_dataset.jsonnet` | Track fit (FD diffusion; the electron-lifetime correction is OFF for these flash-less clusters, see the json) and the 0.5 kV/cm Modified-Box dQ/dx + range tables. |
+
+```bash
+wire-cell -l stderr -c pgrapher/experiment/dune10kt-1x2x6/wct-clustering.jsonnet \
+  -A input=<imaging dir> --tla-code 'anode_indices=[0,2]' -A output_dir=<dir> --tla-code event=<N> \
+  -A save_tensors=<dir>/pctree-evt<N>.tar.gz
+wire-cell -l stderr -c pgrapher/experiment/dune10kt-1x2x6/wct-pr-perevt.jsonnet \
+  -A input=<dir>/pctree-evt<N>.tar.gz --tla-code 'anode_indices=[0,2]' -A output_dir=<dir>/pr --tla-code event=<N>
+```
+
+Light-less **simulation only**: there is no light, so the first PR stage (`ClusteringBundleNoLight`)
+makes the whole event one main + associated bundle at t0 = 0. x = 0 is the APA plane here, so every
+cathode-at-x=0 PR cut is off. Not calibrated on FD: `mip_dqdx`, `muon_dqdx_curve`, the `kine_*`
+recombination factors, the transverse fit widths; no BDT scorers (uBooNE-trained); Bee tag stays
+`protodunehd` until bee3's `dune10kt-1x2x6` class is deployed. Validation status: wcfm/docs/25.
+
 ## 4. Known limitations / remaining issues
 
 - **Drift speed.** `lar.drift_speed` is the common base's 1.6 mm/us while the
