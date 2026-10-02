@@ -27,6 +27,7 @@ namespace WireCell::Clus::PR {
         // ---- the exact network input (cm, float32, build order: vertex block first)
         std::vector<float> x, y, z, q;
         int    n_vertex_rows{0};       ///< leading rows that are PR-graph vertices; the rest are segment-interior fit points
+        bool   cloud_no_exclusion{false}; ///< dl_vtx_cloud_no_exclusion: the cloud came from an exclusion-free refit of this pass's graph
         double q_scale{0}, q_offset{0};///< q = dQ * q_scale + q_offset
         // ---- the network output
         std::vector<float> payload;    ///< raw return: legacy [x,y,z]; rerank [x,y,z,score]*K (cm)
@@ -37,6 +38,9 @@ namespace WireCell::Clus::PR {
         bool   accepted{false};        ///< DL vertex accepted (flag_pass): the main vertex was switched to it
         double dl_x{0}, dl_y{0}, dl_z{0};  ///< the accepted candidate vertex (when accepted)
         bool   dual_transferred{false};///< dual chain snap moved production's pick
+        // ---- the dual-chain hint this (production) call was given, cm; "off" rows: none
+        bool   hint_valid{false};
+        double hint_x{0}, hint_y{0}, hint_z{0};
     };
 
 }  // namespace WireCell::Clus::PR

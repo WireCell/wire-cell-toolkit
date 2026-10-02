@@ -306,8 +306,9 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth(TFile* output_tf, const Clu
 //                  call_index, pass (0 production, 1 dual-chain OFF), top_k,
 //                  rerank, n_points, n_vertex_rows, q_scale/q_offset, payload
 //                  (raw SCN return: [x,y,z] or [x,y,z,score]*K, cm),
-//                  payload_from_off, the decision (trad_*, accepted, dl_*,
-//                  dual_transferred), the candidate's final main vertex
+//                  payload_from_off, cloud_no_exclusion, the decision (trad_*,
+//                  accepted, dl_*, dual_transferred), the dual-chain hint vertex
+//                  the production call was given (hint_*), the candidate's final main vertex
 //                  (final_*), and on MC the truth vertex of the in-detector
 //                  interaction (max edep in truth_nu): raw (truth_*) and shifted
 //                  into the cloud's frame by the TrueFwd SCE map (truth_reco_*;
@@ -355,7 +356,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
 
     int runNo = m_evt_runNo, subRunNo = m_evt_subRunNo, eventNo = m_evt_eventNo;
     int nu_index = 0, call_index = 0, pass = 0, top_k = 0, rerank = 0, n_points = 0, n_vertex_rows = 0;
-    int payload_from_off = 0, trad_valid = 0, accepted = 0, dual_transferred = 0, final_valid = 0, truth_valid = 0;
+    int payload_from_off = 0, cloud_no_exclusion = 0, trad_valid = 0, accepted = 0, dual_transferred = 0, final_valid = 0, truth_valid = 0;
+    int hint_valid = 0; double hint_x = 0, hint_y = 0, hint_z = 0;
     double q_scale = 0, q_offset = 0, trad_x = 0, trad_y = 0, trad_z = 0, dl_x = 0, dl_y = 0, dl_z = 0;
     double final_x = 0, final_y = 0, final_z = 0;
     double truth_x = 0, truth_y = 0, truth_z = 0, truth_reco_x = 0, truth_reco_y = 0, truth_reco_z = 0;
@@ -376,6 +378,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
     tc->Branch("q_offset", &q_offset, "q_offset/D");
     tc->Branch("payload", &payload);
     tc->Branch("payload_from_off", &payload_from_off, "payload_from_off/I");
+    tc->Branch("cloud_no_exclusion", &cloud_no_exclusion, "cloud_no_exclusion/I");
     tc->Branch("trad_valid", &trad_valid, "trad_valid/I");
     tc->Branch("trad_x", &trad_x, "trad_x/D");
     tc->Branch("trad_y", &trad_y, "trad_y/D");
@@ -385,6 +388,10 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
     tc->Branch("dl_y", &dl_y, "dl_y/D");
     tc->Branch("dl_z", &dl_z, "dl_z/D");
     tc->Branch("dual_transferred", &dual_transferred, "dual_transferred/I");
+    tc->Branch("hint_valid", &hint_valid, "hint_valid/I");
+    tc->Branch("hint_x", &hint_x, "hint_x/D");
+    tc->Branch("hint_y", &hint_y, "hint_y/D");
+    tc->Branch("hint_z", &hint_z, "hint_z/D");
     tc->Branch("final_valid", &final_valid, "final_valid/I");
     tc->Branch("final_x", &final_x, "final_x/D");
     tc->Branch("final_y", &final_y, "final_y/D");
@@ -431,7 +438,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
             top_k = c.top_k; rerank = c.rerank ? 1 : 0;
             n_points = static_cast<int>(c.x.size()); n_vertex_rows = c.n_vertex_rows;
             q_scale = c.q_scale; q_offset = c.q_offset;
-            payload = c.payload; payload_from_off = c.payload_from_off ? 1 : 0;
+            payload = c.payload; payload_from_off = c.payload_from_off ? 1 : 0; cloud_no_exclusion = c.cloud_no_exclusion ? 1 : 0;
+            hint_valid = c.hint_valid ? 1 : 0; hint_x = c.hint_x; hint_y = c.hint_y; hint_z = c.hint_z;
             trad_valid = c.trad_valid ? 1 : 0; trad_x = c.trad_x; trad_y = c.trad_y; trad_z = c.trad_z;
             accepted = c.accepted ? 1 : 0; dl_x = c.dl_x; dl_y = c.dl_y; dl_z = c.dl_z;
             dual_transferred = c.dual_transferred ? 1 : 0;

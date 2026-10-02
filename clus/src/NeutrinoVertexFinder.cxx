@@ -4855,6 +4855,13 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         c.z = vec_xyzq[2];
         c.q = vec_xyzq[3];
         c.n_vertex_rows = static_cast<int>(cand_vertices.size());
+        c.cloud_no_exclusion = cloud_no_excl;
+        if (dual_hint && dual_hint->has_vertex) {
+            c.hint_valid = true;
+            c.hint_x = dual_hint->vertex.x() / units::cm;
+            c.hint_y = dual_hint->vertex.y() / units::cm;
+            c.hint_z = dual_hint->vertex.z() / units::cm;
+        }
         c.q_scale = dQdx_scale;
         c.q_offset = dQdx_offset;
         auto trad_it = map_cluster_main_vertices.find(main_cluster);
