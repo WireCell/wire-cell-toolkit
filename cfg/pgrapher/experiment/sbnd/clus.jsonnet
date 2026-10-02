@@ -999,6 +999,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // tcn_overrides (ai-helper issue 35): TaggerCheckNeutrino keys merged LAST,
+              // over the tcn_knobs bag, for experiments from a top-level job (e.g.
+              // {dl_vtx_dual_chain: false}).  Default {} => byte-identical.
+              tcn_overrides={},
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -2854,7 +2858,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
               // doc 77 round 2: these five are read elsewhere in pr() too, so they stay
               // named parameters and join the knob bag here rather than at the job.
-              knobs=tcn_knobs + {
+              knobs=tcn_knobs + tcn_overrides + {
                   [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
