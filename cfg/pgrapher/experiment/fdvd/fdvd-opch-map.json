@@ -1,0 +1,1477 @@
+{
+ "comment": "FD-VD opdigi10ppm OpChannel -> OpDet: opch = 10*opdet + {0,1} (two channels per X-ARAPUCA).",
+ "channels": [
+  {
+   "opch": 0,
+   "opdet": 0
+  },
+  {
+   "opch": 1,
+   "opdet": 0
+  },
+  {
+   "opch": 10,
+   "opdet": 1
+  },
+  {
+   "opch": 11,
+   "opdet": 1
+  },
+  {
+   "opch": 20,
+   "opdet": 2
+  },
+  {
+   "opch": 21,
+   "opdet": 2
+  },
+  {
+   "opch": 30,
+   "opdet": 3
+  },
+  {
+   "opch": 31,
+   "opdet": 3
+  },
+  {
+   "opch": 40,
+   "opdet": 4
+  },
+  {
+   "opch": 41,
+   "opdet": 4
+  },
+  {
+   "opch": 50,
+   "opdet": 5
+  },
+  {
+   "opch": 51,
+   "opdet": 5
+  },
+  {
+   "opch": 60,
+   "opdet": 6
+  },
+  {
+   "opch": 61,
+   "opdet": 6
+  },
+  {
+   "opch": 70,
+   "opdet": 7
+  },
+  {
+   "opch": 71,
+   "opdet": 7
+  },
+  {
+   "opch": 80,
+   "opdet": 8
+  },
+  {
+   "opch": 81,
+   "opdet": 8
+  },
+  {
+   "opch": 90,
+   "opdet": 9
+  },
+  {
+   "opch": 91,
+   "opdet": 9
+  },
+  {
+   "opch": 100,
+   "opdet": 10
+  },
+  {
+   "opch": 101,
+   "opdet": 10
+  },
+  {
+   "opch": 110,
+   "opdet": 11
+  },
+  {
+   "opch": 111,
+   "opdet": 11
+  },
+  {
+   "opch": 120,
+   "opdet": 12
+  },
+  {
+   "opch": 121,
+   "opdet": 12
+  },
+  {
+   "opch": 130,
+   "opdet": 13
+  },
+  {
+   "opch": 131,
+   "opdet": 13
+  },
+  {
+   "opch": 140,
+   "opdet": 14
+  },
+  {
+   "opch": 141,
+   "opdet": 14
+  },
+  {
+   "opch": 150,
+   "opdet": 15
+  },
+  {
+   "opch": 151,
+   "opdet": 15
+  },
+  {
+   "opch": 160,
+   "opdet": 16
+  },
+  {
+   "opch": 161,
+   "opdet": 16
+  },
+  {
+   "opch": 170,
+   "opdet": 17
+  },
+  {
+   "opch": 171,
+   "opdet": 17
+  },
+  {
+   "opch": 180,
+   "opdet": 18
+  },
+  {
+   "opch": 181,
+   "opdet": 18
+  },
+  {
+   "opch": 190,
+   "opdet": 19
+  },
+  {
+   "opch": 191,
+   "opdet": 19
+  },
+  {
+   "opch": 200,
+   "opdet": 20
+  },
+  {
+   "opch": 201,
+   "opdet": 20
+  },
+  {
+   "opch": 210,
+   "opdet": 21
+  },
+  {
+   "opch": 211,
+   "opdet": 21
+  },
+  {
+   "opch": 220,
+   "opdet": 22
+  },
+  {
+   "opch": 221,
+   "opdet": 22
+  },
+  {
+   "opch": 230,
+   "opdet": 23
+  },
+  {
+   "opch": 231,
+   "opdet": 23
+  },
+  {
+   "opch": 240,
+   "opdet": 24
+  },
+  {
+   "opch": 241,
+   "opdet": 24
+  },
+  {
+   "opch": 250,
+   "opdet": 25
+  },
+  {
+   "opch": 251,
+   "opdet": 25
+  },
+  {
+   "opch": 260,
+   "opdet": 26
+  },
+  {
+   "opch": 261,
+   "opdet": 26
+  },
+  {
+   "opch": 270,
+   "opdet": 27
+  },
+  {
+   "opch": 271,
+   "opdet": 27
+  },
+  {
+   "opch": 280,
+   "opdet": 28
+  },
+  {
+   "opch": 281,
+   "opdet": 28
+  },
+  {
+   "opch": 290,
+   "opdet": 29
+  },
+  {
+   "opch": 291,
+   "opdet": 29
+  },
+  {
+   "opch": 300,
+   "opdet": 30
+  },
+  {
+   "opch": 301,
+   "opdet": 30
+  },
+  {
+   "opch": 310,
+   "opdet": 31
+  },
+  {
+   "opch": 311,
+   "opdet": 31
+  },
+  {
+   "opch": 320,
+   "opdet": 32
+  },
+  {
+   "opch": 321,
+   "opdet": 32
+  },
+  {
+   "opch": 330,
+   "opdet": 33
+  },
+  {
+   "opch": 331,
+   "opdet": 33
+  },
+  {
+   "opch": 340,
+   "opdet": 34
+  },
+  {
+   "opch": 341,
+   "opdet": 34
+  },
+  {
+   "opch": 350,
+   "opdet": 35
+  },
+  {
+   "opch": 351,
+   "opdet": 35
+  },
+  {
+   "opch": 360,
+   "opdet": 36
+  },
+  {
+   "opch": 361,
+   "opdet": 36
+  },
+  {
+   "opch": 370,
+   "opdet": 37
+  },
+  {
+   "opch": 371,
+   "opdet": 37
+  },
+  {
+   "opch": 380,
+   "opdet": 38
+  },
+  {
+   "opch": 381,
+   "opdet": 38
+  },
+  {
+   "opch": 390,
+   "opdet": 39
+  },
+  {
+   "opch": 391,
+   "opdet": 39
+  },
+  {
+   "opch": 400,
+   "opdet": 40
+  },
+  {
+   "opch": 401,
+   "opdet": 40
+  },
+  {
+   "opch": 410,
+   "opdet": 41
+  },
+  {
+   "opch": 411,
+   "opdet": 41
+  },
+  {
+   "opch": 420,
+   "opdet": 42
+  },
+  {
+   "opch": 421,
+   "opdet": 42
+  },
+  {
+   "opch": 430,
+   "opdet": 43
+  },
+  {
+   "opch": 431,
+   "opdet": 43
+  },
+  {
+   "opch": 440,
+   "opdet": 44
+  },
+  {
+   "opch": 441,
+   "opdet": 44
+  },
+  {
+   "opch": 450,
+   "opdet": 45
+  },
+  {
+   "opch": 451,
+   "opdet": 45
+  },
+  {
+   "opch": 460,
+   "opdet": 46
+  },
+  {
+   "opch": 461,
+   "opdet": 46
+  },
+  {
+   "opch": 470,
+   "opdet": 47
+  },
+  {
+   "opch": 471,
+   "opdet": 47
+  },
+  {
+   "opch": 480,
+   "opdet": 48
+  },
+  {
+   "opch": 481,
+   "opdet": 48
+  },
+  {
+   "opch": 490,
+   "opdet": 49
+  },
+  {
+   "opch": 491,
+   "opdet": 49
+  },
+  {
+   "opch": 500,
+   "opdet": 50
+  },
+  {
+   "opch": 501,
+   "opdet": 50
+  },
+  {
+   "opch": 510,
+   "opdet": 51
+  },
+  {
+   "opch": 511,
+   "opdet": 51
+  },
+  {
+   "opch": 520,
+   "opdet": 52
+  },
+  {
+   "opch": 521,
+   "opdet": 52
+  },
+  {
+   "opch": 530,
+   "opdet": 53
+  },
+  {
+   "opch": 531,
+   "opdet": 53
+  },
+  {
+   "opch": 540,
+   "opdet": 54
+  },
+  {
+   "opch": 541,
+   "opdet": 54
+  },
+  {
+   "opch": 550,
+   "opdet": 55
+  },
+  {
+   "opch": 551,
+   "opdet": 55
+  },
+  {
+   "opch": 560,
+   "opdet": 56
+  },
+  {
+   "opch": 561,
+   "opdet": 56
+  },
+  {
+   "opch": 570,
+   "opdet": 57
+  },
+  {
+   "opch": 571,
+   "opdet": 57
+  },
+  {
+   "opch": 580,
+   "opdet": 58
+  },
+  {
+   "opch": 581,
+   "opdet": 58
+  },
+  {
+   "opch": 590,
+   "opdet": 59
+  },
+  {
+   "opch": 591,
+   "opdet": 59
+  },
+  {
+   "opch": 600,
+   "opdet": 60
+  },
+  {
+   "opch": 601,
+   "opdet": 60
+  },
+  {
+   "opch": 610,
+   "opdet": 61
+  },
+  {
+   "opch": 611,
+   "opdet": 61
+  },
+  {
+   "opch": 620,
+   "opdet": 62
+  },
+  {
+   "opch": 621,
+   "opdet": 62
+  },
+  {
+   "opch": 630,
+   "opdet": 63
+  },
+  {
+   "opch": 631,
+   "opdet": 63
+  },
+  {
+   "opch": 640,
+   "opdet": 64
+  },
+  {
+   "opch": 641,
+   "opdet": 64
+  },
+  {
+   "opch": 650,
+   "opdet": 65
+  },
+  {
+   "opch": 651,
+   "opdet": 65
+  },
+  {
+   "opch": 660,
+   "opdet": 66
+  },
+  {
+   "opch": 661,
+   "opdet": 66
+  },
+  {
+   "opch": 670,
+   "opdet": 67
+  },
+  {
+   "opch": 671,
+   "opdet": 67
+  },
+  {
+   "opch": 680,
+   "opdet": 68
+  },
+  {
+   "opch": 681,
+   "opdet": 68
+  },
+  {
+   "opch": 690,
+   "opdet": 69
+  },
+  {
+   "opch": 691,
+   "opdet": 69
+  },
+  {
+   "opch": 700,
+   "opdet": 70
+  },
+  {
+   "opch": 701,
+   "opdet": 70
+  },
+  {
+   "opch": 710,
+   "opdet": 71
+  },
+  {
+   "opch": 711,
+   "opdet": 71
+  },
+  {
+   "opch": 720,
+   "opdet": 72
+  },
+  {
+   "opch": 721,
+   "opdet": 72
+  },
+  {
+   "opch": 730,
+   "opdet": 73
+  },
+  {
+   "opch": 731,
+   "opdet": 73
+  },
+  {
+   "opch": 740,
+   "opdet": 74
+  },
+  {
+   "opch": 741,
+   "opdet": 74
+  },
+  {
+   "opch": 750,
+   "opdet": 75
+  },
+  {
+   "opch": 751,
+   "opdet": 75
+  },
+  {
+   "opch": 760,
+   "opdet": 76
+  },
+  {
+   "opch": 761,
+   "opdet": 76
+  },
+  {
+   "opch": 770,
+   "opdet": 77
+  },
+  {
+   "opch": 771,
+   "opdet": 77
+  },
+  {
+   "opch": 780,
+   "opdet": 78
+  },
+  {
+   "opch": 781,
+   "opdet": 78
+  },
+  {
+   "opch": 790,
+   "opdet": 79
+  },
+  {
+   "opch": 791,
+   "opdet": 79
+  },
+  {
+   "opch": 800,
+   "opdet": 80
+  },
+  {
+   "opch": 801,
+   "opdet": 80
+  },
+  {
+   "opch": 810,
+   "opdet": 81
+  },
+  {
+   "opch": 811,
+   "opdet": 81
+  },
+  {
+   "opch": 820,
+   "opdet": 82
+  },
+  {
+   "opch": 821,
+   "opdet": 82
+  },
+  {
+   "opch": 830,
+   "opdet": 83
+  },
+  {
+   "opch": 831,
+   "opdet": 83
+  },
+  {
+   "opch": 840,
+   "opdet": 84
+  },
+  {
+   "opch": 841,
+   "opdet": 84
+  },
+  {
+   "opch": 850,
+   "opdet": 85
+  },
+  {
+   "opch": 851,
+   "opdet": 85
+  },
+  {
+   "opch": 860,
+   "opdet": 86
+  },
+  {
+   "opch": 861,
+   "opdet": 86
+  },
+  {
+   "opch": 870,
+   "opdet": 87
+  },
+  {
+   "opch": 871,
+   "opdet": 87
+  },
+  {
+   "opch": 880,
+   "opdet": 88
+  },
+  {
+   "opch": 881,
+   "opdet": 88
+  },
+  {
+   "opch": 890,
+   "opdet": 89
+  },
+  {
+   "opch": 891,
+   "opdet": 89
+  },
+  {
+   "opch": 900,
+   "opdet": 90
+  },
+  {
+   "opch": 901,
+   "opdet": 90
+  },
+  {
+   "opch": 910,
+   "opdet": 91
+  },
+  {
+   "opch": 911,
+   "opdet": 91
+  },
+  {
+   "opch": 920,
+   "opdet": 92
+  },
+  {
+   "opch": 921,
+   "opdet": 92
+  },
+  {
+   "opch": 930,
+   "opdet": 93
+  },
+  {
+   "opch": 931,
+   "opdet": 93
+  },
+  {
+   "opch": 940,
+   "opdet": 94
+  },
+  {
+   "opch": 941,
+   "opdet": 94
+  },
+  {
+   "opch": 950,
+   "opdet": 95
+  },
+  {
+   "opch": 951,
+   "opdet": 95
+  },
+  {
+   "opch": 960,
+   "opdet": 96
+  },
+  {
+   "opch": 961,
+   "opdet": 96
+  },
+  {
+   "opch": 970,
+   "opdet": 97
+  },
+  {
+   "opch": 971,
+   "opdet": 97
+  },
+  {
+   "opch": 980,
+   "opdet": 98
+  },
+  {
+   "opch": 981,
+   "opdet": 98
+  },
+  {
+   "opch": 990,
+   "opdet": 99
+  },
+  {
+   "opch": 991,
+   "opdet": 99
+  },
+  {
+   "opch": 1000,
+   "opdet": 100
+  },
+  {
+   "opch": 1001,
+   "opdet": 100
+  },
+  {
+   "opch": 1010,
+   "opdet": 101
+  },
+  {
+   "opch": 1011,
+   "opdet": 101
+  },
+  {
+   "opch": 1020,
+   "opdet": 102
+  },
+  {
+   "opch": 1021,
+   "opdet": 102
+  },
+  {
+   "opch": 1030,
+   "opdet": 103
+  },
+  {
+   "opch": 1031,
+   "opdet": 103
+  },
+  {
+   "opch": 1040,
+   "opdet": 104
+  },
+  {
+   "opch": 1041,
+   "opdet": 104
+  },
+  {
+   "opch": 1050,
+   "opdet": 105
+  },
+  {
+   "opch": 1051,
+   "opdet": 105
+  },
+  {
+   "opch": 1060,
+   "opdet": 106
+  },
+  {
+   "opch": 1061,
+   "opdet": 106
+  },
+  {
+   "opch": 1070,
+   "opdet": 107
+  },
+  {
+   "opch": 1071,
+   "opdet": 107
+  },
+  {
+   "opch": 1080,
+   "opdet": 108
+  },
+  {
+   "opch": 1081,
+   "opdet": 108
+  },
+  {
+   "opch": 1090,
+   "opdet": 109
+  },
+  {
+   "opch": 1091,
+   "opdet": 109
+  },
+  {
+   "opch": 1100,
+   "opdet": 110
+  },
+  {
+   "opch": 1101,
+   "opdet": 110
+  },
+  {
+   "opch": 1110,
+   "opdet": 111
+  },
+  {
+   "opch": 1111,
+   "opdet": 111
+  },
+  {
+   "opch": 1120,
+   "opdet": 112
+  },
+  {
+   "opch": 1121,
+   "opdet": 112
+  },
+  {
+   "opch": 1130,
+   "opdet": 113
+  },
+  {
+   "opch": 1131,
+   "opdet": 113
+  },
+  {
+   "opch": 1140,
+   "opdet": 114
+  },
+  {
+   "opch": 1141,
+   "opdet": 114
+  },
+  {
+   "opch": 1150,
+   "opdet": 115
+  },
+  {
+   "opch": 1151,
+   "opdet": 115
+  },
+  {
+   "opch": 1160,
+   "opdet": 116
+  },
+  {
+   "opch": 1161,
+   "opdet": 116
+  },
+  {
+   "opch": 1170,
+   "opdet": 117
+  },
+  {
+   "opch": 1171,
+   "opdet": 117
+  },
+  {
+   "opch": 1180,
+   "opdet": 118
+  },
+  {
+   "opch": 1181,
+   "opdet": 118
+  },
+  {
+   "opch": 1190,
+   "opdet": 119
+  },
+  {
+   "opch": 1191,
+   "opdet": 119
+  },
+  {
+   "opch": 1200,
+   "opdet": 120
+  },
+  {
+   "opch": 1201,
+   "opdet": 120
+  },
+  {
+   "opch": 1210,
+   "opdet": 121
+  },
+  {
+   "opch": 1211,
+   "opdet": 121
+  },
+  {
+   "opch": 1220,
+   "opdet": 122
+  },
+  {
+   "opch": 1221,
+   "opdet": 122
+  },
+  {
+   "opch": 1230,
+   "opdet": 123
+  },
+  {
+   "opch": 1231,
+   "opdet": 123
+  },
+  {
+   "opch": 1240,
+   "opdet": 124
+  },
+  {
+   "opch": 1241,
+   "opdet": 124
+  },
+  {
+   "opch": 1250,
+   "opdet": 125
+  },
+  {
+   "opch": 1251,
+   "opdet": 125
+  },
+  {
+   "opch": 1260,
+   "opdet": 126
+  },
+  {
+   "opch": 1261,
+   "opdet": 126
+  },
+  {
+   "opch": 1270,
+   "opdet": 127
+  },
+  {
+   "opch": 1271,
+   "opdet": 127
+  },
+  {
+   "opch": 1280,
+   "opdet": 128
+  },
+  {
+   "opch": 1281,
+   "opdet": 128
+  },
+  {
+   "opch": 1290,
+   "opdet": 129
+  },
+  {
+   "opch": 1291,
+   "opdet": 129
+  },
+  {
+   "opch": 1300,
+   "opdet": 130
+  },
+  {
+   "opch": 1301,
+   "opdet": 130
+  },
+  {
+   "opch": 1310,
+   "opdet": 131
+  },
+  {
+   "opch": 1311,
+   "opdet": 131
+  },
+  {
+   "opch": 1320,
+   "opdet": 132
+  },
+  {
+   "opch": 1321,
+   "opdet": 132
+  },
+  {
+   "opch": 1330,
+   "opdet": 133
+  },
+  {
+   "opch": 1331,
+   "opdet": 133
+  },
+  {
+   "opch": 1340,
+   "opdet": 134
+  },
+  {
+   "opch": 1341,
+   "opdet": 134
+  },
+  {
+   "opch": 1350,
+   "opdet": 135
+  },
+  {
+   "opch": 1351,
+   "opdet": 135
+  },
+  {
+   "opch": 1360,
+   "opdet": 136
+  },
+  {
+   "opch": 1361,
+   "opdet": 136
+  },
+  {
+   "opch": 1370,
+   "opdet": 137
+  },
+  {
+   "opch": 1371,
+   "opdet": 137
+  },
+  {
+   "opch": 1380,
+   "opdet": 138
+  },
+  {
+   "opch": 1381,
+   "opdet": 138
+  },
+  {
+   "opch": 1390,
+   "opdet": 139
+  },
+  {
+   "opch": 1391,
+   "opdet": 139
+  },
+  {
+   "opch": 1400,
+   "opdet": 140
+  },
+  {
+   "opch": 1401,
+   "opdet": 140
+  },
+  {
+   "opch": 1410,
+   "opdet": 141
+  },
+  {
+   "opch": 1411,
+   "opdet": 141
+  },
+  {
+   "opch": 1420,
+   "opdet": 142
+  },
+  {
+   "opch": 1421,
+   "opdet": 142
+  },
+  {
+   "opch": 1430,
+   "opdet": 143
+  },
+  {
+   "opch": 1431,
+   "opdet": 143
+  },
+  {
+   "opch": 1440,
+   "opdet": 144
+  },
+  {
+   "opch": 1441,
+   "opdet": 144
+  },
+  {
+   "opch": 1450,
+   "opdet": 145
+  },
+  {
+   "opch": 1451,
+   "opdet": 145
+  },
+  {
+   "opch": 1460,
+   "opdet": 146
+  },
+  {
+   "opch": 1461,
+   "opdet": 146
+  },
+  {
+   "opch": 1470,
+   "opdet": 147
+  },
+  {
+   "opch": 1471,
+   "opdet": 147
+  },
+  {
+   "opch": 1480,
+   "opdet": 148
+  },
+  {
+   "opch": 1481,
+   "opdet": 148
+  },
+  {
+   "opch": 1490,
+   "opdet": 149
+  },
+  {
+   "opch": 1491,
+   "opdet": 149
+  },
+  {
+   "opch": 1500,
+   "opdet": 150
+  },
+  {
+   "opch": 1501,
+   "opdet": 150
+  },
+  {
+   "opch": 1510,
+   "opdet": 151
+  },
+  {
+   "opch": 1511,
+   "opdet": 151
+  },
+  {
+   "opch": 1520,
+   "opdet": 152
+  },
+  {
+   "opch": 1521,
+   "opdet": 152
+  },
+  {
+   "opch": 1530,
+   "opdet": 153
+  },
+  {
+   "opch": 1531,
+   "opdet": 153
+  },
+  {
+   "opch": 1540,
+   "opdet": 154
+  },
+  {
+   "opch": 1541,
+   "opdet": 154
+  },
+  {
+   "opch": 1550,
+   "opdet": 155
+  },
+  {
+   "opch": 1551,
+   "opdet": 155
+  },
+  {
+   "opch": 1560,
+   "opdet": 156
+  },
+  {
+   "opch": 1561,
+   "opdet": 156
+  },
+  {
+   "opch": 1570,
+   "opdet": 157
+  },
+  {
+   "opch": 1571,
+   "opdet": 157
+  },
+  {
+   "opch": 1580,
+   "opdet": 158
+  },
+  {
+   "opch": 1581,
+   "opdet": 158
+  },
+  {
+   "opch": 1590,
+   "opdet": 159
+  },
+  {
+   "opch": 1591,
+   "opdet": 159
+  },
+  {
+   "opch": 1600,
+   "opdet": 160
+  },
+  {
+   "opch": 1601,
+   "opdet": 160
+  },
+  {
+   "opch": 1610,
+   "opdet": 161
+  },
+  {
+   "opch": 1611,
+   "opdet": 161
+  },
+  {
+   "opch": 1620,
+   "opdet": 162
+  },
+  {
+   "opch": 1621,
+   "opdet": 162
+  },
+  {
+   "opch": 1630,
+   "opdet": 163
+  },
+  {
+   "opch": 1631,
+   "opdet": 163
+  },
+  {
+   "opch": 1640,
+   "opdet": 164
+  },
+  {
+   "opch": 1641,
+   "opdet": 164
+  },
+  {
+   "opch": 1650,
+   "opdet": 165
+  },
+  {
+   "opch": 1651,
+   "opdet": 165
+  },
+  {
+   "opch": 1660,
+   "opdet": 166
+  },
+  {
+   "opch": 1661,
+   "opdet": 166
+  },
+  {
+   "opch": 1670,
+   "opdet": 167
+  },
+  {
+   "opch": 1671,
+   "opdet": 167
+  },
+  {
+   "opch": 1680,
+   "opdet": 168
+  },
+  {
+   "opch": 1681,
+   "opdet": 168
+  },
+  {
+   "opch": 1690,
+   "opdet": 169
+  },
+  {
+   "opch": 1691,
+   "opdet": 169
+  },
+  {
+   "opch": 1700,
+   "opdet": 170
+  },
+  {
+   "opch": 1701,
+   "opdet": 170
+  },
+  {
+   "opch": 1710,
+   "opdet": 171
+  },
+  {
+   "opch": 1711,
+   "opdet": 171
+  },
+  {
+   "opch": 1720,
+   "opdet": 172
+  },
+  {
+   "opch": 1721,
+   "opdet": 172
+  },
+  {
+   "opch": 1730,
+   "opdet": 173
+  },
+  {
+   "opch": 1731,
+   "opdet": 173
+  },
+  {
+   "opch": 1740,
+   "opdet": 174
+  },
+  {
+   "opch": 1741,
+   "opdet": 174
+  },
+  {
+   "opch": 1750,
+   "opdet": 175
+  },
+  {
+   "opch": 1751,
+   "opdet": 175
+  },
+  {
+   "opch": 1760,
+   "opdet": 176
+  },
+  {
+   "opch": 1761,
+   "opdet": 176
+  },
+  {
+   "opch": 1770,
+   "opdet": 177
+  },
+  {
+   "opch": 1771,
+   "opdet": 177
+  },
+  {
+   "opch": 1780,
+   "opdet": 178
+  },
+  {
+   "opch": 1781,
+   "opdet": 178
+  },
+  {
+   "opch": 1790,
+   "opdet": 179
+  },
+  {
+   "opch": 1791,
+   "opdet": 179
+  },
+  {
+   "opch": 1800,
+   "opdet": 180
+  },
+  {
+   "opch": 1801,
+   "opdet": 180
+  },
+  {
+   "opch": 1810,
+   "opdet": 181
+  },
+  {
+   "opch": 1811,
+   "opdet": 181
+  },
+  {
+   "opch": 1820,
+   "opdet": 182
+  },
+  {
+   "opch": 1821,
+   "opdet": 182
+  },
+  {
+   "opch": 1830,
+   "opdet": 183
+  },
+  {
+   "opch": 1831,
+   "opdet": 183
+  }
+ ]
+}
