@@ -47,6 +47,9 @@ namespace WireCell::Match::FdvdLowE {
         double qmin_cluster{50e3};       // cluster kept for Q-L: blob charge sum >= this [e]
         int pmin_store{3};               // flash groups kept with >= this many lit OpDets
         double x_resp_cm{306.9};         // drift regressor label origin (dl_drift.py X_RESP)
+        // build_groups: merge flashes of exactly equal time (ql_purity.build_groups delta 0).  false = every
+        // flash its own group (fdvd_sim doc 20/21 AdjOpHits source 'adj0').  Default true = the legacy grouping.
+        bool merge_equal_time{true};
     };
 
     // numpy float64 add.reduce on contiguous data (pairwise, block 128)
@@ -131,6 +134,9 @@ namespace WireCell::Match::FdvdLowE {
         int P{5};
         double E{100};
         double ks_c{0.3}, dc_c{200.0};
+        // ratio window [lo * s, hi / s] of the calibration's window (fdvd_sim doc 21 lever 'rw tight' = 1.25);
+        // 1.0 = the calibration window unchanged (legacy)
+        double rwin_shrink{1.0};
     };
     std::vector<Arm> default_arms();
 

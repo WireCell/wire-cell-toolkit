@@ -114,3 +114,50 @@ TEST_CASE("fdvd lowe strict decision")
     CHECK(d.size() == 1);
     CHECK(d.at(0) == 0);
 }
+
+TEST_CASE("fdvd lowe doc 21 knobs: merge_equal_time off, rwin_shrink, default arms unchanged")
+{
+    // default arms are the legacy ql08.ARMS rows, ratio window untouched
+    const auto arms = L::default_arms();
+    REQUIRE(arms.size() == 2);
+    CHECK(arms[0].name == "P5E100");
+    CHECK(arms[1].name == "P8E0");
+    CHECK(arms[0].rwin_shrink == 1.0);
+    L::Constants C;
+    CHECK(C.merge_equal_time);
+    // merge off: the two equal-time flashes of "fdvd lowe flash groups" stay two groups, brightest first
+    C.merge_equal_time = false;
+    std::vector<double> t_ns{100e3, 100e3, 500e3};
+    std::vector<double> pe;
+    for (auto [n, v] : std::vector<std::pair<int, double>>{{4, 2.0}, {6, 3.0}, {2, 50.0}}) {
+        auto r = flash_row(n, v);
+        pe.insert(pe.end(), r.begin(), r.end());
+    }
+    auto G = L::build_groups(t_ns, pe, C);
+    REQUIRE(G.t.size() == 2);
+    CHECK(G.nflash[0] == 1);
+    CHECK(G.pe[0] == 3.0f);                    // the 6 x 3 PE flash (18 PE) before the 4 x 2 PE flash
+    CHECK(G.pe[L::NCH + 0] == 2.0f);
+    // rwin_shrink 1.25: window [0.5 * 1.25, 2.0 / 1.25] = [0.625, 1.6]; r = 1.0 passes, r = 1.7 fails
+    L::Calibration cal;
+    cal.rwin_lo = 0.5;
+    cal.rwin_hi = 2.0;
+    auto arm = L::default_arms()[0];
+    std::vector<L::Cluster> cl(1);
+    cl[0].Q = 150e3;
+    L::Features Fe;
+    Fe.gt = {10.0};
+    Fe.gtot = {500.0};
+    Fe.gnpd = {10};
+    Fe.k = {0};
+    Fe.g = {0};
+    Fe.r = {1.7f};
+    Fe.ks = {0.1f};
+    Fe.dc = {50.0f};
+    Fe.npp = {6.0f};
+    CHECK(L::decide(Fe, {true}, cl, arm, cal).size() == 1);
+    arm.rwin_shrink = 1.25;
+    CHECK(L::decide(Fe, {true}, cl, arm, cal).size() == 0);
+    Fe.r = {1.0f};
+    CHECK(L::decide(Fe, {true}, cl, arm, cal).size() == 1);
+}

@@ -228,9 +228,11 @@ L::Groups L::build_groups(const std::vector<double>& time_ns, const std::vector<
         const size_t lo = std::lower_bound(ts.begin(), ts.end(), t[f] - 0.0) - ts.begin();
         const size_t hi = std::upper_bound(ts.begin(), ts.end(), t[f] + 0.0) - ts.begin();
         std::vector<size_t> mem{f};
-        for (size_t i = lo; i < hi; ++i) {
-            const size_t m = order_t[i];
-            if (!used[m] && m != f) mem.push_back(m);
+        if (C.merge_equal_time) {
+            for (size_t i = lo; i < hi; ++i) {
+                const size_t m = order_t[i];
+                if (!used[m] && m != f) mem.push_back(m);
+            }
         }
         for (size_t m : mem) used[m] = true;
         // pe[g].sum(0): sequential over members, anchor first
@@ -360,7 +362,11 @@ std::vector<bool> L::drift_mask(const Features& Fe, double veto_k, const std::ve
 std::map<int, int> L::decide(const Features& Fe, const std::vector<bool>& mask, const std::vector<Cluster>& cl,
                              const Arm& arm, const Calibration& cal)
 {
-    const float rlo = (float) cal.rwin_lo, rhi = (float) cal.rwin_hi;
+    float rlo = (float) cal.rwin_lo, rhi = (float) cal.rwin_hi;
+    if (arm.rwin_shrink != 1.0) {   // score21.py dec rw 'tight': (rwin[0] * 1.25, rwin[1] / 1.25)
+        rlo = (float) (cal.rwin_lo * arm.rwin_shrink);
+        rhi = (float) (cal.rwin_hi / arm.rwin_shrink);
+    }
     const float ksc = (float) arm.ks_c, dcc = (float) arm.dc_c;
     const float nmin = (float) std::ceil(arm.P / 2.0);
     std::map<int, int> ncl, ngr, best;

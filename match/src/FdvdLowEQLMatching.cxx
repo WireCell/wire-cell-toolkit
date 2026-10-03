@@ -49,6 +49,18 @@ WireCell::Configuration FdvdLowEQLMatching::default_configuration() const
         cfg["specs"][(int) i]["name"] = m_spec_names[i];
         cfg["specs"][(int) i]["veto_k"] = m_veto_k[i];
     }
+    cfg["merge_equal_time"] = m_C.merge_equal_time;
+    const auto arms = m_arms.empty() ? L::default_arms() : m_arms;
+    for (size_t i = 0; i < arms.size(); ++i) {
+        auto& ja = cfg["arms"][(int) i];
+        ja["name"] = arms[i].name;
+        ja["qc"] = arms[i].qc;
+        ja["P"] = arms[i].P;
+        ja["E"] = arms[i].E;
+        ja["ks"] = arms[i].ks_c;
+        ja["dc"] = arms[i].dc_c;
+        ja["rwin_shrink"] = arms[i].rwin_shrink;
+    }
     return cfg;
 }
 
@@ -82,7 +94,25 @@ void FdvdLowEQLMatching::configure(const WireCell::Configuration& cfg)
     }
     if ((int) m_lib->nchan() != L::NCH) raise<ValueError>("FdvdLowEQLMatching: library has %d channels", (int) m_lib->nchan());
     m_cal = L::load_calibration(m_calibration);
+    // fdvd_sim doc 21 knobs, absent = legacy: merge_equal_time (true), arms (ql08.ARMS P5E100, P8E0)
+    m_C.merge_equal_time = get(cfg, "merge_equal_time", m_C.merge_equal_time);
     m_arms = L::default_arms();
+    if (cfg["arms"].isArray()) {
+        m_arms.clear();
+        for (const auto& ja : cfg["arms"]) {
+            L::Arm a;
+            a.name = ja["name"].asString();
+            a.qc = get(ja, "qc", a.qc);
+            a.P = get(ja, "P", a.P);
+            a.E = get(ja, "E", a.E);
+            a.ks_c = get(ja, "ks", a.ks_c);
+            a.dc_c = get(ja, "dc", a.dc_c);
+            a.rwin_shrink = get(ja, "rwin_shrink", a.rwin_shrink);
+            if (a.name.empty() || !(a.rwin_shrink > 0)) raise<ValueError>("FdvdLowEQLMatching: arm needs a name and rwin_shrink > 0");
+            m_arms.push_back(a);
+        }
+        if (m_arms.empty()) raise<ValueError>("FdvdLowEQLMatching: empty arms list");
+    }
     // ql_m2m_proto.py PD_POS (line 61): OpDet order, mm / 10
     const auto geo = Persist::load(Persist::resolve(m_geom_file));
     std::map<int, std::array<double, 3>> bypd;
