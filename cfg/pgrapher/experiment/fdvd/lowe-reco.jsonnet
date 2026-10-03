@@ -14,6 +14,7 @@
 //                                                                         -> MultiAlgBlobClustering ---> QL port 0
 //                                                         \-> FdvdBlobTable(N) ----------------------> QL port 1
 //   light   opwf:    TensorFileSource(opwf_) -> FdvdOpHitFinder -> OpFlashFinder(frozen doc 04 point) -> QL port 2
+//                    (flash_finder='adjophits': -> FdvdAdjOpFlashFinder(adjflash.jsonnet + adj) instead, doc 21)
 //           opflash: TensorFileSource(opflash_) (an OpFlashFinder archive)                            -> QL port 2
 //   drift   drift_model + frames: the matcher runs FdvdDriftRegressor itself (TorchTensorSetService with the
 //           TorchScript M3, fdvd_sim/stageB/export_drift_ts.py; SP gauss frames read from the per-CRM archives
@@ -29,11 +30,27 @@ local tools_maker = import 'pgrapher/common/tools.jsonnet';
 local tools = tools_maker(params);
 local clus_maker = import 'pgrapher/experiment/fdvd/clus.jsonnet';
 local flash = import 'pgrapher/experiment/fdvd/flash.jsonnet';
+local adjflash = import 'pgrapher/experiment/fdvd/adjflash.jsonnet';
+
+// fdvd_sim doc 21 knobs, all default OFF (the compiled job is byte-identical to the doc 18 production template
+// when they are left at their defaults; gate K0):
+//   flash_finder      'opflash' (default, the frozen OpFlashFinder point) | 'adjophits' (FdvdAdjOpFlashFinder with
+//                     adjflash.jsonnet + adj overrides; needs opwf)
+//   adj               object merged over adjflash.jsonnet (only read with flash_finder='adjophits')
+//   arms              FdvdLowEQLMatching arms [{name, qc, P, E, ks, dc, rwin_shrink}]; C++ default = ql08.ARMS P5E100,
+//                     P8E0.  Key omitted when null => byte-identical pre-doc-21 config.
+//   specs             FdvdLowEQLMatching drift specs [{name, veto_k}]; C++ default none (0) + veto3 (3).  Key omitted
+//                     when null.
+//   merge_equal_time  FdvdLowEQLMatching grouping; C++ default true (equal-time flashes share a group).  false = one
+//                     flash per group (the AdjOpHits arm).  Key omitted when null.
 
 function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash='', drift_in='', drift_model='', frames='',
          drift_device='cpu', dump_crops=false, pipe='simple', iso_cm=30, event=0, bee_zip='', dump_tables=false,
-         anode_indices=std.range(0, std.length(tools.anodes) - 1))
+         anode_indices=std.range(0, std.length(tools.anodes) - 1),
+         flash_finder='opflash', adj={}, arms=null, specs=null, merge_equal_time=null)
   assert (opwf != '') != (opflash != '') : 'give exactly one of opwf / opflash';
+  assert flash_finder == 'opflash' || flash_finder == 'adjophits' : "flash_finder is 'opflash' or 'adjophits'";
+  assert flash_finder == 'opflash' || opwf != '' : "flash_finder 'adjophits' needs opwf";
   local anodes = [tools.anodes[i] for i in anode_indices];
   local n = std.length(anodes);
   local C = clus_maker(params, anodes);
@@ -54,7 +71,9 @@ function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash=
   local light = if opwf != '' then g.pipeline([
     g.pnode({ type: 'TensorFileSource', name: 'opwf', data: { inname: opwf, prefix: 'opwf_' } }, nin=0, nout=1),
     g.pnode({ type: 'FdvdOpHitFinder', name: '', data: {} }, nin=1, nout=1),
-    g.pnode({ type: 'OpFlashFinder', name: 'fdvd', data: flash }, nin=1, nout=1),
+    if flash_finder == 'adjophits'
+    then g.pnode({ type: 'FdvdAdjOpFlashFinder', name: 'fdvd', data: adjflash + adj }, nin=1, nout=1)
+    else g.pnode({ type: 'OpFlashFinder', name: 'fdvd', data: flash }, nin=1, nout=1),
   ]) else g.pnode({ type: 'TensorFileSource', name: 'opflash', data: { inname: opflash, prefix: 'opflash_' } },
                   nin=0, nout=1);
 
@@ -76,6 +95,9 @@ function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash=
       calibration: calibration,
       geom_file: 'pgrapher/experiment/fdvd/fdvd-opdet-geom.json',
       dump_tables: dump_tables,
+      [if arms != null then 'arms']: arms,
+      [if specs != null then 'specs']: specs,
+      [if merge_equal_time != null then 'merge_equal_time']: merge_equal_time,
     } + (if drift_model != '' then {
       drift: { forward: wc.tn(torch), frames: frames, frame_tag: 'gauss', dump_crops: dump_crops },
     } else {}),
