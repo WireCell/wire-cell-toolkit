@@ -43,6 +43,8 @@ namespace {
     size_t g_ncol = 0;
     std::vector<float> g_eu, g_ev, g_ew, g_has;   // the head's inputs
     std::vector<float> g_score;
+    bool g_score_eu = false;   // doc 34: the fake score also takes e_U's first dimension (a per-cell value)
+    size_t g_head_calls = 0, g_head_maxrows = 0;
 
     float fake_score(const float* has) { return 10.0f * has[0] + 5.0f * has[1] + has[2] - 3.0f; }
 
@@ -81,7 +83,9 @@ namespace {
             };
             grab(0, g_eu); grab(1, g_ev); grab(2, g_ew); grab(3, g_has);
             g_score.resize(N);
-            for (size_t i = 0; i < N; ++i) g_score[i] = fake_score(&g_has[i * 3]);
+            for (size_t i = 0; i < N; ++i) g_score[i] = fake_score(&g_has[i * 3]) + (g_score_eu ? g_eu[i * FMDIM] : 0.0f);
+            ++g_head_calls;
+            g_head_maxrows = std::max(g_head_maxrows, N);
             ITensor::vector out{std::make_shared<Aux::SimpleTensor>(ITensor::shape_t{N}, g_score.data())};
             return std::make_shared<Aux::SimpleTensorSet>(in->ident(), Configuration(), std::make_shared<ITensor::vector>(out));
         }
@@ -334,4 +338,45 @@ TEST_CASE("CascadeDeghostingFM head on without an FM set: no active pixel, fille
         CHECK(g_xb[i * 18 + 16] == 0.0f);
         CHECK(g_xb[i * 18 + 17] == 0.0f);
     }
+}
+
+TEST_CASE("CascadeDeghostingFM head chunk and nthreads: the same columns as one serial forward (doc 34)")
+{
+    setup_components();
+    auto cl = make_cluster(24);
+    auto fmset = make_fm(cl, false);
+    g_score_eu = true;
+    auto run = [&](int nthreads, int chunk, size_t& ncalls, size_t& maxrows) {
+        auto cfg = cascade_config(true);
+        cfg["nthreads"] = nthreads;
+        if (chunk) cfg["head"]["chunk"] = chunk;
+        Img::CascadeDeghostingFM fm;
+        fm.configure(cfg);
+        ICluster::pointer out;
+        g_head_calls = g_head_maxrows = 0;
+        REQUIRE(fm(std::make_tuple(cl, IFrame::pointer(nullptr), fmset), out));
+        REQUIRE(out);
+        REQUIRE(g_ncol == 18);
+        ncalls = g_head_calls;
+        maxrows = g_head_maxrows;
+        return g_xb;
+    };
+    size_t c0, m0, c1, m1, c2, m2;
+    const auto ref = run(1, 0, c0, m0);
+    const size_t N = ref.size() / 18;
+    REQUIRE(N > 7);
+    CHECK(c0 == 1);
+    CHECK(m0 == N);
+    // the per-cell scores differ, so a misplaced chunk would show
+    bool varied = false;
+    for (size_t i = 1; i < N; ++i) varied = varied || ref[i * 18 + 15] != ref[15];
+    CHECK(varied);
+    const auto par = run(4, 0, c1, m1);
+    CHECK(c1 == 1);
+    CHECK(par == ref);
+    const auto chk = run(3, 7, c2, m2);
+    CHECK(c2 == (N + 6) / 7);
+    CHECK(m2 == 7);
+    CHECK(chk == ref);
+    g_score_eu = false;
 }

@@ -2,6 +2,7 @@
 // See the header and wcfm/docs/01 sec 4.2, wcfm/docs/04.
 #include "WireCellPytorch/FMFeatureExtract.h"
 #include "WireCellPytorch/Torch.h"  // c10::Half
+#include "WireCellPytorch/TorchContext.h"
 
 #include "WireCellAux/FrameTools.h"
 #include "WireCellAux/PlaneTools.h"
@@ -11,6 +12,7 @@
 #include "WireCellUtil/Array.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Persist.h"
 
 #include <algorithm>
 #include <chrono>
@@ -22,6 +24,11 @@ WIRECELL_FACTORY(FMFeatureExtract, WireCell::Pytorch::FMFeatureExtract,
                  WireCell::INamed, WireCell::IFrameTensorSet, WireCell::IConfigurable)
 
 using namespace WireCell;
+
+struct Pytorch::FMFeatureExtract::Direct {
+    torch::jit::script::Module module;
+    TorchContext ctx;
+};
 
 Pytorch::FMFeatureExtract::FMFeatureExtract()
     : Aux::Logger("FMFeatureExtract", "torch")
@@ -58,6 +65,8 @@ WireCell::Configuration Pytorch::FMFeatureExtract::default_configuration() const
     cfg["halo"] = m_halo;
     cfg["store_half"] = m_store_half;
     cfg["provenance"] = m_provenance;
+    cfg["model"] = m_model;     // doc 34: "" = off, the ITensorForward runs the model
+    cfg["device"] = m_device;
     return cfg;
 }
 
@@ -88,6 +97,8 @@ void Pytorch::FMFeatureExtract::configure(const WireCell::Configuration& cfg)
     m_max_dense_pixels = get<Json::Int64>(cfg, "max_dense_pixels", m_max_dense_pixels);
     m_halo = get(cfg, "halo", m_halo);
     m_store_half = get(cfg, "store_half", m_store_half);
+    m_model = get(cfg, "model", m_model);
+    m_device = get(cfg, "device", m_device);
     if (cfg.isMember("provenance")) {
         m_provenance = cfg["provenance"];
     }
@@ -104,7 +115,27 @@ void Pytorch::FMFeatureExtract::configure(const WireCell::Configuration& cfg)
     if (m_halo < 0) m_halo = 0;
 
     m_anode = Factory::find_tn<IAnodePlane>(m_anode_tn);
-    m_forward = Factory::find_tn<ITensorForward>(m_forward_tn);
+    if (m_model.empty()) {
+        m_forward = Factory::find_tn<ITensorForward>(m_forward_tn);
+    }
+    else {   // doc 34: the model is run here, as TorchService runs it
+        m_direct = std::make_unique<Direct>();
+        m_direct->ctx.connect(m_device);
+        const auto path = Persist::resolve(m_model);
+        if (path.empty()) {
+            log->critical("no TorchScript model file found for \"{}\"", m_model);
+            THROW(ValueError() << errmsg{"FMFeatureExtract: no TorchScript model file"});
+        }
+        torch::NoGradGuard no_grad;
+        try {
+            m_direct->module = torch::jit::load(path, m_direct->ctx.device());
+        }
+        catch (const c10::Error& e) {
+            log->critical("error loading model \"{}\" to device \"{}\": {}", path, m_device, e.what());
+            throw;
+        }
+        log->debug("loaded model \"{}\" to device \"{}\" (direct, no ITensorForward)", path, m_direct->ctx.devname());
+    }
 
     m_rows.clear();
     for (int plane : m_planes) {
@@ -277,26 +308,48 @@ bool Pytorch::FMFeatureExtract::operator()(const input_pointer& in, output_point
                     tile[idx] = val[i];
                     tile[(size_t) h * tw + idx] = 1.0f;
                 }
-                ITensor::shape_t ishape = {1, 2, (size_t) h, (size_t) tw};
-                auto iten = std::make_shared<Aux::SimpleTensor>(ishape, tile.data());
-                auto iset = std::make_shared<Aux::SimpleTensorSet>(
-                    in->ident(), Configuration(), std::make_shared<ITensor::vector>(ITensor::vector{iten}));
-                auto oset = m_forward->forward(iset);
-                if (!oset or !oset->tensors() or oset->tensors()->empty()) {
-                    log->critical("call={} plane={} forward \"{}\" returned nothing", m_count, pr.plane, m_forward_tn);
-                    THROW(RuntimeError() << errmsg{"FMFeatureExtract: forward returned nothing"});
+                // the reply [1, C, h, tw] f4: `od` points at it, `oset` / `otorch` keep it alive through the gather
+                ITensorSet::pointer oset;
+                torch::Tensor otorch;
+                const float* od = nullptr;
+                if (m_model.empty()) {
+                    ITensor::shape_t ishape = {1, 2, (size_t) h, (size_t) tw};
+                    auto iten = std::make_shared<Aux::SimpleTensor>(ishape, tile.data());
+                    auto iset = std::make_shared<Aux::SimpleTensorSet>(
+                        in->ident(), Configuration(), std::make_shared<ITensor::vector>(ITensor::vector{iten}));
+                    oset = m_forward->forward(iset);
+                    if (!oset or !oset->tensors() or oset->tensors()->empty()) {
+                        log->critical("call={} plane={} forward \"{}\" returned nothing", m_count, pr.plane, m_forward_tn);
+                        THROW(RuntimeError() << errmsg{"FMFeatureExtract: forward returned nothing"});
+                    }
+                    auto oten = oset->tensors()->front();
+                    const auto oshape = oten->shape();
+                    if (oshape.size() != 4 or oshape[0] != 1 or (int) oshape[1] != C or (int) oshape[2] != h or (int) oshape[3] != tw
+                        or oten->dtype() != "f4") {
+                        std::string got;
+                        for (auto s : oshape) got += std::to_string(s) + ",";
+                        log->critical("call={} plane={} forward reply shape/dtype mismatch: got [{}] {} expected [1,{},{},{}] f4",
+                                      m_count, pr.plane, got, oten->dtype(), C, h, tw);
+                        THROW(RuntimeError() << errmsg{"FMFeatureExtract: forward reply shape mismatch"});
+                    }
+                    od = reinterpret_cast<const float*>(oten->data());
                 }
-                auto oten = oset->tensors()->front();
-                const auto oshape = oten->shape();
-                if (oshape.size() != 4 or oshape[0] != 1 or (int) oshape[1] != C or (int) oshape[2] != h or (int) oshape[3] != tw
-                    or oten->dtype() != "f4") {
-                    std::string got;
-                    for (auto s : oshape) got += std::to_string(s) + ",";
-                    log->critical("call={} plane={} forward reply shape/dtype mismatch: got [{}] {} expected [1,{},{},{}] f4",
-                                  m_count, pr.plane, got, oten->dtype(), C, h, tw);
-                    THROW(RuntimeError() << errmsg{"FMFeatureExtract: forward reply shape mismatch"});
+                else {   // doc 34: run the model here and read its output tensor in place
+                    TorchSemaphore sem(m_direct->ctx);
+                    torch::NoGradGuard no_grad;
+                    auto iten = torch::from_blob(tile.data(), {1, 2, (long) h, (long) tw});
+                    if (m_direct->ctx.is_gpu()) iten = iten.to(m_direct->ctx.device());
+                    otorch = m_direct->module.forward({iten}).toTensor().cpu().contiguous();
+                    if (otorch.dim() != 4 or otorch.size(0) != 1 or otorch.size(1) != C or otorch.size(2) != h
+                        or otorch.size(3) != tw or otorch.scalar_type() != torch::kFloat32) {
+                        std::string got;
+                        for (auto s : otorch.sizes()) got += std::to_string(s) + ",";
+                        log->critical("call={} plane={} model reply shape/dtype mismatch: got [{}] expected [1,{},{},{}] f4",
+                                      m_count, pr.plane, got, C, h, tw);
+                        THROW(RuntimeError() << errmsg{"FMFeatureExtract: model reply shape mismatch"});
+                    }
+                    od = otorch.data_ptr<float>();
                 }
-                const float* od = reinterpret_cast<const float*>(oten->data());
                 for (size_t i = 0; i < N; ++i) {
                     const int c = acol[i] - k0;
                     if (c < a or c >= b) continue;

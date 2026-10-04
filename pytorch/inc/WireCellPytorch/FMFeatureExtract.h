@@ -26,6 +26,12 @@
     of `halo` slices on each side of every tile; only the tile's core columns are gathered so a
     tile edge never enters the stored features.
 
+    With `model` set (wcfm doc 34; default "" = off) the node loads that TorchScript file itself on `device` and
+    gathers the active pixels straight from the model's output tensor, instead of going through the
+    ITensorForward: the service's reply is a second dense [1, C, h, w] buffer (zero-filled, then copied, up to
+    0.55 GB per plane), of which only N rows are read.  Same model, same input, same threads: the same features.
+    `forward` is then not looked up.
+
     The DNN-ROI front end (DNNROIFinding.cxx, Util.cxx) is not touched: this node builds its own
     canvas and reads the forward's reply through the ITensor data pointer directly.
 */
@@ -41,6 +47,7 @@
 #include "WireCellUtil/Configuration.h"
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -86,6 +93,11 @@ namespace WireCell::Pytorch {
         long m_max_dense_pixels{0};
         int m_halo{64};
         bool m_store_half{true};
+        // doc 34: a TorchScript file run by this node directly ("" = use the ITensorForward), and its device.
+        std::string m_model{""};
+        std::string m_device{"cpu"};
+        struct Direct;   // the module and its torch context (defined in the .cxx: no torch header here)
+        std::unique_ptr<Direct> m_direct;
         Configuration m_provenance;
 
         IAnodePlane::pointer m_anode;

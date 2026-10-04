@@ -28,7 +28,11 @@
     With `head` absent (the default) the node is CascadeDeghosting with an ignored third port.
 
     Configuration: all of CascadeDeghosting's, plus
-      head     (absent / null = off) {forward: "<type>:<name>" of the head ITensorForward, fm_dim: 128}
+      head     (absent / null = off) {forward: "<type>:<name>" of the head ITensorForward, fm_dim: 128,
+                 chunk: 0}.  chunk (wcfm doc 34) = the number of cells per head forward; 0 (the default) hands the
+                 whole final level to one forward, as doc 30.  The head scores each cell from its own row, so a
+                 chunked forward bounds the head's working memory (2.3 GB at 4e5 cells in one batch) at the price
+                 of a batch-size-dependent BLAS path: the scores may differ in the last bits (doc 34 has the gate).
  */
 #ifndef WIRECELLIMG_CASCADEDEGHOSTINGFM
 #define WIRECELLIMG_CASCADEDEGHOSTINGFM
@@ -99,6 +103,7 @@ namespace WireCell::Img {
         bool m_head{false};
         std::string m_head_tn{""};
         int m_fm_dim{128};
+        int m_head_chunk{0};   // doc 34: cells per head forward; 0 = one forward for the level
         ITensorForward::pointer m_head_forward;
         size_t m_count{0};
     };

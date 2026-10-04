@@ -107,11 +107,12 @@ void Img::CascadeDeghostingFM::configure(const WireCell::Configuration& cfg)
     if (m_head) {
         m_head_tn = get<std::string>(jh, "forward", "");
         m_fm_dim = get(jh, "fm_dim", m_fm_dim);
+        m_head_chunk = get(jh, "chunk", m_head_chunk);
         if (m_head_tn.empty() || m_fm_dim <= 0) {
             THROW(ValueError() << errmsg{"CascadeDeghostingFM: head needs a forward and fm_dim > 0"});
         }
         m_head_forward = Factory::find_tn<ITensorForward>(m_head_tn);
-        log->debug("doc 30 head-score columns on: forward={} fm_dim={}", m_head_tn, m_fm_dim);
+        log->debug("doc 30 head-score columns on: forward={} fm_dim={} chunk={}", m_head_tn, m_fm_dim, m_head_chunk);
     }
 
     m_levels.clear();
@@ -347,52 +348,76 @@ namespace {
     // The three columns [score, ls_mean, ls_min] per node of a k = 1 level (wcfm scripts/d27_head.py graph_inputs /
     // head_scores / fill_nan, and gnn_dataset.py b_fm).  The slice index of the FM coords is the slice ident.
     std::vector<float> head_columns(const ITensorForward::pointer& head, const Level& lev, const Cascade::SliceCharge& sc,
-                                    const FMIndex& fm, int ident, HeadStats& st)
+                                    const FMIndex& fm, int ident, HeadStats& st, int nthreads, size_t chunk,
+                                    double tsplit[2])
     {
+        using clock = std::chrono::steady_clock;
         const size_t N = lev.nnodes(), NW = lev.wq.size(), E = lev.bw_src.size();
         const int D = fm.dim;
+        // wcfm doc 34: the head's inputs are built and forwarded `chunk` cells at a time (0 = the whole level in one
+        // forward, as doc 30), and a chunk's rows are filled in nthreads blocks: a row depends on its own cell only
+        // and is written to its own slot, so the arrays do not depend on the threading.
+        const size_t C = chunk > 0 ? std::min(chunk, std::max<size_t>(N, 1)) : std::max<size_t>(N, 1);
         std::array<std::vector<float>, 3> e;
-        for (int p = 0; p < 3; ++p) e[p].assign(N * D, 0.0f);
-        std::vector<float> has(N * 3, 0.0f);
-        std::vector<double> acc(D);
-        for (size_t i = 0; i < N; ++i) {
-            const auto ch = Cascade::blob_channels(lev.blobs[i]);
-            const int k = sc.slice_of[lev.sidx[i]]->ident();
-            for (int p = 0; p < 3; ++p) {
-                std::fill(acc.begin(), acc.end(), 0.0);
-                int n = 0;
-                for (int c : ch[p]) {
-                    const float* r = fm.row(p, c, k);
-                    if (!r) continue;
-                    for (int d = 0; d < D; ++d) acc[d] += r[d];
-                    ++n;
-                }
-                if (n) {
-                    has[i * 3 + p] = 1.0f;
-                    ++st.nhas[p];
-                    float* out = e[p].data() + i * D;
-                    for (int d = 0; d < D; ++d) out[d] = round_half((float) (acc[d] / n));   // b_fm is stored f16
-                }
-            }
-        }
-        // the head: score = CrossHead(eU, eV, eW, has)
+        std::vector<float> has;
         std::vector<float> score(N, 0.0f);
-        {
-            ITensor::vector tv{tens(e[0], {N, (size_t) D}), tens(e[1], {N, (size_t) D}), tens(e[2], {N, (size_t) D}),
-                               tens(has, {N, 3})};
-            auto in = std::make_shared<Aux::SimpleTensorSet>(ident, Configuration(), std::make_shared<ITensor::vector>(tv));
-            auto out = head->forward(in);
-            if (!out || !out->tensors() || out->tensors()->empty()) {
-                THROW(RuntimeError() << errmsg{"CascadeDeghostingFM: head forward failed"});
+        tsplit[0] = tsplit[1] = 0.0;
+        size_t a = 0;
+        do {
+            const size_t b = std::min(N, a + C), n = b - a;
+            const auto tc = clock::now();
+            for (int p = 0; p < 3; ++p) e[p].assign(n * D, 0.0f);
+            has.assign(n * 3, 0.0f);
+            Cascade::parallel_blocks(n, nthreads, [&](size_t j0, size_t j1) {
+                std::vector<double> acc(D);
+                for (size_t j = j0; j < j1; ++j) {
+                    const size_t i = a + j;
+                    const auto ch = Cascade::blob_channels(lev.blobs[i]);
+                    const int k = sc.slice_of[lev.sidx[i]]->ident();
+                    for (int p = 0; p < 3; ++p) {
+                        std::fill(acc.begin(), acc.end(), 0.0);
+                        int nrow = 0;
+                        for (int c : ch[p]) {
+                            const float* r = fm.row(p, c, k);
+                            if (!r) continue;
+                            for (int d = 0; d < D; ++d) acc[d] += r[d];
+                            ++nrow;
+                        }
+                        if (nrow) {
+                            has[j * 3 + p] = 1.0f;
+                            float* out = e[p].data() + j * D;
+                            for (int d = 0; d < D; ++d) out[d] = round_half((float) (acc[d] / nrow));   // b_fm is stored f16
+                        }
+                    }
+                }
+            });
+            for (size_t j = 0; j < n; ++j) {
+                for (int p = 0; p < 3; ++p) st.nhas[p] += has[j * 3 + p] > 0.0f;
             }
-            const auto& t = out->tensors()->front();
-            if (t->dtype() != "f4" || t->size() != N * sizeof(float)) {
-                THROW(RuntimeError() << errmsg{String::format("CascadeDeghostingFM: head output is %s of %d bytes, want f4 [%d]",
-                                                              t->dtype(), (int) t->size(), (int) N)});
+            const auto tf = clock::now();
+            // the head: score = CrossHead(eU, eV, eW, has)
+            {
+                ITensor::vector tv{tens(e[0], {n, (size_t) D}), tens(e[1], {n, (size_t) D}), tens(e[2], {n, (size_t) D}),
+                                   tens(has, {n, 3})};
+                auto in = std::make_shared<Aux::SimpleTensorSet>(ident, Configuration(), std::make_shared<ITensor::vector>(tv));
+                auto out = head->forward(in);
+                if (!out || !out->tensors() || out->tensors()->empty()) {
+                    THROW(RuntimeError() << errmsg{"CascadeDeghostingFM: head forward failed"});
+                }
+                const auto& t = out->tensors()->front();
+                if (t->dtype() != "f4" || t->size() != n * sizeof(float)) {
+                    THROW(RuntimeError() << errmsg{String::format("CascadeDeghostingFM: head output is %s of %d bytes, want f4 [%d]",
+                                                                  t->dtype(), (int) t->size(), (int) n)});
+                }
+                const float* p = reinterpret_cast<const float*>(t->data());
+                std::copy(p, p + n, score.begin() + a);
             }
-            const float* p = reinterpret_cast<const float*>(t->data());
-            score.assign(p, p + N);
-        }
+            tsplit[0] += std::chrono::duration<double>(tf - tc).count();
+            tsplit[1] += std::chrono::duration<double>(clock::now() - tf).count();
+            a = b;
+        } while (a < N);
+        for (auto& v : e) std::vector<float>().swap(v);
+        std::vector<float>().swap(has);
         st.smin = N ? *std::min_element(score.begin(), score.end()) : 0.0f;
         st.smax = N ? *std::max_element(score.begin(), score.end()) : 0.0f;
         // active wire nodes: an FM pixel at (plane, channel, slice ident)
@@ -567,7 +592,9 @@ bool Img::CascadeDeghostingFM::operator()(const input_tuple_type& intup, output_
         std::vector<float> xb18;
         if (with_head) {
             HeadStats hs;
-            headcols = head_columns(m_head_forward, lev, sc, fmidx, in->ident(), hs);
+            double tsplit[2];
+            headcols = head_columns(m_head_forward, lev, sc, fmidx, in->ident(), hs, m_nthreads, (size_t) m_head_chunk, tsplit);
+            fmidx = FMIndex();   // doc 34: the pixel table is not needed past the head columns
             const size_t Nh = lev.nnodes();
             xb18.resize(Nh * 18);
             for (size_t i = 0; i < Nh; ++i) {
@@ -579,6 +606,9 @@ bool Img::CascadeDeghostingFM::operator()(const input_tuple_type& intup, output_
                        "no-active-wire filled={} score=[{:.3f}, {:.3f}]",
                        m_count, in->ident(), li, Nh, hs.nhas[0], hs.nhas[1], hs.nhas[2], hs.nactive_wires, lev.wq.size(),
                        hs.nfilled, hs.smin, hs.smax);
+            // wcfm doc 34: the final level's forward= phase is these two plus the level model's forward
+            log->debug("call={} cluster={} level={} head split: columns={:.3f}s head_forward={:.3f}s chunk={}", m_count,
+                       in->ident(), li, tsplit[0], tsplit[1], m_head_chunk);
         }
         run_forward(lc.forward, lev, with_head ? xb18 : lev.xb, ncol, in->ident(), logit, qhat);
         const auto tf = clock::now();
