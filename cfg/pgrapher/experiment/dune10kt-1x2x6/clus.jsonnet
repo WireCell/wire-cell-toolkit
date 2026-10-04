@@ -67,8 +67,14 @@ local dvm = {
     for face in [0, 1]
 };
 
+// Component name suffix of a DetectorVolumes / PCTransformSet: the anode idents joined by "-", then the face as
+// "-f<face>" when the volume is face-specific.  The face used to be appended as a bare "-<face>", so the face-1 volume
+// of anode 0 ("dv-apa0-1") and the anode-pair volume of anodes 0 and 1 ("dv-apa0-1") were ONE component configured
+// twice; the pair volume then carried anode 0's metadata only and T0Correction::forward threw std::out_of_range
+// (map::at on apa 1) for every event whose active anodes are exactly {0, 1}.  The "f" makes the two names distinct;
+// component names do not reach any output (wcfm doc 33: pctree archives byte-identical on 8 events).
 local anodes_name(anodes, face="") =
-    std.join("-", [std.toString(a.data.ident) for a in anodes]) + if face == "" then "" else "-" + std.toString(face);
+    std.join("-", [std.toString(a.data.ident) for a in anodes]) + if face == "" then "" else "-f" + std.toString(face);
 
 // Both faces of every anode are always registered (Grouping::fill_dv_cache reads every face).
 local detector_volumes(anodes, face="") = {
