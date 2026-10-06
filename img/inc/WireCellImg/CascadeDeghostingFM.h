@@ -91,6 +91,9 @@ namespace WireCell::Img {
         std::string m_policy{"uboone"};
         std::string m_charge_tag{""};
         double m_charge_scale{0.25};
+        // false = legacy: the slice's first tick is (slice start - frame time) / tick.  true: slice start / tick, for
+        // slicers with frame-relative slice starts (MaskSlice) on frames with a non-zero time (pdvd doc 122 sec 3).
+        bool m_slice_start_relative{false};
         double m_uncer_cut{1e11};
         int m_ident_base{1 << 20};
         std::string m_dump_dir{""};

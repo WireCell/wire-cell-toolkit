@@ -83,7 +83,7 @@ Cascade::SliceCharge Cascade::make_slice_charge(const cluster_graph_t& gr, doubl
 }
 
 Cascade::SliceCharge Cascade::make_slice_charge_frame(const cluster_graph_t& gr, const IFrame::pointer& frame,
-                                                     const std::string& tag, double scale)
+                                                     const std::string& tag, double scale, bool slice_start_relative)
 {
     // the slice indexing of the activity mode (no activity read: uncer_cut = -1 skips every entry)
     SliceCharge sc = make_slice_charge(gr, scale, -1.0);
@@ -91,8 +91,10 @@ Cascade::SliceCharge Cascade::make_slice_charge_frame(const cluster_graph_t& gr,
     sc.from_frame = true;
     sc.scale = scale;
     const double tick = frame->tick();
+    // legacy: slice start taken as absolute.  MaskSlice slice starts are frame-relative (pdvd doc 122 sec 3).
+    const double origin = slice_start_relative ? 0.0 : frame->time();
     for (const auto& s : sc.slice_of) {
-        sc.t0.push_back((int) std::lround((s->start() - frame->time()) / tick));
+        sc.t0.push_back((int) std::lround((s->start() - origin) / tick));
         sc.nt.push_back((int) std::lround(s->span() / tick));
     }
     const auto& trs = tag.empty() ? *frame->traces() : ITrace::vector();

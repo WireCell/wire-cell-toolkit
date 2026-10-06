@@ -51,6 +51,7 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["policy"] = m_policy;
     cfg["charge_tag"] = m_charge_tag;
     cfg["charge_scale"] = m_charge_scale;
+    cfg["slice_start_relative"] = m_slice_start_relative;
     cfg["uncer_cut"] = m_uncer_cut;
     cfg["ident_base"] = m_ident_base;
     cfg["dump_dir"] = m_dump_dir;
@@ -75,6 +76,7 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     m_policy = get(cfg, "policy", m_policy);
     m_charge_tag = get(cfg, "charge_tag", m_charge_tag);
     m_charge_scale = get(cfg, "charge_scale", m_charge_scale);
+    m_slice_start_relative = get(cfg, "slice_start_relative", m_slice_start_relative);
     m_uncer_cut = get(cfg, "uncer_cut", m_uncer_cut);
     m_ident_base = get(cfg, "ident_base", m_ident_base);
     m_dump_dir = get(cfg, "dump_dir", m_dump_dir);
@@ -266,7 +268,7 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
     else {
         log->warn("call={} no frame: charge from the slice activity (not the training charge)", m_count);
     }
-    auto sc = use_frame ? Cascade::make_slice_charge_frame(gr, frame, m_charge_tag, m_charge_scale)
+    auto sc = use_frame ? Cascade::make_slice_charge_frame(gr, frame, m_charge_tag, m_charge_scale, m_slice_start_relative)
                         : Cascade::make_slice_charge(gr, m_charge_scale, m_uncer_cut);
     std::vector<IBlob::pointer> cur;
     for (auto vtx : boost::make_iterator_range(boost::vertices(gr))) {

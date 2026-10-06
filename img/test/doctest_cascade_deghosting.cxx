@@ -243,6 +243,33 @@ TEST_CASE("frame charge: scale x the sum over the slice's ticks, all ticks, 0 wi
     CHECK(sc.charge(1, 999) == 0.0f);
 }
 
+TEST_CASE("frame charge: a frame with a non-zero time and frame-relative slice starts (MaskSlice)")
+{
+    // pdvd doc 122 sec 3: the d121 simulation frames have time -250 us while MaskSlice slice starts count from the
+    // frame's first tick.  The legacy reader then starts 500 ticks late; slice_start_relative reads the slice's ticks.
+    auto cl = make_cluster(12);
+    const auto& gr = cl->graph();
+    std::vector<float> q100(20);
+    for (int t = 0; t < 20; ++t) q100[t] = (float) t;
+    ITrace::vector trs{std::make_shared<Aux::SimpleTrace>(100, 0, q100)};
+    auto frame = std::make_shared<Aux::SimpleFrame>(7, -250.0 * units::microsecond, trs, 0.5 * units::microsecond);
+    auto legacy = Cascade::make_slice_charge_frame(gr, frame, "", 0.25);
+    REQUIRE(legacy.slice_of.size() == 2);
+    CHECK(legacy.t0[0] == 500);
+    CHECK(legacy.charge(0, 100) == 0.0f);        // read beyond the trace
+    auto sc = Cascade::make_slice_charge_frame(gr, frame, "", 0.25, true);
+    CHECK(sc.t0[0] == 0);
+    CHECK(sc.t0[1] == 4);
+    CHECK(sc.charge(0, 100) == doctest::Approx(0.25 * (0 + 1 + 2 + 3)));
+    CHECK(sc.charge(1, 100) == doctest::Approx(0.25 * (4 + 5 + 6 + 7)));
+    // a frame with time 0: the two readings are the same
+    auto frame0 = std::make_shared<Aux::SimpleFrame>(7, 0.0, trs, 0.5 * units::microsecond);
+    auto a = Cascade::make_slice_charge_frame(gr, frame0, "", 0.25, false);
+    auto b = Cascade::make_slice_charge_frame(gr, frame0, "", 0.25, true);
+    CHECK(a.t0 == b.t0);
+    CHECK(a.charge(1, 100) == b.charge(1, 100));
+}
+
 TEST_CASE("geom_pairs equals the geom_clustering graph pairs")
 {
     auto anodes = Testing::anodes("uboone");

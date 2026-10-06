@@ -60,8 +60,12 @@ namespace WireCell::Img::Cascade {
 
     /// The same slice indexing, with the charge taken from the frame's traces of `tag` ("" = all traces):
     /// charge(s, ch) = float(scale x sum over the slice's ticks of the trace), 0 for a channel without a trace.
+    /// The slice's first tick is (slice start - frame time) / tick: right for slicers whose slice start is absolute
+    /// (SumSlice).  MaskSlice creates its slices with a start relative to the frame, so for a frame with a non-zero
+    /// time that is off by frame time / tick (pdvd doc 122 sec 3); slice_start_relative = true takes slice start / tick.
+    /// The two are the same for a frame with time 0.
     SliceCharge make_slice_charge_frame(const cluster_graph_t& gr, const IFrame::pointer& frame,
-                                        const std::string& tag, double scale);
+                                        const std::string& tag, double scale, bool slice_start_relative = false);
 
     /// Channel ident of every wire of every blob strip, per plane: chans[p] sorted unique.
     std::array<std::vector<int>, 3> blob_channels(const IBlob::pointer& blob);

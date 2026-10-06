@@ -41,6 +41,9 @@
       policy            ("uboone") geom_clustering policy for bb and for the output graph
       charge_tag        ("") the frame's trace tag holding the charge (e.g. "gauss2"); "" = all traces
       charge_scale      (0.25) the training charge unit: 0.25 x the 4-tick sum (frame or activity)
+      slice_start_relative (bool, false) false: the frame is read from tick (slice start - frame time) / tick, right
+                        when the slicer gives absolute slice starts; true: from slice start / tick, for MaskSlice
+                        (frame-relative slice starts).  Identical for a frame with time 0 (pdvd doc 122 sec 3)
       uncer_cut         (1e11) activity entries with larger uncertainty (dummy / masked) are ignored
       ident_base        (1 << 20) first ident of the output blobs
       dump_dir          ("" = off) write one npz per level and event (graph arrays, logits, decisions)
@@ -111,6 +114,9 @@ namespace WireCell::Img {
         std::string m_policy{"uboone"};
         std::string m_charge_tag{""};
         double m_charge_scale{0.25};
+        // false = legacy: the slice's first tick is (slice start - frame time) / tick.  true: slice start / tick, for
+        // slicers with frame-relative slice starts (MaskSlice) on frames with a non-zero time (pdvd doc 122 sec 3).
+        bool m_slice_start_relative{false};
         double m_uncer_cut{1e11};
         int m_ident_base{1 << 20};
         std::string m_dump_dir{""};
