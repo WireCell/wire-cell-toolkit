@@ -102,3 +102,18 @@ TEST_CASE("root knob defaults: UbooneTaggerOutputVisitor nu_particle_links is OF
     REQUIRE_MESSAGE(cfg.isMember("nu_particle_links"), "missing knob: nu_particle_links");
     CHECK(cfg["nu_particle_links"].asBool() == false);
 }
+
+// ai-helper issue 35: dl_vtx_dump makes the writer emit T_dlvtx_call / T_dlvtx_cloud
+// on every event.  It MUST default false: with it on, tracking-pr.root gains two
+// trees and is no longer byte-identical to every arm recorded before.
+TEST_CASE("root knob defaults: SbndPrMagnifyTrackingVisitor dl_vtx_dump is OFF")
+{
+    PluginManager::instance().add("WireCellRoot");
+    auto icfg = Factory::lookup<IConfigurable>("SbndPrMagnifyTrackingVisitor",
+                                               "issue35_knobdefaults_probe");
+    REQUIRE(icfg);
+    auto cfg = icfg->default_configuration();
+    REQUIRE_MESSAGE(cfg.isMember("dl_vtx_dump"), "missing knob: dl_vtx_dump");
+    CHECK(cfg["dl_vtx_dump"].asBool() == false);
+    CHECK_FALSE(cfg.isMember("sce_field"));   // optional; absent => truth_reco_* = truth_*, truth_sce_applied = 0
+}

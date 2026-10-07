@@ -85,6 +85,10 @@ namespace WireCell {
             // ai-helper issue 35: optional TrueFwd (true->reco) SCE map, used only to
             // shift the MC truth vertex into the DL cloud's frame in T_dlvtx_call.
             ISCEField::pointer m_sce{nullptr};
+            // ai-helper issue 35: true => T_dlvtx_call / T_dlvtx_cloud are always written (empty when no call
+            // was recorded), so the file schema does not depend on the event.  False (default) => written only
+            // when a call was recorded (and then only because TaggerCheckNeutrino.dl_vtx_dump was on).
+            bool m_dl_vtx_dump{false};
             // sbnd_xin/docs/109 group 1: write TaggerCheckNeutrino's selection
             // census (Grouping::get_nu_census) as T_bundle (one row per
             // in-beam-window flash bundle, with the reason it did or did not

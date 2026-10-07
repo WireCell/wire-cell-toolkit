@@ -1000,8 +1000,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
               // tcn_overrides (ai-helper issue 35): TaggerCheckNeutrino keys merged LAST,
-              // over the tcn_knobs bag, for experiments from a top-level job (e.g.
-              // {dl_vtx_dual_chain: false}).  Default {} => byte-identical.
+              // over the tcn_knobs bag AND the named keys pr() sets itself, for
+              // experiments from a top-level job (e.g. {dl_vtx_dual_chain: false}).
+              // Default {} => byte-identical.  NOTE: {dl_vtx_dump: true} here records
+              // but does not configure the writer's sce_field / dl_vtx_dump (the
+              // dl_vtx_dump argument does both); T_dlvtx_call.truth_sce_applied says which.
               tcn_overrides={},
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
@@ -2872,7 +2875,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                 kink_dqdx_hot_ratio=kink_dqdx_hot_ratio,
               // doc 77 round 2: these five are read elsewhere in pr() too, so they stay
               // named parameters and join the knob bag here rather than at the job.
-              knobs=tcn_knobs + tcn_overrides + {
+              knobs=tcn_knobs + {
                   [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35
                   [if cathode_x != null then 'cathode_x']: cathode_x,
                   [if cosmic_consistent_fv then 'cosmic_consistent_fv']: true,
@@ -2882,7 +2885,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
-              }),
+              } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
             // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -2951,6 +2954,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     grouping: 'live',
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
+                    [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,

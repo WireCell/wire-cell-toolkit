@@ -78,11 +78,12 @@ flowchart TB
   class harvest dbg
 ```
 
-- **Two inputs per candidate.** The OFF pass builds the same kind of cloud from its exclusion-free fit and calls the same network. Its result is the snap hint. Its harvest is disabled, so its input isn't recorded anywhere today.
+- **Two inputs per candidate.** The OFF pass builds the same kind of cloud from its exclusion-free fit and calls the same network. Its result is the snap hint. Its harvest is disabled; with `dl_vtx_dump` its call is recorded like production's, tagged `pass = off`.
 - **The input is exact only at this point.** Afterwards, step D's `improve_vertex` and the audits refit the trajectory around the chosen vertex, and steps E and F work on that refit graph.
 - **What gets written:**
   - `tracking-pr.root` (`T_rec_charge`, the fit points) and the Bee `track_fit` layer are written from the final graph.
   - The calib JSON (`PrDisplayDump`) holds the final graph, plus the exact production-pass input when the harvest is on.
+  - With `dl_vtx_dump` (section 4), `tracking-pr.root` holds every network call's exact input and output, both passes.
 
 ## 3. Where the trajectory is (re)fit
 
@@ -104,13 +105,13 @@ Every `TrackFitting::do_multi_tracking` call site in the neutrino PR, by functio
 
 The OFF pass repeats the A–D rows on its own fitter, with exclusion off.
 
-## 4. Where issue 35 adds dump points
+## 4. The dump points (`dl_vtx_dump`, ai-helper issue 35)
 
-These are planned, not implemented yet.
+Implemented. The `pr()` parameter `dl_vtx_dump` (default off; a `wct-pr.jsonnet` TLA) sets `TaggerCheckNeutrino.dl_vtx_dump`, which records every network call as a `PR::DlVtxCall` (`clus/inc/WireCellClus/PRDlVtxDump.h`), and `SbndPrMagnifyTrackingVisitor.dl_vtx_dump` + `sce_field`, which write them. Nothing recorded is read by any decision; with the knob off every compiled SBND config is byte-identical and no tree is written.
 
-| point | what | how |
+| point | what | where |
 |---|---|---|
-| each network call, OFF and production | the exact `vec_xyzq` and the call's top-K payload, tagged `pass`, `nu_index` | a knob `dl_vtx_dump`, default off, written as `T_dlvtx_cloud` / `T_dlvtx_call` in `tracking-pr.root` |
-| the decision | the reranked choice, the snap outcome, the traditional vertex, the final vertex | `T_dlvtx_call` |
-| MC truth | the in-detector `truth_nu` vertex, transformed into the cloud's frame | `T_dlvtx_call` (MC only) |
-| standalone check | re-run `SCN_Vertex.SCN_Vertex` on `T_dlvtx_cloud` and compare with `T_dlvtx_call` | ai-helper script |
+| each network call | the exact `vec_xyzq` (float32, vertex block first), q scale/offset, top-K, this call's own payload; `pass` = production, OFF (snap mode, the same function) or `off-voxels` (voxels/union mode, `dual_chain_scn_voxels`); `status` when the network threw | `determine_overall_main_vertex_DL`, `dual_chain_scn_voxels` → `T_dlvtx_cloud` (one row per point) / `T_dlvtx_call` (one row per call) |
+| the decision | the traditional vertex, the call's own pick before the dual-chain snap (`rerank_*`), the accepted vertex after snap and veto (`dl_*`, `accepted`, `dual_transferred`, `two_end_veto`), each also as its row inside the vertex block, the hint the production call was given, the candidate's final vertex | `T_dlvtx_call` |
+| MC truth | the max-edep `truth_nu` interaction raw and shifted into the cloud's frame by the TrueFwd SCE map (`truth_sce_applied`), and every interaction of the event as vectors (`truth_all_*`) for a per-candidate choice | `T_dlvtx_call` (MC only) |
+| standalone check | re-run `SCN_Vertex.SCN_Vertex` on `T_dlvtx_cloud` with the call's top-K and compare with `payload` | ai-helper issue 35 `dlvtx-replay.py` |
