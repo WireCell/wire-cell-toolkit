@@ -144,6 +144,36 @@ void normalize_cluster_flags(Grouping& grouping, Log::logptr_t log, const std::s
     SPDLOG_LOGGER_DEBUG(log, "normalize_cluster_flags: ident={} grouping={} added={} missing flag values",
                         ident, grouping_name, nmissing);
 }
+
+size_t fill_sep_family_before_serialize(Grouping& grouping)
+{
+    // Walk the grouping NODE's children -- the order as_tensors appends in
+    // (the facade's children() is a cache).  The first child with a
+    // cluster_scalar PC sets the accumulated key set.
+    auto* gnode = grouping.node();
+    if (!gnode) return 0;
+    const PointCloud::Dataset* first = nullptr;
+    for (const auto* cnode : gnode->children()) {
+        const auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it == lpcs.end()) continue;
+        first = &it->second;
+        break;
+    }
+    if (!first || !first->has("sep_family")) {
+        return 0;
+    }
+    size_t nfilled = 0;
+    for (auto* cnode : gnode->children()) {
+        auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it == lpcs.end() || it->second.has("sep_family")) continue;
+        // as Cluster::set_scalar<int>("sep_family", 0) on a PC lacking the key
+        it->second.add("sep_family", PointCloud::Array({(int)0}));
+        ++nfilled;
+    }
+    return nfilled;
+}
 }  // namespace WireCell::Clus::Facade
 
 
@@ -292,6 +322,16 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     if (m_ctpc_aniso_metric) {
         log->info("ctpc_aniso_metric ON: ctpc radius queries use the lattice-normalised "
                   "metric (doc pdvd/36) on every grouping loaded by this node");
+    }
+
+    // doc icarus/04 sec 8: a 3-D dead region set on every grouping this node
+    // loads (load_grouping).  Absent/empty key => no region, legacy path.
+    m_dead_region_tn = get(cfg, "dead_region", m_dead_region_tn);
+    m_dead_region = nullptr;
+    if (!m_dead_region_tn.empty()) {
+        m_dead_region = Factory::find_tn<IFiducial>(m_dead_region_tn);
+        log->info("dead_region ON: {} counts as dead on all planes on every grouping "
+                  "loaded by this node (doc icarus/04 sec 8)", m_dead_region_tn);
     }
 
     for (auto jtn : cfg["pipeline"]) {
@@ -550,6 +590,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
 
     cfg["dead_live_overlap_offset"] = m_dead_live_overlap_offset;
     cfg["ctpc_aniso_metric"] = m_ctpc_aniso_metric;  // doc pdvd/36: false = legacy isotropic ctpc metric
+    cfg["dead_region"] = m_dead_region_tn;  // doc icarus/04 sec 8: "" = no 3-D dead region
 
     cfg["use_config_rse"] = false;  // By default, don't use configured RSE
     cfg["runNo"] = m_runNo;
@@ -3877,6 +3918,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
     grouping->set_ctpc_aniso_metric(m_ctpc_aniso_metric);  // doc pdvd/36
+    grouping->set_dead_region(m_dead_region);              // doc icarus/04 sec 8 (null = none)
     check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
 }
@@ -4369,6 +4411,13 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
                                          "nu_band_veto_role", "perblob");
                 }
             }
+        }
+        // separate(tag_family=true) writes sep_family on some clusters only;
+        // fill it where the serialization below would otherwise throw
+        // (no-op on every input that serializes today; wcfm/docs/13).
+        if (const size_t nsep = fill_sep_family_before_serialize(grouping)) {
+            SPDLOG_LOGGER_DEBUG(log, "fill_sep_family_before_serialize: ident={} grouping={} filled={}",
+                                ident, name, nsep);
         }
         auto node = ensemble.remove_child(grouping);
         check_perblob_provenance(*node, "save:" + outpath(name, ident));

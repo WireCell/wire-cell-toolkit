@@ -15,6 +15,22 @@ using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
 using namespace WireCell::PointCloud::Tree;
 
+// Distance cuts of the merge passes (fdvd_sim doc 04).  The member defaults are
+// the literals the passes used before these became knobs, so an absent key is
+// byte-identical.  bbox_prefilter skips get_closest_points() for a pair whose
+// axis-aligned bounding-box distance already reaches the pass's cut: that call
+// returns the distance of an actual point pair, which can never be below the
+// bounding-box distance of the same kd3d points, so the skipped pair could not
+// have passed "dis < cut".  It is applied to the small->big and both small-small
+// passes only; the big-big pass is left as is.
+struct IsolatedCuts {
+    double small_big_dis_cut{80 * units::cm};
+    double small_chain_dis_cut{5 * units::cm};
+    double small_small_dis_cut{50 * units::cm};
+    double big_dis_cut{3 * units::cm};
+    double big_dis_range_cut{16 * units::cm};
+    bool bbox_prefilter{false};
+};
 
 static void clustering_isolated(
     Grouping& live_grouping,
@@ -27,7 +43,8 @@ static void clustering_isolated(
     bool save_assoc_id = false,
     double cathode_guard_xcut = 0,
     double cathode_x = 0,
-    double cathode_guard_dis_floor = 0
+    double cathode_guard_dis_floor = 0,
+    const IsolatedCuts& cuts = IsolatedCuts{}
     );
 
 class ClusteringIsolated : public IConfigurable, public Clus::IEnsembleVisitor, private NeedDV, private NeedScope {
@@ -80,13 +97,35 @@ public:
         // absorbs -- the 444187 pathology sat at 46-76 cm -- are declined.
         // Default 0 = no floor (the pure comparative guard).
         cathode_guard_dis_floor_ = get(config, "cathode_guard_dis_floor", cathode_guard_dis_floor_);
+        // Merge-pass distance cuts (fdvd_sim doc 04: FD-VD MeV events, where
+        // every cluster is "small" and the 50 cm small-small pass is the one
+        // that bundles).  Defaults = the former literals; see IsolatedCuts.
+        cuts_.small_big_dis_cut = get(config, "small_big_dis_cut", cuts_.small_big_dis_cut);
+        cuts_.small_chain_dis_cut = get(config, "small_chain_dis_cut", cuts_.small_chain_dis_cut);
+        cuts_.small_small_dis_cut = get(config, "small_small_dis_cut", cuts_.small_small_dis_cut);
+        cuts_.big_dis_cut = get(config, "big_dis_cut", cuts_.big_dis_cut);
+        cuts_.big_dis_range_cut = get(config, "big_dis_range_cut", cuts_.big_dis_range_cut);
+        cuts_.bbox_prefilter = get(config, "bbox_prefilter", cuts_.bbox_prefilter);
+    }
+
+    // Only the fdvd_sim doc 04 knobs are listed; the older keys keep their
+    // get() literal defaults in configure().
+    virtual Configuration default_configuration() const {
+        Configuration cfg;
+        cfg["small_big_dis_cut"] = cuts_.small_big_dis_cut;
+        cfg["small_chain_dis_cut"] = cuts_.small_chain_dis_cut;
+        cfg["small_small_dis_cut"] = cuts_.small_small_dis_cut;
+        cfg["big_dis_cut"] = cuts_.big_dis_cut;
+        cfg["big_dis_range_cut"] = cuts_.big_dis_range_cut;
+        cfg["bbox_prefilter"] = cuts_.bbox_prefilter;
+        return cfg;
     }
 
     void visit(Ensemble& ensemble) const {
         auto& live = *ensemble.with_name("live").at(0);
         return clustering_isolated(live, m_dv, m_scope, use_flash_t0_, flash_t0_window_,
                                    length_cut_, range_cut_, save_assoc_id_,
-                                   cathode_guard_xcut_, cathode_x_, cathode_guard_dis_floor_);
+                                   cathode_guard_xcut_, cathode_x_, cathode_guard_dis_floor_, cuts_);
     }
 
 private:
@@ -98,6 +137,7 @@ private:
     double cathode_guard_xcut_{0};
     double cathode_x_{0};
     double cathode_guard_dis_floor_{0};
+    IsolatedCuts cuts_;
 };
 
 
@@ -128,7 +168,8 @@ static void clustering_isolated(
     bool save_assoc_id,
     double cathode_guard_xcut,
     double cathode_x,
-    double cathode_guard_dis_floor
+    double cathode_guard_dis_floor,
+    const IsolatedCuts& cuts
 )
 {
     // Get all the wire plane IDs from the grouping
@@ -293,8 +334,41 @@ static void clustering_isolated(
     };
     std::set<std::pair<Cluster *, Cluster *>, cluster_pair_less_t> to_be_merged_pairs;
 
+    // bbox_prefilter (see IsolatedCuts): per-cluster box of the kd3d points
+    // get_closest_points() reads, and a box-to-box distance with the same
+    // sqrt(pow + pow + pow) arithmetic, which is monotone, so box distance <=
+    // any returned point-pair distance holds in floating point too.
+    struct BBox { double lo[3]{1e300, 1e300, 1e300}; double hi[3]{-1e300, -1e300, -1e300}; };
+    auto bbox_of = [](const Cluster* c) {
+        BBox b;
+        const int n = c->npoints();
+        for (int k = 0; k != n; k++) {
+            const geo_point_t p = c->point3d(k);
+            const double v[3] = {p.x(), p.y(), p.z()};
+            for (int a = 0; a != 3; a++) {
+                if (v[a] < b.lo[a]) b.lo[a] = v[a];
+                if (v[a] > b.hi[a]) b.hi[a] = v[a];
+            }
+        }
+        return b;
+    };
+    auto bbox_dis = [](const BBox& a, const BBox& b) {
+        double d[3];
+        for (int k = 0; k != 3; k++) {
+            d[k] = 0;
+            if (a.lo[k] - b.hi[k] > d[k]) d[k] = a.lo[k] - b.hi[k];
+            if (b.lo[k] - a.hi[k] > d[k]) d[k] = b.lo[k] - a.hi[k];
+        }
+        return sqrt(pow(d[0], 2) + pow(d[1], 2) + pow(d[2], 2));
+    };
+    std::vector<BBox> small_bbox, big_bbox;
+    if (cuts.bbox_prefilter) {
+        for (const auto* c : small_clusters) small_bbox.push_back(bbox_of(c));
+        for (const auto* c : big_clusters) big_bbox.push_back(bbox_of(c));
+    }
+
     // clustering small with big ones ...
-    double small_big_dis_cut = 80 * units::cm;
+    double small_big_dis_cut = cuts.small_big_dis_cut;
     std::set<Cluster *, cluster_less_functor> used_small_clusters;
     // Cathode guard (doc pr/19): smalls this pass declines to absorb.  They
     // also may not be chained into an absorbed group by the 5 cm small-small
@@ -310,6 +384,10 @@ static void clustering_isolated(
 
         for (auto it1 = big_clusters.begin(); it1 != big_clusters.end(); it1++) {
             Cluster *big_cluster = (*it1);
+            // A skipped big has dis >= cut: it can never be the absorbing
+            // min_dis cluster (the absorb needs min_dis < cut).
+            if (cuts.bbox_prefilter &&
+                bbox_dis(small_bbox[it - small_clusters.begin()], big_bbox[it1 - big_clusters.begin()]) >= small_big_dis_cut) continue;
             // big_cluster->Create_point_cloud();
             // ToyPointCloud *cloud2 = big_cluster->get_point_cloud();
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
@@ -349,12 +427,13 @@ static void clustering_isolated(
     // LogDebug("to_be_merged_pairs.size() = " << to_be_merged_pairs.size());
 
     // small distance ...
-    double small_small_dis_cut = 5 * units::cm;
+    double small_small_dis_cut = cuts.small_chain_dis_cut;
     for (size_t i = 0; i != small_clusters.size(); i++) {
         Cluster *cluster1 = small_clusters.at(i);
         // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
         for (size_t j = i + 1; j != small_clusters.size(); j++) {
             Cluster *cluster2 = small_clusters.at(j);
+            if (cuts.bbox_prefilter && bbox_dis(small_bbox[i], small_bbox[j]) >= small_small_dis_cut) continue;
             // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
@@ -380,19 +459,23 @@ static void clustering_isolated(
     }
 
     std::vector<Cluster *> remaining_small_clusters;
+    std::vector<BBox> remaining_bbox;
     for (auto it = small_clusters.begin(); it != small_clusters.end(); it++) {
         Cluster *curr_cluster = (*it);
-        if (used_small_clusters.find(curr_cluster) == used_small_clusters.end())
+        if (used_small_clusters.find(curr_cluster) == used_small_clusters.end()) {
             remaining_small_clusters.push_back(curr_cluster);
+            if (cuts.bbox_prefilter) remaining_bbox.push_back(small_bbox[it - small_clusters.begin()]);
+        }
     }
 
     // clustering small with small ones ...
-    small_small_dis_cut = 50 * units::cm;
+    small_small_dis_cut = cuts.small_small_dis_cut;
     for (size_t i = 0; i != remaining_small_clusters.size(); i++) {
         Cluster *cluster1 = remaining_small_clusters.at(i);
         // ToyPointCloud *cloud1 = cluster1->get_point_cloud();
         for (size_t j = i + 1; j != remaining_small_clusters.size(); j++) {
             Cluster *cluster2 = remaining_small_clusters.at(j);
+            if (cuts.bbox_prefilter && bbox_dis(remaining_bbox[i], remaining_bbox[j]) >= small_small_dis_cut) continue;
             // ToyPointCloud *cloud2 = cluster2->get_point_cloud();
             // std::tuple<int, int, double> results = cloud2->get_closest_points(cloud1);
             std::tuple<int, int, double> results = cluster2->get_closest_points(*cluster1);
@@ -409,8 +492,8 @@ static void clustering_isolated(
     // cloud1 is the longer one
     // used_big_clusters holds the shorter one
     std::set<Cluster *, cluster_less_functor> used_big_clusters;
-    double big_dis_cut = 3 * units::cm;
-    double big_dis_range_cut = 16 * units::cm;
+    double big_dis_cut = cuts.big_dis_cut;
+    double big_dis_range_cut = cuts.big_dis_range_cut;
     for (size_t i = 0; i != big_clusters.size(); i++) {
         // cluster1->Create_point_cloud();
         for (size_t j = i + 1; j != big_clusters.size(); j++) {

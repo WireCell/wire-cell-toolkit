@@ -2955,6 +2955,10 @@ namespace WireCell::Clus::PR {
         double m_cosmic_y_top_loose{80 * units::cm};    // :1191, 37 cm below top: event
                                                         // highest point, global gate on the
                                                         // whole flagp_cosmic decision.
+        // icarus/docs/04 G2/G3 (internal units; see TaggerCheckNeutrino.h):
+        // 0 = the legacy y=0 mid-plane and absolute-z BDT feature.
+        double m_cosmic_y_mid{0};
+        double m_cosmic_vtx_z_origin{0};
         double m_cosmic_y_small_piece{50 * units::cm};  // :1073, 67 cm below top: a <3 cm
                                                         // cluster counts as cosmic debris
                                                         // (acc_small_length) only if its PCA

@@ -17,6 +17,7 @@
 
 #include "WireCellIface/IFrameFilter.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IDFT.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellAux/SimpleTrace.h"
 
@@ -28,6 +29,10 @@ void load_plugins() {
     PluginManager& pm = PluginManager::instance();
     pm.add("WireCellAux");
     pm.add("WireCellSigProc");
+    // configure() resolves its "dft" with Factory::find_tn, which only finds
+    // an existing instance.  Create it here so these cases do not depend on
+    // an earlier test having done so (they failed when run alone).
+    Factory::lookup_tn<IDFT>("FftwDFT");
 }
 }  // namespace
 

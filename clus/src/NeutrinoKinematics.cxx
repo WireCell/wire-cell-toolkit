@@ -2,6 +2,7 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/PRShowerFunctions.h"
 #include "WireCellClus/PRGraph.h"
+#include "WireCellClus/KineSegmentLinks.h"  // sbnd_xin/docs/128-129
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/GraphTools.h"  // doc pr/93 r4: mir() for the orphan-track pass
@@ -9,6 +10,8 @@
 #include <cstdlib>
 #include <cstdio>   // doc pr/130 probe: std::fprintf
 #include <iostream>
+#include <map>   // sbnd_xin/docs/128 sec 10.2 probe
+#include <set>
 #include <sstream>
 
 static auto s_log = WireCell::Log::logger("clus.NeutrinoPattern");
@@ -17,6 +20,20 @@ using namespace WireCell::Clus::PR;
 using namespace WireCell::Clus;
 using namespace WireCell;
 using WireCell::GraphTools::mir;  // doc pr/93 r4
+
+// sbnd_xin/docs/128-129: the particle-flow display id of a segment,
+// cluster_id*1000 + (id() if set, else graph_index) -- the key of the Bee PF
+// node, the calib dump's segments[].id and T_rec_charge.real_cluster_id.
+// Duplicated (not shared) like its siblings PrDisplayDump.cxx pf_node_id and
+// MultiAlgBlobClustering.cxx seg_display_id, which must stay untouched.
+static int kine_seg_display_id(const SegmentPtr& seg)
+{
+    if (!seg) return -1;
+    int sid = seg->id();
+    if (sid < 0) sid = static_cast<int>(seg->get_graph_index());
+    const auto* cl = seg->cluster();
+    return cl ? cl->get_cluster_id() * 1000 + sid : sid;
+}
 
 // init_tagger_info: reset a TaggerInfo struct to its default values.
 // In the toolkit we rely on C++ default-member-initializers on the struct
@@ -126,6 +143,14 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // this walk never counts.
     IndexedSegmentSet counted_segs;
 
+    // sbnd_xin/docs/128-129: the particle behind each kine row, pushed at
+    // every row site in step with kine_energy_particle (track rows carry the
+    // segment, shower rows the shower) plus the pass that pushed it.  Read
+    // only at the end to fill the kine_particle_* and link_seg_* members,
+    // which no legacy output reads.
+    struct KineRowSource { SegmentPtr seg; ShowerPtr shower; int pool; };
+    std::vector<KineRowSource> row_src;
+
     // Mark all shower-internal vertices and segments as used.
     for (const ShowerPtr& shower : showers) {
         shower->fill_sets(used_vertices, used_segments, /*flag_exclude_start_segment=*/false);
@@ -201,7 +226,8 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // Helper: push one shower's kinematics into ktree vectors.
     // kine_energy_included is pushed by the caller (value differs by context).
     // -------------------------------------------------------------------------
-    auto push_shower_kine = [&](const ShowerPtr& shower) {
+    auto push_shower_kine = [&](const ShowerPtr& shower, int pool) {
+        row_src.push_back({nullptr, shower, pool});  // sbnd_xin/docs/128-129
         double kine_best   = shower->get_kine_best();
         double kine_charge = shower->get_kine_charge();
         double kine_range  = shower->get_kine_range();
@@ -254,7 +280,8 @@ KineInfo PatternAlgorithms::fill_kine_tree(
     // Helper: push one track segment's kinematics into ktree vectors.
     // Returns the segment's PDG code.
     // -------------------------------------------------------------------------
-    auto push_segment_kine = [&](SegmentPtr seg, int include_flag) -> int {
+    auto push_segment_kine = [&](SegmentPtr seg, int include_flag, int pool) -> int {
+        row_src.push_back({seg, nullptr, pool});  // sbnd_xin/docs/128-129
         int    pdg        = 0;
         double mass       = 0;
         double kine_best  = 0;
@@ -317,7 +344,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         auto it = map_sg_shower.find(seg);
         if (it != map_sg_shower.end()) {
             // This segment is a shower start-segment.
-            push_shower_kine(it->second);
+            push_shower_kine(it->second, 0);
             ktree.kine_energy_included.push_back(1);
             used_showers.insert(it->second);
         }
@@ -337,7 +364,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             used_segments.insert(seg);
             VertexPtr other_vtx = find_other_vertex(graph, seg, main_vertex);
             segments_to_be_examined.emplace_back(other_vtx, seg);
-            push_segment_kine(seg, 1);
+            push_segment_kine(seg, 1, 0);
         }
     }
     used_vertices.insert(main_vertex);
@@ -402,7 +429,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                     if (used_segments.count(curr_sg)) continue;
                     used_segments.insert(curr_sg);
 
-                    push_segment_kine(curr_sg, 1);
+                    push_segment_kine(curr_sg, 1, 1);
 
                     VertexPtr other_vtx = find_other_vertex(graph, curr_sg, curr_vtx);
                     if (!used_vertices.count(other_vtx))
@@ -412,7 +439,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                     // Shower
                     const ShowerPtr& shower = it2->second;
                     if (!used_showers.count(shower)) {
-                        push_shower_kine(shower);
+                        push_shower_kine(shower, 1);
                         ktree.kine_energy_included.push_back(1);
                         used_showers.insert(shower);
                     }
@@ -614,6 +641,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         double kine_range  = shower->get_kine_range();
         const int pdg      = shower_kine_pdg(shower);
 
+        row_src.push_back({nullptr, shower, 2});  // sbnd_xin/docs/128-129
         ktree.kine_energy_particle.push_back(static_cast<float>(kine_best / units::MeV));
         ktree.kine_particle_type.push_back(pdg);
 
@@ -687,7 +715,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
         size_t n_orphan = 0;
         for (const auto& [eidx, seg] : orphan_cands) {
             used_segments.insert(seg);
-            const int pdg = push_segment_kine(seg, 1);
+            const int pdg = push_segment_kine(seg, 1, 3);  // pool 3: orphan track
             ++n_orphan;
             SPDLOG_LOGGER_INFO(s_log,
                 "kine_count_orphan_tracks: COUNT seg idx={} cluster={} pdg={} ke_mev={:.2f} len_cm={:.1f}",
@@ -856,7 +884,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (!aims) continue;
             }
             used_segments.insert(seg);
-            const int pdg = push_segment_kine(seg, 1);
+            const int pdg = push_segment_kine(seg, 1, 4);  // pool 4: guard-freed track
             ++n_freed;
             SPDLOG_LOGGER_INFO(s_log,
                 "kine_count_guard_freed: COUNT seg idx={} cluster={} pdg={} ke_mev={:.2f} len_cm={:.1f}",
@@ -966,7 +994,7 @@ KineInfo PatternAlgorithms::fill_kine_tree(
                 if (!aims) continue;
             }
             used_segments.insert(seg);
-            const int pdg = push_segment_kine(seg, 1);
+            const int pdg = push_segment_kine(seg, 1, 5);  // pool 5: near cross-cluster track
             ++n_near;
             SPDLOG_LOGGER_INFO(s_log,
                 "kine_count_near_cross_cluster: COUNT seg idx={} cluster={} pdg={} score={:.3f} "
@@ -1087,6 +1115,152 @@ KineInfo PatternAlgorithms::fill_kine_tree(
             ktree.kine_n_excluded, ktree.kine_energy_flagged,
             main_cid, n_graph, n_graph_main, (int)counted_segs.size(),
             (int)ktree.kine_energy_particle.size(), (int)used_showers.size(), n_nocl);
+    }
+
+    // -------------------------------------------------------------------------
+    // sbnd_xin/docs/128-129 (P1 + P2 input): which particle each kine row is,
+    // and which row each counted segment fed.  In-memory only -- these
+    // members are written by UbooneTaggerOutputVisitor behind its
+    // nu_particle_links knob and read by nothing else, so every legacy output
+    // is untouched.  Placed after the census so counted_segs is complete.
+    // -------------------------------------------------------------------------
+    {
+        const auto* mv_cl = main_vertex->cluster();
+        ktree.kine_main_vertex_id = (mv_cl ? mv_cl->get_cluster_id() : 0) * 1000 +
+                                    static_cast<int>(main_vertex->get_graph_index());
+
+        const size_t nrow = ktree.kine_energy_particle.size();
+        std::vector<KineRowMembers> members;
+        members.reserve(row_src.size());
+        IndexedSegmentSet linked;
+        for (const auto& src : row_src) {
+            KineRowMembers m;
+            SegmentPtr key_seg = src.seg;
+            if (src.shower) {
+                m.is_shower = true;
+                key_seg = src.shower->start_segment();
+                IndexedVertexSet vtmp;
+                IndexedSegmentSet stmp;
+                src.shower->fill_sets(vtmp, stmp, /*flag_exclude_start_segment=*/false);
+                for (const auto& s : stmp) {
+                    m.graph_indices.push_back(static_cast<int>(s->get_graph_index()));
+                    linked.insert(s);
+                }
+            }
+            else if (src.seg) {
+                m.graph_indices.push_back(static_cast<int>(src.seg->get_graph_index()));
+                linked.insert(src.seg);
+            }
+            const auto* kcl = key_seg ? key_seg->cluster() : nullptr;
+            ktree.kine_particle_id.push_back(kine_seg_display_id(key_seg));
+            ktree.kine_particle_is_shower.push_back(m.is_shower ? 1 : 0);
+            ktree.kine_particle_cluster_id.push_back(kcl ? kcl->get_cluster_id() : -1);
+            ktree.kine_particle_nseg.push_back(static_cast<int>(m.graph_indices.size()));
+            ktree.kine_particle_pool.push_back(src.pool);
+            members.push_back(std::move(m));
+        }
+
+        // Self-check: one source per row, and the rows' segments are exactly
+        // the census's counted_segs.  A mismatch means a row site was missed;
+        // publish no links rather than wrong ones.
+        bool same_set = (linked.size() == counted_segs.size());
+        if (same_set) {
+            for (const auto& s : counted_segs) {
+                if (!linked.count(s)) { same_set = false; break; }
+            }
+        }
+        if (row_src.size() != nrow || !same_set) {
+            SPDLOG_LOGGER_WARN(s_log,
+                "kine_particle_links: self-check FAILED rows={} sources={} counted_segs={} "
+                "linked_segs={} -- link_seg_* left empty",
+                nrow, row_src.size(), counted_segs.size(), linked.size());
+            if (row_src.size() != nrow) {
+                // Not parallel to the rows: an identity vector that lines up
+                // with the wrong row is worse than none.
+                ktree.kine_particle_id.clear();
+                ktree.kine_particle_is_shower.clear();
+                ktree.kine_particle_cluster_id.clear();
+                ktree.kine_particle_nseg.clear();
+                ktree.kine_particle_pool.clear();
+            }
+        }
+        else {
+            for (const auto& ln : build_kine_segment_links(members)) {
+                ktree.link_seg_graph_index.push_back(ln.graph_index);
+                ktree.link_seg_kine_index.push_back(ln.kine_index);
+                ktree.link_seg_n_rows.push_back(ln.n_rows);
+            }
+        }
+
+        // sbnd_xin/docs/128 sec 10.2 probe (log only; changes no output): do
+        // two counted SHOWER rows that share a segment both carry its charge?
+        // Shower::add_segment merges each member's "fit" and
+        // "associate_points" clouds into the shower's own cloud, and a
+        // charge-based kine_best (kine_energy_info == 2) is computed from that
+        // cloud -- so a segment in two such rows is priced twice.  Price each
+        // shared segment with the same charge function (segment overload,
+        // cached 2-D maps only: an empty cache is never filled from here) and
+        // report the implied double count.  Silent when nothing is shared.
+        //
+        // sbnd_xin/docs/128 sec 12 (correction): with kine_charge_dedup on,
+        // recompute_shower_kine_charge_final already gives each 2-D charge
+        // cell to ONE shower, so charge-priced rows sharing a segment count it
+        // once between them; only a row priced otherwise (range, dQ/dx) adds a
+        // copy.  est_double_count_mev prices that (kine_overlap_extra_copies);
+        // est_double_count_legacy_mev keeps the sec 10.2 figure, which ignored
+        // the dedup.  Still an estimate: a shower re-priced after the dedup
+        // pass is not visible here.
+        if (!ktree.link_seg_n_rows.empty()) {
+            std::map<int, SegmentPtr> seg_by_gi;
+            for (const auto& s : counted_segs) seg_by_gi[static_cast<int>(s->get_graph_index())] = s;
+            std::map<int, std::vector<int>> shower_rows_of;  // graph_index -> shower rows holding it
+            for (size_t r = 0; r < members.size(); ++r) {
+                if (!members[r].is_shower) continue;
+                for (int gi : members[r].graph_indices) shower_rows_of[gi].push_back(static_cast<int>(r));
+            }
+            double est_double = 0, est_double_legacy = 0, shared_charge = 0;
+            int n_shared = 0;
+            std::set<int> rows_involved;
+            for (const auto& [gi, rows] : shower_rows_of) {
+                if (rows.size() < 2) continue;
+                ++n_shared;
+                int n_charge_rows = 0, n_other_rows = 0;
+                for (int r : rows) {
+                    rows_involved.insert(r);
+                    if (ktree.kine_energy_info[r] == 2) ++n_charge_rows;
+                    else ++n_other_rows;
+                }
+                const int extra = kine_overlap_extra_copies(n_charge_rows, n_other_rows, m_kine_charge.dedup);
+                double e = -1;
+                auto sit = seg_by_gi.find(gi);
+                if (sit != seg_by_gi.end() && !m_charge_2d_u.empty()) {
+                    e = cal_kine_charge(sit->second, graph, track_fitter, dv) / units::MeV;
+                }
+                if (e > 0) {
+                    shared_charge += e;
+                    if (n_charge_rows > 1) est_double_legacy += e * (n_charge_rows - 1);
+                    est_double += e * extra;
+                }
+                std::string rs;
+                for (int r : rows) {
+                    rs += (rs.empty() ? "" : ",") + std::to_string(r) + ":" +
+                          std::to_string(ktree.kine_energy_info[r]);
+                }
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_overlap_probe: seg={} rows(row:info)=[{}] seg_charge_mev={:.2f} extra_copies={}",
+                    kine_seg_display_id(sit != seg_by_gi.end() ? sit->second : SegmentPtr{}), rs, e, extra);
+            }
+            if (n_shared) {
+                double rows_e = 0;
+                for (int r : rows_involved) rows_e += ktree.kine_energy_particle[r];
+                SPDLOG_LOGGER_INFO(s_log,
+                    "kine_overlap_probe: SUMMARY shared_segs={} shower_rows={} rows_mev={:.2f} "
+                    "shared_seg_charge_mev={:.2f} dedup={} est_double_count_mev={:.2f} "
+                    "est_double_count_legacy_mev={:.2f} Enu={:.2f}",
+                    n_shared, rows_involved.size(), rows_e, shared_charge, m_kine_charge.dedup,
+                    est_double, est_double_legacy, ktree.kine_reco_Enu);
+            }
+        }
     }
 
     // -------------------------------------------------------------------------

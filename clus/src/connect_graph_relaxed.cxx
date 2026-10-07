@@ -200,6 +200,11 @@ void Graphs::connect_graph_relaxed(
                             if (scores[0]+scores[3]==0) num_bad1[1]++;
                             if (scores[1]+scores[4]==0) num_bad1[2]++;
                             if (scores[2]+scores[5]==0) num_bad1[3]++;
+                        } else if (grouping->in_dead_region(test_p)) {
+                            // doc icarus/04 sec 8: an off-face step inside a 3-D dead
+                            // region scores as test_good_point does there (all planes
+                            // dead): not bad, dead on every plane.  Null region -> never.
+                            num_bad2[0]++; num_bad2[1]++; num_bad2[2]++;
                         } else {
                             // Step is outside all APA volumes (between APAs).
                             // Count as fully bad: no signal from any plane can validate this gap.
@@ -444,8 +449,10 @@ void Graphs::connect_graph_relaxed(
                             else if (!grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
-                        } else {
+                        } else if (!grouping->in_dead_region(test_p)) {
                             // Step is outside all APA volumes — count as bad.
+                            // (doc icarus/04 sec 8: unless it is inside a 3-D dead
+                            // region, where it is dead, not bad.  Null region -> bad.)
                             num_bad++;
                             num_bad1++;
                         }
@@ -558,8 +565,10 @@ void Graphs::connect_graph_relaxed(
                             else if (!grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face(), 0.6*units::cm, 1, 0)) {
                                 num_bad1++;
                             }
-                        } else {
+                        } else if (!grouping->in_dead_region(test_p)) {
                             // Step is outside all APA volumes — count as bad.
+                            // (doc icarus/04 sec 8: unless it is inside a 3-D dead
+                            // region, where it is dead, not bad.  Null region -> bad.)
                             num_bad++;
                             num_bad1++;
                         }

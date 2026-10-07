@@ -14,6 +14,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/IFiducial.h"
 
 #include "WireCellClus/Facade_Mixins.h"
 #include "WireCellClus/Facade_Flash.h"
@@ -88,6 +89,8 @@ namespace WireCell::Clus::Facade {
         IDetectorVolumes::pointer m_dv{nullptr};
         // doc pdvd/36; see set_ctpc_aniso_metric().  Default OFF = legacy.
         bool m_ctpc_aniso_metric{false};
+        // doc icarus/04 sec 8; see set_dead_region().  Default null = no region.
+        IFiducial::pointer m_dead_region{nullptr};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -305,11 +308,43 @@ namespace WireCell::Clus::Facade {
         void set_ctpc_aniso_metric(bool on) { m_ctpc_aniso_metric = on; }
         bool ctpc_aniso_metric() const { return m_ctpc_aniso_metric; }
 
+        /// doc icarus/04 sec 8: a 3-D region with no data (ICARUS: the slab
+        /// |z| of a few cm where an anode's two faces meet and the Collection
+        /// plane records no charge).  A point inside it counts as dead on all
+        /// three planes in is_good_point / is_good_point_wc / test_good_point
+        /// and get_closest_dead_chs, and the path walkers treat an off-face
+        /// step inside it as dead instead of bad.  Unlike the W-wind dead gap
+        /// (in_dead_gap) it is geometric, so it works for any wire angle and
+        /// across the face boundary.  Set once per job by
+        /// MultiAlgBlobClustering::load_grouping from its "dead_region" config
+        /// key.  Null (default) = no region, every test is the legacy path.
+        void set_dead_region(IFiducial::pointer fid) { m_dead_region = fid; }
+        bool in_dead_region(const geo_point_t& point) const {
+            return m_dead_region && m_dead_region->contained(point);
+        }
+
         // Return a value representing the content of this grouping.
         size_t hash() const;
 
         std::set<WireCell::WirePlaneId> wpids() const { return cache().cluster_wpids; }
         std::set<WireCell::WirePlaneId> dv_wpids() const { return cache().dv_wpids; }
+
+        // icarus/docs/04 (G1): the (apa, face) a tagger falls back to for an
+        // uncontained vertex.  (0, 0) -- the legacy fallback -- whenever the
+        // detector volumes carry that face (uBooNE, SBND, PDHD, PDVD, ICARUS
+        // east), else the lowest (apa, face) they do carry (ICARUS west,
+        // anodes {2,3}, where the keyed lookups wire_angles(0,0) /
+        // get_drift_dir().at(0) would throw).  (0, 0) with no detector volumes.
+        std::pair<int, int> fallback_apa_face() const { return fallback_apa_face(cache().dv_wpids); }
+        static std::pair<int, int> fallback_apa_face(const std::set<WireCell::WirePlaneId>& ws) {
+            for (const auto& w : ws) {
+                if (w.apa() == 0 && w.face() == 0) return {0, 0};
+            }
+            if (ws.empty()) return {0, 0};
+            std::pair<int, int> best{ws.begin()->apa(), ws.begin()->face()};
+            for (const auto& w : ws) best = std::min(best, std::make_pair(w.apa(), w.face()));
+            return best;
+        }
 
         const std::map<int, mapfp_t<std::map<int, std::pair<double, double>>>>& all_dead_winds() const;
         std::map<int, std::pair<double, double>>& get_dead_winds(const int apa, const int face, const int pind) const;

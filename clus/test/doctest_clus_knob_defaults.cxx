@@ -427,6 +427,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     // doc pr/51 round 3: op3 satellite-anchor extension + traditional-path
     // swap-apply -- both OFF.
     CHECK_KNOB_BOOL(cfg, "main_vertex_swap_apply", false);
+    // sbnd_xin/docs/128 sec 10: clean discard of an unapplied swap -- OFF.
+    CHECK_KNOB_BOOL(cfg, "main_vertex_swap_discard_clean", false);
     // doc pr/51 round 4: diagnostic-only rough-path probe -- OFF.
     CHECK_KNOB_BOOL(cfg, "rough_path_probe", false);
     CHECK_KNOB_BOOL(cfg, "sgp_edge_probe", false);   // doc pr/73: per-edge sentinel, log-only
@@ -1652,4 +1654,15 @@ TEST_CASE("clus knob defaults: TrackFitting proj_skip_unmapped_face is off")
     CHECK(tf.get_parameter("proj_skip_unmapped_face") == doctest::Approx(1.0));
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().proj_skip_unmapped_face == doctest::Approx(0.0));
+}
+
+TEST_CASE("clus knob defaults: ClusteringIsolated merge cuts are the former literals (fdvd_sim doc 04)")
+{
+    auto cfg = defaults_of("ClusteringIsolated");
+    CHECK_KNOB_NUM(cfg, "small_big_dis_cut", 80 * units::cm);
+    CHECK_KNOB_NUM(cfg, "small_chain_dis_cut", 5 * units::cm);
+    CHECK_KNOB_NUM(cfg, "small_small_dis_cut", 50 * units::cm);
+    CHECK_KNOB_NUM(cfg, "big_dis_cut", 3 * units::cm);
+    CHECK_KNOB_NUM(cfg, "big_dis_range_cut", 16 * units::cm);
+    CHECK_KNOB_BOOL(cfg, "bbox_prefilter", false);
 }

@@ -248,6 +248,12 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
         m_params.keep_dqdx_response = value;
+    } else if (name == "electron_lifetime") {           // icarus/docs/04, WCT time units
+        m_params.electron_lifetime = value;
+        if (value > 0) {
+            SPDLOG_LOGGER_INFO(s_log, "electron_lifetime: tau = {:.4g} ms; fitted dQ of flash-matched clusters is corrected by exp(t_drift/tau)",
+                               value / units::ms);
+        }
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -435,6 +441,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dqdx_fit_keep_all_points;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
         return m_params.keep_dqdx_response;
+    } else if (name == "electron_lifetime") {           // icarus/docs/04
+        return m_params.electron_lifetime;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -597,6 +605,8 @@ void TrackFitting::reset_for_new_event(){
         SPDLOG_LOGGER_INFO(s_log, "tf_reset_census: carried from the previous event:{}",
                            carried.empty() ? std::string(" <nothing>") : carried);
     }
+
+    flush_lifetime_census();   // icarus/docs/04
 
     clear_graph();
     clear_segments();
@@ -3916,8 +3926,19 @@ void TrackFitting::ensure_cov_index(const Facade::Grouping* grouping) const
     }
 }
 
+void TrackFitting::flush_lifetime_census()
+{
+    // icarus/docs/04: census of the electron-lifetime correction (knob on only).
+    if (m_params.electron_lifetime > 0 && (m_lifetime_ncorr + m_lifetime_nskip) > 0) {
+        SPDLOG_LOGGER_INFO(s_log, "electron_lifetime: tau = {:.4g} ms, {} fitted points corrected, {} skipped (no matched flash / no live face)",
+                           m_params.electron_lifetime / units::ms, m_lifetime_ncorr, m_lifetime_nskip);
+    }
+    m_lifetime_ncorr = m_lifetime_nskip = 0;
+}
+
 TrackFitting::~TrackFitting()
 {
+    flush_lifetime_census();
     if (s_cov_census && m_cov_census[0]) {
         s_log->debug("TF_COV_CENSUS at destruction: calls={} visited={} box_pass={} covered={}",
                      m_cov_census[0], m_cov_census[1], m_cov_census[2], m_cov_census[3]);
@@ -8763,8 +8784,59 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
             fits[i].reduced_chi2 = traj_reduced_chi2[idx];
         }
     }
+
+    // icarus/docs/04: electron-lifetime correction of the fitted charge.  Off
+    // (electron_lifetime == 0) => this block does nothing.  Applied after the
+    // chi2 above, which compares the fit to the (uncorrected) measurement.
+    if (m_params.electron_lifetime > 0) {
+        for (const auto& [vertex_idx, vertex] : vertex_index_map) {
+            if (vertex_idx >= n_3D_pos) continue;
+            auto& vertex_fit = vertex->fit();
+            const auto wpid = m_dv->contained_by(vertex_fit.point);
+            vertex_fit.dQ *= electron_lifetime_at(vertex->cluster(), vertex_fit.point, wpid.apa(), wpid.face());
+        }
+        for (const auto& ed : get_segment_edges()) {
+            auto& edge_bundle = (*m_graph)[ed];
+            if (!edge_bundle.segment) continue;
+            auto segment = edge_bundle.segment;
+            auto& fits = segment->fits();
+            const size_t sg = segment->get_graph_index();
+            for (size_t i = 0; i < fits.size(); i++) {
+                auto it = segment_point_index_map.find({sg, i});
+                if (it == segment_point_index_map.end() || it->second >= n_3D_pos) continue;
+                const auto wpid = m_dv->contained_by(fits[i].point);
+                fits[i].dQ *= electron_lifetime_at(segment->cluster(), fits[i].point, wpid.apa(), wpid.face());
+            }
+        }
+    }
 }
 
+
+double Clus::TrackFitting::electron_lifetime_factor(double drift_distance, double drift_speed, double lifetime)
+{
+    if (!(lifetime > 0) || !(drift_speed > 0)) return 1.0;
+    return std::exp(std::abs(drift_distance) / drift_speed / lifetime);
+}
+
+double Clus::TrackFitting::electron_lifetime_at(const Facade::Cluster* cluster, const WireCell::Point& p, int apa, int face)
+{
+    if (!(m_params.electron_lifetime > 0)) return 1.0;
+    if (!cluster || apa < 0 || face < 0 || !m_grouping || !cluster->get_matched_flash()) {
+        ++m_lifetime_nskip;
+        return 1.0;
+    }
+    auto anode = m_grouping->get_anode(apa);
+    if (!anode || face >= (int) anode->faces().size() || !anode->faces()[face]) {
+        ++m_lifetime_nskip;
+        return 1.0;
+    }
+    // Same anode position and drift speed as the fitter's diffusion model
+    // (dQ_dx_multi_fit / dQ_dx_fit: drift_distance = |x - xorig|).
+    const double xorig = anode->faces()[face]->planes()[2]->wires().front()->center().x();
+    const double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
+    ++m_lifetime_ncorr;
+    return electron_lifetime_factor(p.x() - xorig, drift_speed, m_params.electron_lifetime);
+}
 
 int Clus::TrackFitting::dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf)
 {
@@ -9558,6 +9630,16 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
         reduced_chi2[k] = (total_weight > 0) ? sqrt(total_chi2 / total_weight) : 0;
     }
     
+    // icarus/docs/04: electron-lifetime correction of the fitted charge (see
+    // dQ_dx_multi_fit).  Off (electron_lifetime == 0) => nothing happens.
+    if (m_params.electron_lifetime > 0) {
+        for (int i = 0; i < n_3D_pos; i++) {
+            auto segment = fine_tracking_path.at(i).second;
+            dQ[i] *= electron_lifetime_at(segment ? segment->cluster() : nullptr,
+                                          fine_tracking_path.at(i).first, paf.at(i).first, paf.at(i).second);
+        }
+    }
+
     // Restore original charge data
     recover_original_charge_data();
 }

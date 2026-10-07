@@ -88,6 +88,10 @@ namespace WireCell::Aux::ClusterArrays {
     // invalidate neither node nor edge descriptors.
     cluster_graph_t bodge_channel_slice(cluster_graph_t graph);
 
+    // Same as bodge_channel_slice() but modifies the graph in place
+    // (no copy of a whole-event graph beyond the caller's own).
+    void bodge_channel_slice_inplace(cluster_graph_t& graph);
+
 
     // Fill array sets from cluster.
     void to_arrays(const cluster_graph_t& cgraph,

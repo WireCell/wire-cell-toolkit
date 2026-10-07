@@ -1425,6 +1425,15 @@ function(
     // match except T_rec_charge.cluster_id (7 files, the column this fixes),
     // the two added branches and the operating-point hash.
     root_point_ids = true,
+    // sbnd_xin/docs/128-129: book the particle links -- T_kine per-row
+    // identity, a T_segment tree (one row per PR-graph segment per candidate:
+    // in_enu, kine_index, shower_id, ...) and per-cluster counts on the
+    // T_tagger roster.  Observation only.  C++ default stays false.
+    // SBND PRODUCTION ON 2026-09-29 on the owner's word (doc 128 sec 10.1): on
+    // 67 sbnd_xin data events the knob adds only T_segment + 6 T_kine + 3
+    // T_tagger branches, every existing branch and archive identical (doc 128
+    // sec 9.3).  -A root_particle_links=false restores the pre-flip file.
+    root_particle_links = true,
     // sbnd_xin/docs/109 rev 3: collapse neutrino candidates that come from one
     // physical beam flash seen by both drift volumes (same flash_group), keeping
     // the longest selected activity.  This MOVES the selection -- it removes
@@ -2993,11 +3002,20 @@ function(
     // See sbnd_xin/docs/77_knob-ledger.tsv.
     // doc pr/51 round 3 -- apply the traditional main-vertex path's cluster
     // swap decision instead of silently discarding it (a latent bug: the
-    // decision fires today but never reaches the caller).  DEFAULT OFF
-    // pending owner review.  Validation: -A main_vertex_swap_apply=true (or
-    // the SBND_MAIN_VERTEX_SWAP_APPLY runner env).  false omits the key =>
-    // byte-identical.
-    main_vertex_swap_apply = false,
+    // decision fires today but never reaches the caller, and the discard
+    // leaves other_clusters and the main flags edited -- sbnd_xin/docs/128
+    // sec 9.5).  SBND PRODUCTION ON 2026-09-29: the owner chose this
+    // (option A) over main_vertex_swap_discard_clean (option B), doc 128
+    // sec 10.5.  --tla-code main_vertex_swap_apply=false (or
+    // SBND_MAIN_VERTEX_SWAP_APPLY=false) omits the key => the pre-flip
+    // config, byte-identical.
+    main_vertex_swap_apply = true,
+    // sbnd_xin/docs/128 sec 10 -- when the traditional path's swap is NOT
+    // applied, undo its side effects (other_clusters regains the swap target
+    // and loses the duplicated main; Flags::main_cluster restored).  Fixes the
+    // half-applied state pr/51 round 3 documented.  C++ default false; key
+    // omitted when off => byte-identical.
+    main_vertex_swap_discard_clean = false,
     // doc pr/51 round 4 -- diagnostic-only rough-path probe for the
     // near-vertex short-cut investigation (path-COST, not graph-shape).
     // No graph/fit/segment content is ever changed; every line is TRACE.
@@ -3717,6 +3735,7 @@ function(
         [if excl_t0_frame then 'excl_t0_frame']: true,
         [if kine_dqdx_skip_zero_dx then 'kine_dqdx_skip_zero_dx']: true,
         [if main_vertex_swap_apply then 'main_vertex_swap_apply']: true,
+        [if main_vertex_swap_discard_clean then 'main_vertex_swap_discard_clean']: true,  // sbnd_xin/docs/128 sec 10
         [if rough_path_probe then 'rough_path_probe']: true,
         [if steiner_gap_penalty != null then 'steiner_gap_penalty']: steiner_gap_penalty,
         [if sgp_dead_alpha != null then 'sgp_dead_alpha']: sgp_dead_alpha,
@@ -3880,6 +3899,7 @@ function(
                              root_cluster_flags=root_cluster_flags,
                              root_provenance=root_provenance,
                              root_point_ids=root_point_ids,  // sbnd_xin/docs/109 rev 3
+                             root_particle_links=root_particle_links,  // sbnd_xin/docs/128-129
                              provenance_extra=provenance_extra,
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,

@@ -232,3 +232,55 @@ TEST_CASE("opflashfinder legacy refine is unchanged and blind to the tail")
         CHECK(((const double*) op->data())[0] == doctest::Approx(100.0));
     }
 }
+
+// Late-light model knobs (fdvd_sim doc 04).  A 100 PE seed at ~100 ns and a
+// 12 PE flash ~4.9 us later, both with a 15 ns hit-time half-spread.  With the
+// larana LAr tau (1.6 us) the late-light hypothesis is ~4.7 PE, so the later
+// flash sits ~3.4 sigma above it and survives; a Xe-like tau (5.6 us) or a
+// wider cut (4 sigma) removes it.
+static std::vector<HitRow> late_light_rows()
+{
+    std::vector<HitRow> rows;
+    for (int ch = 0; ch < 4; ++ch) rows.push_back(hit(ch, 90.0 + 10.0 * ch, 30.0, 25.0));
+    for (int ch = 0; ch < 4; ++ch) rows.push_back(hit(ch, 5000.0 + 10.0 * ch, 30.0, 3.0));
+    return rows;
+}
+
+TEST_CASE("opflashfinder late-light knobs default to the larana constants")
+{
+    Flash::OpFlashFinder ff;
+    auto cfg = ff.default_configuration();
+    CHECK(cfg["late_light_tau_us"].asDouble() == 1.6);
+    CHECK(cfg["late_light_nsigma"].asDouble() == 3.0);
+    // The us -> ns conversion reproduces the former literal exactly.
+    CHECK(cfg["late_light_tau_us"].asDouble() * 1000.0 == 1600.0);
+}
+
+TEST_CASE("opflashfinder late-light tau and nsigma decide the removal")
+{
+    Configuration over;
+    over["remove_late_light"] = true;
+
+    SUBCASE("LAr tau keeps the later flash") {
+        auto out = run_finder(over, late_light_rows());
+        CHECK(named_tensor(out, "opflash")->shape()[0] == 2);
+    }
+    SUBCASE("explicit default values equal the absent keys") {
+        over["late_light_tau_us"] = 1.6;
+        over["late_light_nsigma"] = 3.0;
+        auto out = run_finder(over, late_light_rows());
+        CHECK(named_tensor(out, "opflash")->shape()[0] == 2);
+    }
+    SUBCASE("a Xe-like tau removes it") {
+        over["late_light_tau_us"] = 5.6;
+        auto out = run_finder(over, late_light_rows());
+        REQUIRE(named_tensor(out, "opflash")->shape()[0] == 1);
+        const double* M = (const double*) named_tensor(out, "opflash")->data();
+        CHECK(M[0] == doctest::Approx(105.0));  // the seed survives
+    }
+    SUBCASE("a 4 sigma cut removes it") {
+        over["late_light_nsigma"] = 4.0;
+        auto out = run_finder(over, late_light_rows());
+        CHECK(named_tensor(out, "opflash")->shape()[0] == 1);
+    }
+}

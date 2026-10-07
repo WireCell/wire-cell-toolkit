@@ -7,6 +7,7 @@
 #include "WireCellUtil/Persist.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <limits>
@@ -25,6 +26,7 @@ namespace {
     struct Hit {
         int channel;
         double time, pe;
+        double width{0};  // ns (used by step 0 only)
     };
 
     struct Cand {
@@ -226,17 +228,78 @@ namespace {
         return s;
     }
 
+    // Step 0: fake hits.  After a very bright pulse the SBND reco1 PMT hit finder can emit wide
+    // hits on that one PMT that no other PMT sees.  A hit is fake when it has >= fake_min_pe, the
+    // same OpDet had a hit of >= fake_prev_pe in the fake_prev_ns before it, the other OpDets hold
+    // < fake_max_frac of its PE within -fake_pre_ns/+fake_post_ns of it, and either that bright
+    // hit is >= fake_prev_width_ns wide (the hit finder's longest hits, ~4.4 us: what follows them
+    // on the PMT is excess) or the hit itself has >= fake_big_pe (no real light puts that on one
+    // PMT alone).  Without the last condition the veto also removes the second piece of a
+    // saturated pulse the hit finder cut in two, which carries real light (MC, 104 events: 61 of
+    // 123 such hits, 81 k PE of real light; with it 0).
+    std::vector<char> fake_hits(const std::vector<Hit>& hits, const Params& p)
+    {
+        std::vector<char> fake(hits.size(), 0);
+        std::vector<size_t> order(hits.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return hits[a].time < hits[b].time; });
+        std::map<int, std::pair<double, double>> last_bright;  // OpDet -> (time, width) of its latest bright hit
+        size_t lo = 0, hi = 0;              // window [lo, hi) in time order
+        for (size_t i = 0; i < order.size(); ++i) {
+            const auto& h = hits[order[i]];
+            if (h.pe >= p.fake_min_pe) {
+                auto it = last_bright.find(h.channel);
+                if (it != last_bright.end() && h.time - it->second.first <= p.fake_prev_ns &&
+                    (it->second.second >= p.fake_prev_width_ns || h.pe >= p.fake_big_pe)) {
+                    while (lo < order.size() && hits[order[lo]].time < h.time - p.fake_pre_ns) ++lo;
+                    hi = std::max(hi, lo);
+                    while (hi < order.size() && hits[order[hi]].time <= h.time + p.fake_post_ns) ++hi;
+                    double other = 0;
+                    for (size_t j = lo; j < hi; ++j)
+                        if (hits[order[j]].channel != h.channel) other += hits[order[j]].pe;
+                    if (other < p.fake_max_frac * h.pe) fake[order[i]] = 1;
+                }
+            }
+            // a bright hit counts as "before" only for later hits (ties in time: not before itself)
+            if (h.pe >= p.fake_prev_pe) last_bright[h.channel] = {h.time, h.width};
+        }
+        return fake;
+    }
+
     // SBND flash time (SimpleFlashAlgo candidate bin + FlashT0SelectedChannels).
     double prompt_time(const std::vector<int>& fh, const std::vector<Hit>& hits, const Params& p)
     {
         double t_lo = std::numeric_limits<double>::max();
         for (int k : fh) t_lo = std::min(t_lo, hits[k].time);
-        std::map<long, double> bins;
-        for (int k : fh) bins[long((hits[k].time - t_lo) / p.prompt_bin_ns)] += hits[k].pe;
-        long best = 0;
-        double best_pe = -1;
-        for (const auto& [b, pe] : bins)  // ascending: ties go to the earliest bin
-            if (pe > best_pe) { best = b; best_pe = pe; }
+        struct Bin {
+            double pe{0};
+            int nhit{0};
+            std::set<int> ods;
+        };
+        std::map<long, Bin> bins;
+        for (int k : fh) {
+            auto& b = bins[long((hits[k].time - t_lo) / p.prompt_bin_ns)];
+            b.pe += hits[k].pe;
+            ++b.nhit;
+            b.ods.insert(hits[k].channel);
+        }
+        // candidate bin as SimpleFlashAlgo: >= prompt_min_pe and >= prompt_min_hits hits (and
+        // >= prompt_min_opdets OpDets), so a single-PMT fake hit cannot set the time; brightest
+        // bin of all if none qualifies
+        auto pick = [&](bool coinc) {
+            long best = -1;
+            double best_pe = -1;
+            for (const auto& [b, v] : bins) {  // ascending: ties go to the earliest bin
+                if (coinc && (v.pe < p.prompt_min_pe || v.nhit < p.prompt_min_hits ||
+                              int(v.ods.size()) < p.prompt_min_opdets))
+                    continue;
+                if (v.pe > best_pe) { best = b; best_pe = v.pe; }
+            }
+            return best;
+        };
+        long best = pick(true);
+        if (best < 0) best = pick(false);
         const double tb = t_lo + best * p.prompt_bin_ns;
         std::vector<std::pair<double, double>> sel;  // (pe, time)
         double pe_sum = 0;
@@ -304,8 +367,25 @@ WireCell::Configuration Flash::SBNDOpFlashFinder::default_configuration() const
     cfg["prompt_post_ns"] = p.prompt_post_ns;
     cfg["prompt_min_hit_pe"] = p.prompt_min_hit_pe;
     cfg["prompt_pe_fraction"] = p.prompt_pe_fraction;
+    cfg["prompt_min_pe"] = p.prompt_min_pe;
+    cfg["prompt_min_hits"] = p.prompt_min_hits;
+    cfg["prompt_min_opdets"] = p.prompt_min_opdets;
+    cfg["fake_veto"] = p.fake_veto;
+    cfg["fake_min_pe"] = p.fake_min_pe;
+    cfg["fake_prev_pe"] = p.fake_prev_pe;
+    cfg["fake_prev_ns"] = p.fake_prev_ns;
+    cfg["fake_pre_ns"] = p.fake_pre_ns;
+    cfg["fake_post_ns"] = p.fake_post_ns;
+    cfg["fake_max_frac"] = p.fake_max_frac;
+    cfg["fake_prev_width_ns"] = p.fake_prev_width_ns;
+    cfg["fake_big_pe"] = p.fake_big_pe;
     cfg["offset_us"] = m_offset_us;
     cfg["metadata_extra"] = m_metadata_extra;
+    cfg["light_travel"] = m_lt;
+    cfg["light_travel_file"] = m_lt_file;
+    cfg["light_travel_curve"] = m_lt_curve;
+    cfg["light_travel_fail"] = m_lt_fail;
+    cfg["tpc"] = m_tpc;
     return cfg;
 }
 
@@ -347,10 +427,55 @@ void Flash::SBNDOpFlashFinder::configure(const WireCell::Configuration& cfg)
     p.prompt_post_ns = get(cfg, "prompt_post_ns", p.prompt_post_ns);
     p.prompt_min_hit_pe = get(cfg, "prompt_min_hit_pe", p.prompt_min_hit_pe);
     p.prompt_pe_fraction = get(cfg, "prompt_pe_fraction", p.prompt_pe_fraction);
+    p.prompt_min_pe = get(cfg, "prompt_min_pe", p.prompt_min_pe);
+    p.prompt_min_hits = get(cfg, "prompt_min_hits", p.prompt_min_hits);
+    p.prompt_min_opdets = get(cfg, "prompt_min_opdets", p.prompt_min_opdets);
+    p.fake_veto = get(cfg, "fake_veto", p.fake_veto);
+    p.fake_min_pe = get(cfg, "fake_min_pe", p.fake_min_pe);
+    p.fake_prev_pe = get(cfg, "fake_prev_pe", p.fake_prev_pe);
+    p.fake_prev_ns = get(cfg, "fake_prev_ns", p.fake_prev_ns);
+    p.fake_pre_ns = get(cfg, "fake_pre_ns", p.fake_pre_ns);
+    p.fake_post_ns = get(cfg, "fake_post_ns", p.fake_post_ns);
+    p.fake_max_frac = get(cfg, "fake_max_frac", p.fake_max_frac);
+    p.fake_prev_width_ns = get(cfg, "fake_prev_width_ns", p.fake_prev_width_ns);
+    p.fake_big_pe = get(cfg, "fake_big_pe", p.fake_big_pe);
     m_offset_us = get(cfg, "offset_us", m_offset_us);
     if (cfg.isMember("metadata_extra")) m_metadata_extra = cfg["metadata_extra"];
     if (p.bin_width <= 0 || p.split_bin_ns <= 0 || p.prompt_bin_ns <= 0) {
         raise<ValueError>("SBNDOpFlashFinder: bin widths must be > 0");
+    }
+
+    m_lt = get(cfg, "light_travel", m_lt);
+    m_lt_file = get(cfg, "light_travel_file", m_lt_file);
+    m_lt_curve = get(cfg, "light_travel_curve", m_lt_curve);
+    m_lt_fail = get(cfg, "light_travel_fail", m_lt_fail);
+    m_tpc = get(cfg, "tpc", m_tpc);
+    if (m_lt) {
+        if (m_lt_fail != "wires" && m_lt_fail != "none") {
+            raise<ValueError>("SBNDOpFlashFinder: light_travel_fail must be wires or none");
+        }
+        if (m_lt_file.empty()) raise<ValueError>("SBNDOpFlashFinder: light_travel needs light_travel_file");
+        auto jlt = Persist::load(m_lt_file);
+        m_drift_cm = get(jlt, "drift_cm", m_drift_cm);
+        m_v_vuv = get(jlt, "v_vuv_cm_per_ns", m_v_vuv);
+        m_v_vis = get(jlt, "v_vis_cm_per_ns", m_v_vis);
+        m_od_type.assign(m_nchan, 0);
+        m_od_box.assign(m_nchan, -1);
+        for (const auto& jod : jlt["opdets"]) {
+            const int od = jod["opdet"].asInt();
+            if (od < 0 || od >= m_nchan) continue;
+            m_od_type[od] = jod["type"].asInt();
+            m_od_box[od] = jod["box"].asInt();
+        }
+        const auto& jc = jlt["curves"][m_lt_curve];
+        m_cal_ratio.clear();
+        m_cal_x.clear();
+        for (const auto& v : jc["ratio"]) m_cal_ratio.push_back(v.asDouble());
+        for (const auto& v : jc["x_cm"]) m_cal_x.push_back(v.asDouble());
+        if (m_cal_ratio.size() < 2 || m_cal_ratio.size() != m_cal_x.size()) {
+            raise<ValueError>("SBNDOpFlashFinder: no usable curve \"%s\" in %s", m_lt_curve, m_lt_file);
+        }
+        if (m_tpc != 0 && m_tpc != 1) log->warn("light_travel with tpc={}: X is written without a sign", m_tpc);
     }
 
     m_opdet_y.assign(m_nchan, 0.0);
@@ -366,6 +491,44 @@ void Flash::SBNDOpFlashFinder::configure(const WireCell::Configuration& cfg)
         m_opdet_y[od] = jod["y"].asDouble();
         m_opdet_z[od] = jod["z"].asDouble();
     }
+}
+
+// |X| from the cathode [cm] from the PMT PE ratio (DriftEstimatorPMTRatio::GetDriftPosition,
+// DataCalibration branch).  ok = false when no box has light on its uncoated PMT and a coated one.
+double Flash::SBNDOpFlashFinder::drift_abs_x(const std::vector<double>& pes, bool& ok) const
+{
+    std::map<int, std::array<double, 3>> box;  // box -> coated PE, coated PMTs with PE, uncoated PE
+    for (int od = 0; od < m_nchan; ++od) {
+        if (pes[od] == 0 || m_od_type[od] == 0) continue;
+        auto& b = box[m_od_box[od]];
+        if (m_od_type[od] == 1) {
+            b[0] += pes[od];
+            b[1] += 1;
+        }
+        else b[2] += pes[od];
+    }
+    double tot = 0, wsum = 0;
+    for (const auto& [id, b] : box) {
+        if (b[2] == 0 || b[1] < 1) continue;
+        const double r = b[2] / b[0] * b[1];
+        tot += b[0] + b[2];
+        wsum += r * (b[0] + b[2]);
+    }
+    ok = tot > 0;
+    const double r = ok ? wsum / tot : 0.0;  // failed: the ratio -> 0 end of the curve
+    if (r <= m_cal_ratio.front()) return m_cal_x.front();
+    if (r >= m_cal_ratio.back()) return m_cal_x.back();
+    const size_t k = std::upper_bound(m_cal_ratio.begin(), m_cal_ratio.end(), r) - m_cal_ratio.begin();
+    const double f = (r - m_cal_ratio[k - 1]) / (m_cal_ratio[k] - m_cal_ratio[k - 1]);
+    return m_cal_x[k - 1] + f * (m_cal_x[k] - m_cal_x[k - 1]);
+}
+
+// Time [ns] the light needs from |X| to the PMTs (DriftEstimatorPMTRatio::GetPropagationTime).
+double Flash::SBNDOpFlashFinder::travel_ns(double abs_x) const
+{
+    const double kink = 0.5 * m_drift_cm * (1.0 - m_v_vuv / m_v_vis);
+    if (abs_x > kink) return (m_drift_cm - abs_x) / m_v_vuv;
+    return abs_x / m_v_vuv + m_drift_cm / m_v_vis;
 }
 
 bool Flash::SBNDOpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet::pointer& out)
@@ -398,8 +561,27 @@ bool Flash::SBNDOpFlashFinder::operator()(const ITensorSet::pointer& in, ITensor
         const double* row = H + r * ncol;
         const int ch = int(row[0]);
         if (ch < 0 || ch >= m_nchan) continue;
-        hits.push_back(Hit{ch, row[1], row[5]});
+        hits.push_back(Hit{ch, row[1], row[5], row[2]});
         row_of.push_back(r);
+    }
+    // 0. fake hits: left out of every flash (kept in the output with no flash)
+    size_t nfake = 0;
+    double fake_pe = 0;
+    if (p.fake_veto) {
+        const auto fake = fake_hits(hits, p);
+        std::vector<Hit> good;
+        std::vector<size_t> good_row;
+        for (size_t k = 0; k < hits.size(); ++k) {
+            if (fake[k]) {
+                ++nfake;
+                fake_pe += hits[k].pe;
+                continue;
+            }
+            good.push_back(hits[k]);
+            good_row.push_back(row_of[k]);
+        }
+        hits = std::move(good);
+        row_of = std::move(good_row);
     }
 
     auto make = [&](std::vector<int> fh, int group) {
@@ -522,10 +704,32 @@ bool Flash::SBNDOpFlashFinder::operator()(const ITensorSet::pointer& in, ITensor
         flashes = std::move(kept);
     }
 
-    // 7. SBND prompt time, then time order
-    for (auto& f : flashes) f.time = prompt_time(f.hits, hits, p);
-    std::stable_sort(flashes.begin(), flashes.end(),
-                     [](const Cand& a, const Cand& b) { return a.time < b.time; });
+    // 7. SBND prompt time; 8. light travel-time correction; then time order
+    std::vector<std::array<double, 4>> drift(flashes.size());  // X, travel, time before, X ok
+    for (size_t f = 0; f < flashes.size(); ++f) {
+        auto& fl = flashes[f];
+        fl.time = prompt_time(fl.hits, hits, p);
+        if (!m_lt) continue;
+        bool ok = false;
+        const double ax = drift_abs_x(fl.pes, ok);
+        const double tt = (ok || m_lt_fail == "wires") ? travel_ns(ax) : 0.0;
+        drift[f] = {ok ? (m_tpc == 0 ? -ax : ax) : 0.0, tt, fl.time, ok ? 1.0 : 0.0};
+        fl.time -= tt;
+    }
+    {
+        std::vector<size_t> order(flashes.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::stable_sort(order.begin(), order.end(),
+                         [&](size_t a, size_t b) { return flashes[a].time < flashes[b].time; });
+        std::vector<Cand> fs;
+        std::vector<std::array<double, 4>> ds;
+        for (size_t k : order) {
+            fs.push_back(std::move(flashes[k]));
+            ds.push_back(drift[k]);
+        }
+        flashes = std::move(fs);
+        drift = std::move(ds);
+    }
 
     // Output: the OpFlashFinder tensor-set schema.
     const size_t nflash = flashes.size();
@@ -559,14 +763,28 @@ bool Flash::SBNDOpFlashFinder::operator()(const ITensorSet::pointer& in, ITensor
     add("opflash", nflash, mcol, matrix);
     add("flash_summary", nflash, 8, summary);
     add("ophits", nrow, 9, ohits);
+    if (m_lt) {
+        std::vector<double> dv;
+        for (const auto& d : drift) dv.insert(dv.end(), d.begin(), d.end());
+        add("flash_drift", nflash, 4, dv);
+    }
 
     Configuration md = in->metadata();
     md["producer"] = "wct-flash-sbnd";
     md["nchan"] = m_nchan;
     md["offset_us"] = m_offset_us;
+    if (m_lt) {
+        md["light_travel"] = true;
+        md["light_travel_curve"] = m_lt_curve;
+    }
+    if (p.fake_veto) {
+        md["fake_hits"] = (Json::UInt64) nfake;
+        md["fake_hits_pe"] = fake_pe;
+    }
     if (!m_metadata_extra.isNull())
         for (const auto& key : m_metadata_extra.getMemberNames()) md[key] = m_metadata_extra[key];
     out = std::make_shared<Aux::SimpleTensorSet>(in->ident(), md, ITensor::shared_vector(tensors));
-    log->debug("set {}: {} flashes from {} hits", in->ident(), nflash, hits.size());
+    log->debug("set {}: {} flashes from {} hits ({} fake hits, {:.0f} PE, left out)", in->ident(), nflash,
+               hits.size(), nfake, fake_pe);
     return true;
 }

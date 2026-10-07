@@ -409,6 +409,15 @@ public:
         double m_cosmic_y_top_strict{102};
         double m_cosmic_y_top_loose{80};
         double m_cosmic_y_small_piece{50};
+        // icarus/docs/04 G2: y of the detector mid-plane that cosmic_tagger's
+        // flagp_cosmic gate requires the main vertex to sit above (cm).  C++
+        // default 0 = the legacy literal (uBooNE and SBND are symmetric about
+        // y=0); ICARUS's active y is [-181.86, 134.96], mid-plane -23.45.
+        double m_cosmic_y_mid{0};
+        // icarus/docs/04 G3: subtracted from the numu-BDT input
+        // cosmict_10_vtx_z only (cm).  C++ default 0 = absolute z (uBooNE and
+        // SBND start at z=0); ICARUS's active z starts at -894.95.
+        double m_cosmic_vtx_z_origin{0};
         // sbnd_xin/docs/74 G1/G2: when true (and "fiducial" is configured),
         // cosmic_tagger()'s containment tests run against m_fiducial +
         // m_fv_tolerance instead of the grouping's FiducialUtils zero-margin
@@ -511,6 +520,17 @@ public:
         // swap is decided, in both states, so the off-arms self-census how
         // often the traditional path swaps in production today.
         bool   m_main_vertex_swap_apply{false};
+        // sbnd_xin/docs/128 sec 10: the other half of the pr/51 round 3 bug.
+        // With main_vertex_swap_apply false the swap is discarded, but
+        // swap_main_cluster has already pushed the old main into
+        // other_clusters (the caller's real list), erased the swap target
+        // from it and flipped both Flags::main_cluster bits; the rest of the
+        // pass then sees the main twice and misses a companion (6/67 SBND
+        // events, doc 128 sec 9.5).  true = restore other_clusters and the
+        // flags of the main and every companion to their pre-call values
+        // whenever the swap is not applied (both the main pass and the
+        // dual-chain off pass).  false (default) = legacy, byte-identical.
+        bool   m_main_vertex_swap_discard_clean{false};
         // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only TRACE probe for the
         // near-vertex short-cut investigation (owner Bee scan of
         // 131357/268067/285567/506746 -- rounds 2-3's main_vertex_graph_audit

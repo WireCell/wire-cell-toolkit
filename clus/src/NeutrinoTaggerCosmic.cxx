@@ -1226,10 +1226,11 @@ bool PatternAlgorithms::cosmic_tagger(
         if (((num_cosmic > 2  && acc_cosmic_len + acc_small_length > 0.55 * acc_total_len) ||
              (num_cosmic >= 2 && acc_cosmic_len + acc_small_length > 0.70 * acc_total_len) ||
              (num_cosmic == 1 && acc_cosmic_len + acc_small_length > 0.625 * acc_total_len && highest_y > m_cosmic_y_top_strict)) &&
-            mv_pt.y() > 0 && flag_main_cluster && highest_y > m_cosmic_y_top_loose)
+            mv_pt.y() > m_cosmic_y_mid && flag_main_cluster && highest_y > m_cosmic_y_top_loose)
             flagp_cosmic = true;
-        // mv_pt.y() > 0 above is the detector MID-PLANE, scale-free on both
-        // detectors (uBooNE y in [-116,+117], SBND y in [-200,+200]) -- no knob.
+        // mv_pt.y() > m_cosmic_y_mid above is the detector MID-PLANE: 0 on
+        // uBooNE (y in [-116,+117]) and SBND (y in [-200,+200]), the C++
+        // default; ICARUS (y in [-182,+135]) sets it (icarus/docs/04 G2).
         SPDLOG_LOGGER_TRACE(s_log,
             "cosmic_tagger: part D num_cosmic={} highest_y={:.1f} cm acc_cosmic={:.1f} acc_small={:.1f} "
             "acc_total={:.1f} cm flagp_cosmic={} (y cuts: top_main={:.1f} strict={:.1f} loose={:.1f} small={:.1f} cm)",
@@ -1351,7 +1352,9 @@ bool PatternAlgorithms::cosmic_tagger(
                         flag_cosmic_10 = true;
 
                     ti.cosmict_10_flag_inside.push_back(inside_fv(vpt));
-                    ti.cosmict_10_vtx_z.push_back(static_cast<float>(vpt.z() / units::cm));
+                    // icarus/docs/04 G3: m_cosmic_vtx_z_origin (default 0) puts
+                    // the BDT feature on the uBooNE/SBND z >= 0 convention.
+                    ti.cosmict_10_vtx_z.push_back(static_cast<float>((vpt.z() - m_cosmic_vtx_z_origin) / units::cm));
                     ti.cosmict_10_flag_shower.push_back(seg_is_shower(sg));
                     ti.cosmict_10_flag_dir_weak.push_back(seg_dir_weak(sg));
                     ti.cosmict_10_angle_beam.push_back(static_cast<float>(angle_beam));

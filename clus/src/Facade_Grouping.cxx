@@ -540,6 +540,10 @@ const Grouping::kd2d_t& Grouping::kd2d(const int apa, const int face, const int 
 
 
 bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad, const double pitch_frac) const {
+    // doc icarus/04 sec 8: a 3-D dead region counts as dead on all planes (same
+    // verdict as the dead gap below, tested first: no wire cache is needed).
+    // Null region (default) -> no-op.
+    if (in_dead_region(point)) return true;
     // Hand-declared dead gap: the full vertical W-defect column counts as dead on
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
@@ -568,6 +572,10 @@ bool Grouping::is_good_point(const geo_point_t& point, const int apa, const int 
 
 bool Grouping::is_good_point_wc(const geo_point_t& point, const int apa, const int face, double radius, int ch_range, int allowed_bad) const
 {
+    // doc icarus/04 sec 8: a 3-D dead region counts as dead on all planes (same
+    // verdict as the dead gap below, tested first: no wire cache is needed).
+    // Null region (default) -> no-op.
+    if (in_dead_region(point)) return true;
     // Hand-declared dead gap: the full vertical W-defect column counts as dead on
     // all planes (generalizes the y~0 center patch).  Default-empty -> no-op.
     if (in_dead_gap(point, ch_range, apa, face)) return true;
@@ -606,6 +614,13 @@ void Grouping::test_good_point(const geo_point_t& point, const int apa, const in
     int (&num_planes)[6], double radius, int ch_range) const
 {
     for (int i = 0; i < 6; ++i) num_planes[i] = 0;   // was vector(6, 0)
+    // doc icarus/04 sec 8: a 3-D dead region is dead on all three planes (slots
+    // 3,4,5), like the dead gap below; tested first, no wire cache needed.
+    // Null (default) -> no-op.
+    if (in_dead_region(point)) {
+        num_planes[3] = num_planes[4] = num_planes[5] = 1;
+        return;
+    }
     // Hand-declared dead gap: the full vertical W-defect column counts as dead on
     // all three planes (slots 3,4,5).  Default-empty -> falls through to normal check.
     if (in_dead_gap(point, ch_range, apa, face)) {
@@ -727,6 +742,9 @@ bool Grouping::has_closest_point(const geo_point_t& point, const double radius, 
 }
 
 bool Grouping::get_closest_dead_chs(const geo_point_t& point, const int ch_range, const int apa, const int face, int pind) const {
+    // doc icarus/04 sec 8: every plane is dead inside a 3-D dead region.
+    // Null region (default) -> no-op.
+    if (in_dead_region(point)) return true;
     const auto& ch2xrange = get_dead_winds(apa, face, pind);
     if (ch2xrange.empty()) return false;
     const auto [tind, wind] = convert_3Dpoint_time_ch(point, apa, face, pind);

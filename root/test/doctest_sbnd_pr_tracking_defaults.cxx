@@ -88,3 +88,17 @@ TEST_CASE("root knob defaults: UbooneTaggerOutputVisitor nu_provenance is OFF")
     REQUIRE_MESSAGE(cfg.isMember("nu_provenance"), "missing knob: nu_provenance");
     CHECK(cfg["nu_provenance"].asBool() == false);
 }
+
+// sbnd_xin/docs/128-129.  The particle-link branches and the T_segment tree
+// must stay unbooked by default: this writer is shared with PDHD, PDVD and
+// uBooNE.
+TEST_CASE("root knob defaults: UbooneTaggerOutputVisitor nu_particle_links is OFF")
+{
+    PluginManager::instance().add("WireCellRoot");
+    auto icfg = Factory::lookup<IConfigurable>("UbooneTaggerOutputVisitor",
+                                               "doc128_knobdefaults_probe");
+    REQUIRE(icfg);
+    auto cfg = icfg->default_configuration();
+    REQUIRE_MESSAGE(cfg.isMember("nu_particle_links"), "missing knob: nu_particle_links");
+    CHECK(cfg["nu_particle_links"].asBool() == false);
+}

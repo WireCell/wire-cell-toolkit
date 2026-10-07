@@ -110,4 +110,16 @@ TEST_CASE("KineInfo default initialization")
     CHECK(ki.kine_energy_info.empty());
     CHECK(ki.kine_particle_type.empty());
     CHECK(ki.kine_energy_included.empty());
+
+    // sbnd_xin/docs/128-129: per-row identity and segment links start empty,
+    // and the main-vertex id reads "not filled".
+    CHECK(ki.kine_particle_id.empty());
+    CHECK(ki.kine_particle_is_shower.empty());
+    CHECK(ki.kine_particle_cluster_id.empty());
+    CHECK(ki.kine_particle_nseg.empty());
+    CHECK(ki.kine_particle_pool.empty());
+    CHECK(ki.kine_main_vertex_id == -1);
+    CHECK(ki.link_seg_graph_index.empty());
+    CHECK(ki.link_seg_kine_index.empty());
+    CHECK(ki.link_seg_n_rows.empty());
 }

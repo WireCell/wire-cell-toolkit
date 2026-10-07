@@ -28,6 +28,7 @@
 
 #include "WireCellIface/IFrameFilter.h"
 #include "WireCellIface/IConfigurable.h"
+#include "WireCellIface/IDFT.h"
 #include "WireCellAux/SimpleFrame.h"
 #include "WireCellAux/SimpleTrace.h"
 
@@ -35,6 +36,7 @@
 #include <filesystem>
 #include <set>
 #include <string>
+#include <unistd.h>
 
 using namespace WireCell;
 using namespace WireCell::Aux;
@@ -58,6 +60,10 @@ void load_plugins()
     PluginManager& pm = PluginManager::instance();
     pm.add("WireCellAux");
     pm.add("WireCellSigProc");
+    // configure() resolves its "dft" with Factory::find_tn, which only finds
+    // an existing instance.  Create it here so these cases do not depend on
+    // an earlier test having done so (they failed when run alone).
+    Factory::lookup_tn<IDFT>("FftwDFT");
 }
 
 // Build a minimal frame with `raw` and `gauss` tags.  4 channels,
@@ -134,9 +140,11 @@ TEST_CASE("L1SPFilterPD dump-mode emits documented NPZ schema") {
     }
     load_plugins();
 
-    // /home/xqian/tmp is the user-blessed scratch area (memory:
-    // feedback_tmp_directory).
-    const std::string tmp = "/home/xqian/tmp/wct_l1sp_dump_test";
+    // The system temp dir (honours TMPDIR), one subdir per process so
+    // concurrent runs do not share it.  A user-specific absolute path
+    // does not exist on other machines, where the dump then fails.
+    const std::string tmp = (std::filesystem::temp_directory_path()
+                             / ("wct_l1sp_dump_test_" + std::to_string(::getpid()))).string();
     std::error_code ec;
     std::filesystem::remove_all(tmp, ec);
 

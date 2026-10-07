@@ -74,7 +74,17 @@ void rezero(ArrayType& arr, const std::vector<size_t>& sv)
 // map" of the ISlice instances.  Old c-nodes with nullptr shoudl be
 // ignored but are left in order not to invalidate vertex descriptors.
 //
+// The by-value form copies its argument and (boost::adjacency_list has no
+// move constructor) copies it again on return, so a whole-event graph is
+// alive three times at once; to_arrays() uses the in-place form on its one
+// working copy (wcp-porting-img wcfm/docs/13).
 cluster_graph_t ClusterArrays::bodge_channel_slice(cluster_graph_t graph)
+{
+    bodge_channel_slice_inplace(graph);
+    return graph;
+}
+
+void ClusterArrays::bodge_channel_slice_inplace(cluster_graph_t& graph)
 {
     std::vector<cluster_vertex_t> old_cvtx;
     for (const auto& vtx : vertex_range(graph)) {
@@ -144,8 +154,6 @@ cluster_graph_t ClusterArrays::bodge_channel_slice(cluster_graph_t graph)
     for (auto cvtx : old_cvtx) {
         graph[cvtx].ptr = (size_t)0;
     }
-
-    return graph;
 }
 
 static bool is_old_chan(const cluster_node_t& node)
@@ -390,7 +398,11 @@ void ClusterArrays::to_arrays(const cluster_graph_t& cin_graph,
 
     // Change c-nodes from representing physical channels to
     // representing per-slice channels associated with activites.
-    const cluster_graph_t graph = bodge_channel_slice(cin_graph);
+    // One working copy, bodged in place (was bodge_channel_slice(), which
+    // held three copies at its return).
+    cluster_graph_t bodged(cin_graph);
+    bodge_channel_slice_inplace(bodged);
+    const cluster_graph_t& graph = bodged;
 
     // {                           // debugging
     //     std::cerr << "pre-bodge:  ";

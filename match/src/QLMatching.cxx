@@ -264,6 +264,8 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     // ---- PDVD / vertical-drift knobs (all default OFF => byte-identical). ----
     m_shared_flash      = get(cfg, "shared_flash",      m_shared_flash);
     m_opdet_all_volumes = get(cfg, "opdet_all_volumes", m_opdet_all_volumes);
+    m_sign_offset_from_geometry = get(cfg, "sign_offset_from_geometry", m_sign_offset_from_geometry);
+    m_cathode_x_wct_units = get(cfg, "cathode_x_wct_units", m_cathode_x_wct_units);
     m_vd_surface_flags  = get(cfg, "vd_surface_flags",  m_vd_surface_flags);
     m_pd_wall_cushion   = get(cfg, "pd_wall_cushion",   m_pd_wall_cushion);
     if (cfg.isMember("pd_wall_channels_ylo") && cfg["pd_wall_channels_ylo"].isArray()) {
@@ -815,6 +817,8 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["auto_mask_same_type"]    = m_auto_mask_same_type;
     cfg["shared_flash"]           = m_shared_flash;
     cfg["opdet_all_volumes"]      = m_opdet_all_volumes;
+    cfg["sign_offset_from_geometry"] = m_sign_offset_from_geometry;
+    cfg["cathode_x_wct_units"] = m_cathode_x_wct_units;
     cfg["vd_surface_flags"]       = m_vd_surface_flags;
     cfg["pd_wall_cushion"]        = m_pd_wall_cushion;
     cfg["pd_wall_channels_ylo"]   = Json::arrayValue;
@@ -1482,11 +1486,17 @@ void QLMatching::compute_geometry(ApaRun& run)
     }
     const Ray bray = bb.bounds();
     const double x_lo = bray.first.x(), x_hi = bray.second.x();
-    const bool lo_is_cathode = std::abs(x_lo - m_cathode_x) < std::abs(x_hi - m_cathode_x);
+    // cathode_x_wct_units (default false => raw m_cathode_x, byte-identical).
+    const double cathode_x_ref = ql_cathode_x_wct(m_cathode_x, m_cathode_x_wct_units);
+    const bool lo_is_cathode = std::abs(x_lo - cathode_x_ref) < std::abs(x_hi - cathode_x_ref);
     const double cathode_x = lo_is_cathode ? x_lo : x_hi;
     run.anode_x   = lo_is_cathode ? x_hi : x_lo;
     run.s         = (run.anode_x < cathode_x) ? +1.0 : -1.0;
     run.u_cathode = run.s * (cathode_x - run.anode_x);   // > 0
+    // sign_offset_from_geometry (default false => the ident rule set above is
+    // kept => byte-identical): -s from the geometry just computed (ICARUS
+    // anode 2 breaks the ident rule; see QLMatching.h).
+    run.sign_offset = ql_sign_offset(tpc, run.s, m_sign_offset_from_geometry);
     // Y/Z active bounds from the same bbox, shrunk(+)/grown(-) by the cushions.
     run.y_lo = bray.first.y()  + m_y_cushion;
     run.y_hi = bray.second.y() - m_y_cushion;
@@ -4369,7 +4379,7 @@ void QLMatching::dump_cathode_diag(const std::vector<ApaRun>& runs)
     struct CC { Cluster* c; int side; double off; double t_us; };
     std::vector<CC> ccs;
     for (const auto& run : runs) {
-        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
+        const int side = (run.anode_x < ql_cathode_x_wct(m_cathode_x, m_cathode_x_wct_units)) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double ft  = flash->get_time();
             const double off = run.sign_offset * (ft + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
@@ -4666,7 +4676,7 @@ void QLMatching::cull_cross_tpc(std::vector<ApaRun>& runs)
     struct Cand { XtpcMC mc; int side; double t_us; };
     std::vector<Cand> cands;
     for (auto& run : runs) {
-        const int side = (run.anode_x < m_cathode_x) ? 0 : 1;
+        const int side = (run.anode_x < ql_cathode_x_wct(m_cathode_x, m_cathode_x_wct_units)) ? 0 : 1;
         for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
             const double off = run.sign_offset * (flash->get_time() + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
             for (const auto& bundle : run.flash_bundles_map.at(flash)) {

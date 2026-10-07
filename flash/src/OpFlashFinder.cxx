@@ -178,7 +178,8 @@ namespace {
     }
 
     void remove_late_light(std::vector<FlashSummary>& flashes,
-                           std::vector<std::vector<int>>& hits_per_flash)
+                           std::vector<std::vector<int>>& hits_per_flash,
+                           const double late_tau_ns, const double late_nsigma)
     {
         // Sort flashes (and their hit lists) by time, then drop any
         // flash consistent with late light of an earlier one.
@@ -196,7 +197,10 @@ namespace {
         hits_per_flash = std::move(sorted_hits);
 
         std::vector<bool> remove(flashes.size(), false);
-        const double argon_tau = 1600.0;  // ns ("1.6" in the us-based original)
+        // late_tau_ns / late_nsigma: the late_light_tau_us / late_light_nsigma
+        // knobs; their defaults 1600 ns / 3 are the larana argon_tau ("1.6" in
+        // the us-based original) and cut that were literals here.
+        const double argon_tau = late_tau_ns;
         for (size_t i = 0; i < flashes.size(); ++i) {
             for (size_t j = i + 1; j < flashes.size(); ++j) {
                 if (remove[j]) continue;
@@ -206,7 +210,7 @@ namespace {
                 const double hyp_pe = fi.total_pe * fj.time_width / fi.time_width *
                                       std::exp(-(fj.time - fi.time) / argon_tau);
                 const double nsigma = (fj.total_pe - hyp_pe) / std::sqrt(hyp_pe);
-                if (nsigma < 3.0) remove[j] = true;
+                if (nsigma < late_nsigma) remove[j] = true;
             }
         }
         size_t w = 0;
@@ -240,6 +244,9 @@ namespace {
         int    cut_min_pds = 0;      // drop flash if nPD (>= cut_fired_pe) < this
         double cut_min_pe  = 0.0;    // drop flash if total_pe < this
         double cut_fired_pe = -1.0;  // per-PD PE for the cut_min_pds count; <0 => use fired_pe
+        // Late-light removal model (used only when remove_late_light is on).
+        double late_tau_ns = 1600.0;  // = m_late_light_tau_us * 1000
+        double late_nsigma = 3.0;     // = m_late_light_nsigma
         // [nchan] grid coords within each cathode side (-1 if unmapped).
         const std::vector<int>* row  = nullptr;
         const std::vector<int>* col  = nullptr;
@@ -448,7 +455,7 @@ namespace {
         }
 
         if (remove_late) {
-            remove_late_light(out_flashes, out_refined);
+            remove_late_light(out_flashes, out_refined, rp.late_tau_ns, rp.late_nsigma);
         }
 
         // Optional merge of over-split satellite flashes (no-op if disabled).
@@ -498,6 +505,8 @@ WireCell::Configuration Flash::OpFlashFinder::default_configuration() const
     cfg["flash_threshold"] = m_flash_threshold;
     cfg["width_tolerance"] = m_width_tolerance;
     cfg["remove_late_light"] = m_remove_late_light;
+    cfg["late_light_tau_us"] = m_late_light_tau_us;
+    cfg["late_light_nsigma"] = m_late_light_nsigma;
     cfg["group_by_side"] = m_group_by_side;
     cfg["flash_refine"] = m_flash_refine;
     cfg["refine_window_us"] = m_refine_window_us;
@@ -527,6 +536,8 @@ void Flash::OpFlashFinder::configure(const WireCell::Configuration& cfg)
     m_flash_threshold = get(cfg, "flash_threshold", m_flash_threshold);
     m_width_tolerance = get(cfg, "width_tolerance", m_width_tolerance);
     m_remove_late_light = get(cfg, "remove_late_light", m_remove_late_light);
+    m_late_light_tau_us = get(cfg, "late_light_tau_us", m_late_light_tau_us);
+    m_late_light_nsigma = get(cfg, "late_light_nsigma", m_late_light_nsigma);
     m_group_by_side = get(cfg, "group_by_side", m_group_by_side);
     m_flash_refine = get(cfg, "flash_refine", m_flash_refine);
     m_refine_window_us = get(cfg, "refine_window_us", m_refine_window_us);
@@ -667,6 +678,8 @@ bool Flash::OpFlashFinder::operator()(const ITensorSet::pointer& in, ITensorSet:
     rp.cut_min_pds = m_min_fired_pds;
     rp.cut_min_pe = m_min_total_pe;
     rp.cut_fired_pe = m_min_fired_pe;
+    rp.late_tau_ns = m_late_light_tau_us * 1000.0;  // us -> WCT ns (1.6 -> 1600.0 exactly)
+    rp.late_nsigma = m_late_light_nsigma;
     rp.row = &m_opdet_row;
     rp.col = &m_opdet_col;
     rp.side = &m_opdet_side;

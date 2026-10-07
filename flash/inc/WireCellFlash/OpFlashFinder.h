@@ -51,6 +51,14 @@ namespace WireCell {
             double m_flash_threshold{3.5};   // FlashThreshold [PE] (dunefd/protodune)
             double m_width_tolerance{0.5};   // WidthTolerance
             bool m_remove_late_light{true};
+            // Late-light model of remove_late_light: a later flash is dropped
+            // when its PE is within late_light_nsigma of the earlier flash's
+            // PE x exp(-dt / tau).  The defaults are the larana constants
+            // (LAr triplet 1.6 us, 3 sigma) that were hard-coded before the
+            // knobs, so an absent key is bit-identical.  FD-VD light is Ar +
+            // 10 ppm Xe, whose late light is slower (fdvd_sim doc 04).
+            double m_late_light_tau_us{1.6};
+            double m_late_light_nsigma{3.0};
             // Build flashes independently per side of the cathode (one
             // drift volume each) rather than across all OpDets.  The PDHD
             // cathode is opaque to scintillation light, so the two volumes
