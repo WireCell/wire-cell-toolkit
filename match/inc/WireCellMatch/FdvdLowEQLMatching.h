@@ -40,6 +40,7 @@
 #include "WireCellAux/Logger.h"
 #include "WireCellMatch/FdvdLowE.h"
 #include "WireCellMatch/FdvdDriftRegressor.h"
+#include "WireCellMatch/FdvdDriftRegressor3View.h"
 
 #include <memory>
 
@@ -71,6 +72,9 @@ namespace WireCell::Match {
         std::vector<std::array<double, 3>> m_pd_pos;
         std::unique_ptr<PhotonLibraryModel> m_lib;
         std::unique_ptr<FdvdDriftRegressor> m_drift;
+        // "drift": {"views": 3, ...} selects the three-view regressor (fdvd_sim doc 37).  Absent or 1 = m_drift,
+        // the collection-only regressor, unchanged.
+        std::unique_ptr<FdvdDriftRegressor3View> m_drift3;
         size_t m_count{0};
     };
 

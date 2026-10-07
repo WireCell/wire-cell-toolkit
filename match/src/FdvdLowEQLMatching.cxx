@@ -88,9 +88,20 @@ void FdvdLowEQLMatching::configure(const WireCell::Configuration& cfg)
     }
     m_lib = std::make_unique<PhotonLibraryModel>(m_library);
     m_drift.reset();
+    m_drift3.reset();
     if (cfg["drift"].isObject()) {
         if (m_multiplicity == 4) raise<ValueError>("FdvdLowEQLMatching: give a drift block or a drift port, not both");
-        m_drift = std::make_unique<FdvdDriftRegressor>(cfg["drift"]);
+        // "views": C++ default 1 (collection-only regressor).  Key absent => the pre-existing path, unchanged.
+        const int views = get(cfg["drift"], "views", 1);
+        if (views == 3) {
+            m_drift3 = std::make_unique<FdvdDriftRegressor3View>(cfg["drift"]);
+        }
+        else if (views == 1) {
+            m_drift = std::make_unique<FdvdDriftRegressor>(cfg["drift"]);
+        }
+        else {
+            raise<ValueError>("FdvdLowEQLMatching: drift views must be 1 or 3, got %d", views);
+        }
     }
     if ((int) m_lib->nchan() != L::NCH) raise<ValueError>("FdvdLowEQLMatching: library has %d channels", (int) m_lib->nchan());
     m_cal = L::load_calibration(m_calibration);
@@ -174,6 +185,11 @@ bool FdvdLowEQLMatching::operator()(const input_vector& invec, output_pointer& o
     if (m_drift) {
         dres = m_drift->compute(*grouping, (const double*) bt->data(), bt->shape()[0], bt->shape()[1], ident);
         for (size_t r = 0; r + 2 < dres.rows.size(); r += 3) drift[(int) dres.rows[r]] = {dres.rows[r + 1], dres.rows[r + 2]};
+    }
+    FdvdDriftRegressor3View::Result dres3;
+    if (m_drift3) {
+        dres3 = m_drift3->compute(*grouping, (const double*) bt->data(), bt->shape()[0], bt->shape()[1], ident);
+        for (size_t r = 0; r + 2 < dres3.rows.size(); r += 3) drift[(int) dres3.rows[r]] = {dres3.rows[r + 1], dres3.rows[r + 2]};
     }
     if (m_multiplicity == 4) {
         const auto dt = named(invec[3], "drift");
@@ -285,6 +301,17 @@ bool FdvdLowEQLMatching::operator()(const input_vector& invec, output_pointer& o
             cmd["name"] = "crops";
             tv->push_back(std::make_shared<Aux::SimpleTensor>(
                 ITensor::shape_t{dres.ncrop, (size_t) m_drift->nch(), (size_t) m_drift->ntk()}, dres.crops.data(), cmd));
+        }
+    }
+    if (m_drift3) {
+        tv->push_back(tensor("drift", dres3.rows, 3));
+        if (m_drift3->dump_crops()) {
+            Configuration cmd;
+            cmd["name"] = "crops";
+            tv->push_back(std::make_shared<Aux::SimpleTensor>(
+                ITensor::shape_t{dres3.ncrop, (size_t) 3, (size_t) m_drift3->nch(), (size_t) m_drift3->ntk()},
+                dres3.crops.data(), cmd));
+            tv->push_back(tensor("crop_origins", dres3.origins, 7));
         }
     }
     if (m_dump_tables) {

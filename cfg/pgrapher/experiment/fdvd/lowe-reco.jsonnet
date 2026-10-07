@@ -45,7 +45,7 @@ local adjflash = import 'pgrapher/experiment/fdvd/adjflash.jsonnet';
 //                     flash per group (the AdjOpHits arm).  Key omitted when null.
 
 function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash='', drift_in='', drift_model='', frames='',
-         drift_device='cpu', dump_crops=false, pipe='simple', iso_cm=30, event=0, bee_zip='', dump_tables=false,
+         drift_device='cpu', drift_views=1, dump_crops=false, pipe='simple', iso_cm=30, event=0, bee_zip='', dump_tables=false,
          anode_indices=std.range(0, std.length(tools.anodes) - 1),
          flash_finder='opflash', adj={}, arms=null, specs=null, merge_equal_time=null)
   assert (opwf != '') != (opflash != '') : 'give exactly one of opwf / opflash';
@@ -99,7 +99,15 @@ function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash=
       [if specs != null then 'specs']: specs,
       [if merge_equal_time != null then 'merge_equal_time']: merge_equal_time,
     } + (if drift_model != '' then {
-      drift: { forward: wc.tn(torch), frames: frames, frame_tag: 'gauss', dump_crops: dump_crops },
+      drift: {
+        forward: wc.tn(torch),
+        frames: frames,
+        frame_tag: 'gauss',
+        dump_crops: dump_crops,
+        // C++ default 1 (collection-only FdvdDriftRegressor).  3 = FdvdDriftRegressor3View with the model of
+        // fdvd_sim/stage35/export_e4_ts.py (doc 37).  Key omitted when 1 => byte-identical pre-existing config.
+        [if drift_views != 1 then 'views']: drift_views,
+      },
     } else {}),
   }, nin=if with_drift then 4 else 3, nout=1, uses=if drift_model != '' then [torch] else []);
   local drift = g.pnode({ type: 'TensorFileSource', name: 'drift', data: { inname: drift_in, prefix: 'drift_' } },
