@@ -3,6 +3,12 @@ import scripts.roi_metrics as roi_metrics
 import numpy as np
 
 config.setdefault('threshold', 0.5)
+config.setdefault('device', 'cpu')
+config.setdefault('app', 'xvunet')
+config.setdefault('nevents', 10)
+config.setdefault('paths','')
+config.setdefault('model_file','')
+config.setdefault('cfg','')
 
 def get_with_chan_range(y, labels, chan_range, threshold=0.5):
     res  = roi_metrics.roi_metrics(
@@ -99,10 +105,11 @@ rule threshold_scan:
     output:
         "threshold_scan_roi_plane_{plane}_run_one_{entry}.pt"
     params:
-        step=config['threshold_step']
+        step=config['threshold_step'],
+        device=('cuda' if 'gpu' in config['device'] else config['device']),
     run:
         thresholds=np.arange(0., 1., params.step)
-        y, labels = load_y_labels(input[0], config['device'])
+        y, labels = load_y_labels(input[0], params.device)
         chan_range = chan_ranges[wildcards.plane]
         res = roi_metrics.threshold_scan(y[chan_range[0]:chan_range[1]], labels[chan_range[0]:chan_range[1]], thresholds, as_eff_pur=False)
         torch.save(res, output[0])
@@ -113,11 +120,12 @@ rule threshold_pixel_scan:
     output:
         "threshold_scan_pixel_plane_{plane}_run_one_{entry}.pt"
     params:
-        step=config['threshold_step']
+        step=config['threshold_step'],
+        device=('cuda' if 'gpu' in config['device'] else config['device']),
     run:
-        thresholds=torch.arange(0., 1., params.step).to(config['device'])
+        thresholds=torch.arange(0., 1., params.step).to(params.device)
         chan_range = chan_ranges[wildcards.plane]
-        y, labels = load_y_labels(input[0], config['device'])
+        y, labels = load_y_labels(input[0], params.device)
         y, labels = y[chan_range[0]:chan_range[1]], labels[chan_range[0]:chan_range[1]]
 
         n_true = torch.tensor(labels.sum())
@@ -224,12 +232,6 @@ rule plot_fbeta_scan:
 
 
 
-config.setdefault('device', 'cpu')
-config.setdefault('app', 'xvunet')
-config.setdefault('nevents', 10)
-config.setdefault('paths','')
-config.setdefault('model_file','')
-config.setdefault('cfg','')
 rule run_n:
     resources:
         gpu = 1 if ('gpu' in config['device'] or 'cuda' in config['device']) else 0
@@ -476,6 +478,16 @@ use rule trios_cross_plane as trios_cross_plane_line with:
   output:
     "threshold-{threshold}-xvu-trio-crossplane-{plane}plane-{angles}-g4-trio.npz"
 
+
+use rule trios_cross_plane as trios_cross_plane_line_noxvu with:
+  input:
+    run_one="<results>/test_line_{plane}plane_{angles}.pt",
+    trios=lambda w: "linedepos-pdhd-{plane}plane-"+ w.angles.replace("t1-", "t1_").replace("t2-", "t2_") + "-g4-trio.h5"
+  params:
+    threshold=lambda w : w.threshold
+  output:
+    "threshold-{threshold}-noxvu-trio-crossplane-{plane}plane-{angles}-g4-trio.npz"
+
 rule merge_trio_cross_plane:
     run:
         import numpy as np
@@ -508,35 +520,35 @@ rule merge_trio_cross_plane:
 use rule merge_trio_cross_plane as merge_vplane_trio_cross_planes with:
     input:
         expand(
-            "threshold-{{threshold}}-xvu-trio-crossplane-vplane-{angles}-g4-trio.npz",
+            "threshold-{{threshold}}-{{style}}-trio-crossplane-vplane-{angles}-g4-trio.npz",
             angles=vangles
         )
     output:
-        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_vplane_high_end.npz"
+        "<results>/threshold-{threshold}-{style}-trio-merged-crossplane_vplane_high_end.npz"
 
 use rule merge_trio_cross_plane as merge_uplane_trio_cross_planes with:
     input:
         expand(
-            "threshold-{{threshold}}-xvu-trio-crossplane-uplane-{angles}-g4-trio.npz",
+            "threshold-{{threshold}}-{{style}}-trio-crossplane-uplane-{angles}-g4-trio.npz",
             angles=uangles
         )
     output:
-        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_uplane_high_end.npz"
+        "<results>/threshold-{threshold}-{style}-trio-merged-crossplane_uplane_high_end.npz"
 use rule merge_trio_cross_plane as merge_wplane_trio_cross_planes with:
     input:
         expand(
-            "threshold-{{threshold}}-xvu-trio-crossplane-wplane-{angles}-g4-trio.npz",
+            "threshold-{{threshold}}-{{style}}-trio-crossplane-wplane-{angles}-g4-trio.npz",
             angles=wangles
         )
     output:
-        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_wplane_high_end.npz"
+        "<results>/threshold-{threshold}-{style}-trio-merged-crossplane_wplane_high_end.npz"
 
 
 rule plot_trio_rates:
     input:
-        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_{plane}plane_high_end.npz"
+        "<results>/threshold-{threshold}-{style}-trio-merged-crossplane_{plane}plane_high_end.npz"
     output:
-        "<results>/threshold-{threshold}-xvu-trio-merged-crossplane_{plane}plane_high_end.png"
+        "<results>/threshold-{threshold}-{style}-trio-merged-crossplane_{plane}plane_high_end.png"
     run:
         import matplotlib.pyplot as plt
         import numpy

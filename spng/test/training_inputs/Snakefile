@@ -481,12 +481,12 @@ rule run_one:
     output:
         '<results>/test_line_{plane}plane_t1-{t1}-t2-{t2}.pt'
     params:
-        device=config['device'],
+        device=('cuda' if 'gpu' in config['device'] else config['device']),
         model=config['model'],
         app=config['dnnapp'],
         cfg=config['cfg'],
     resources:
-        gpu = 1 if config['device'] == 'gpu' else 0
+        gpu = 1 if ('gpu' in config['device'] or 'cuda' in config['device']) else 0
     shell: """
     wcpy dnn run_one \
     {input.rec} {input.tru} \
