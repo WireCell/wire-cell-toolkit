@@ -626,6 +626,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // off, keys omitted => compiled config byte-identical to the
               // pre-doc-56 one).  Inert if beam_window is empty.
               beam_window_only=true,
+              // doc pdvd/125: beam_deghost (default false; keys omitted when off =>
+              // compiled config byte-identical).  true => the MABC also loads a
+              // third grouping 'deghost' (the deghosting cascade's cells, built
+              // by deghost_tree() below and joined to the pctree by
+              // PointTreeConcat in wct-pr-perevt.jsonnet), which the
+              // 'beam_deghost' stage (ClusteringBeamDeghost) moves into the
+              // clusters of the beam bundle.
+              beam_deghost=false,
               // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
               // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
               // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
@@ -1521,6 +1529,22 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // tagger (they silently no-op without it).
         local cm_by_name = {
             switch_scope: cm_old.switch_scope(),
+            // doc pdvd/125: replace the blobs of the beam bundle's clusters by the
+            // deghosting cascade's cells (grouping 'deghost').  Same window keys
+            // as check_beam_particle.  Position: after unmerge_assoc, BEFORE
+            // steiner.  Absent from pipeline_names => absent from the compiled
+            // config.
+            beam_deghost: {
+                type: 'ClusteringBeamDeghost',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    deghost_grouping: 'deghost',
+                    pc_transforms: wc.tn(pcts),
+                    beam_window_low: beam_window[0],
+                    beam_window_high: beam_window[1],
+                },
+            },
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the
             // taggers and the per-bundle neutrino PR evaluate it (QLMatching only
             // flags MicroBooNE-style decomposed mains, which PDVD never builds).
@@ -2280,6 +2304,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             data: {
                 inpath: 'pointtrees/%d',
                 outpath: 'pointtrees/%d',
+                // doc pdvd/125.  C++ default groupings ['live', 'dead'].  Keys
+                // omitted when off => byte-identical pre-knob config.
+                [if beam_deghost then 'groupings']: ['live', 'dead', 'deghost'],
+                [if beam_deghost then 'insubpaths']: [{ name: 'deghost', subpath: '/dg/live' }],
                 perf: true,
                 bee_dir: bee_dir,
                 bee_zip: if pr_bee then bee_zip_path else '',  // doc 87
@@ -2600,4 +2628,69 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         ret:: if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
     }.ret,
     detector_volumes(anodes):: clus_maker.detector_volumes(anodes),
+    // doc pdvd/125: the deghosting cascade's image as a point-cloud tree at
+    // datapath 'pointtrees/<ident>/dg/live'.  dir holds the cascade's
+    // clusters-apa-anode<N>-ms-active.tar.gz (pdvd/d121/run_img_evt.sh -M).  Per
+    // anode and face the same nodes as the clustering job (clus.jsonnet
+    // clus_per_face: ClusterScopeFilter -> PointTreeBuilding with the default
+    // 'stepped' live sampler), live input only, then one PointTreeMerging.
+    // Sampler and volume nodes carry their own names ('dg-...') so they cannot
+    // collide with the retile samplers of the same anode face.  Hidden method:
+    // nothing here reaches a compiled config unless the caller builds it.
+    deghost_tree(anodes, dir)::
+        local n = std.length(anodes);
+        local srcs = [g.pnode({
+            type: 'ClusterFileSource',
+            name: 'dg-src-%d' % a.data.ident,
+            data: {
+                inname: '%s/clusters-apa-anode%d-ms-active.tar.gz' % [dir, a.data.ident],
+                anodes: [wc.tn(x) for x in anodes],
+            },
+        }, nin=0, nout=1, uses=anodes) for a in anodes];
+        local fans = [g.pnode({
+            type: 'ClusterFanout',
+            name: 'dg-fan-%d' % a.data.ident,
+            data: { multiplicity: 2 },
+        }, nin=1, nout=2) for a in anodes];
+        local face(a, f) =
+            local dvf = clus_maker.detector_volumes([a], f) + { name: 'dg-dv-apa%d-%d' % [a.data.ident, f] };
+            local bs = clus_maker.live_sampler(a, f) + { name: 'dg-live-%s-%d' % [a.name, f] };
+            local csf = g.pnode({
+                type: 'ClusterScopeFilter',
+                name: 'dg-csf-%s-%d' % [a.name, f],
+                data: { face_index: f },
+            }, nin=1, nout=1);
+            local ptb = g.pnode({
+                type: 'PointTreeBuilding',
+                name: 'dg-%s-%d' % [a.name, f],
+                data: {
+                    samplers: { '3d': wc.tn(bs) },
+                    multiplicity: 1,
+                    tags: ['live'],
+                    datapath: 'pointtrees/%d/dg',
+                    anode: wc.tn(a),
+                    face: f,
+                    detector_volumes: wc.tn(dvf),
+                },
+            }, nin=1, nout=1, uses=[bs, dvf]);
+            g.pipeline([csf, ptb], 'dg-face-%s-%d' % [a.name, f]);
+        local faces = [[face(a, 0), face(a, 1)] for a in anodes];
+        local merge = g.pnode({
+            type: 'PointTreeMerging',
+            name: 'dg-merge',
+            data: {
+                multiplicity: 2 * n,
+                inpath: 'pointtrees/%d/dg',
+                outpath: 'pointtrees/%d/dg',
+                tolerate_missing: true,
+            },
+        }, nin=2 * n, nout=1);
+        g.intern(
+            innodes=srcs,
+            centernodes=fans + std.flattenArrays(faces),
+            outnodes=[merge],
+            edges=[g.edge(srcs[i], fans[i], 0, 0) for i in std.range(0, n - 1)]
+                  + [g.edge(fans[i], faces[i][f], f, 0) for i in std.range(0, n - 1) for f in [0, 1]]
+                  + [g.edge(faces[i][f], merge, 0, 2 * i + f) for i in std.range(0, n - 1) for f in [0, 1]],
+        ),
 }

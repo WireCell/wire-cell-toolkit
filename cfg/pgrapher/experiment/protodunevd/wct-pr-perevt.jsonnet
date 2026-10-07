@@ -1791,6 +1791,18 @@ function(
     // byte-identical to the pre-doc-56 one.  Inert when beam_window_us is empty.
     // Runner flag: -no-bwonly.
     beam_window_only = true,
+    // doc pdvd/125: deghosting of the beam bundle before the PR.  A directory
+    // holding the deghosting cascade's clusters-apa-anode<N>-ms-active.tar.gz
+    // (pdvd/d121/run_img_evt.sh -M on the event's SP frames).  '' (default) =>
+    // nothing is built and the compiled config is byte-identical.  Set => the
+    // cascade image joins the pctree as a third grouping 'deghost'; the stage
+    // 'beam_deghost' (in pipeline_names, after unmerge_assoc and before
+    // steiner) then moves its cells into the clusters of the beam bundle.
+    // Runner: run_pr_evt.sh -beam-deghost.
+    beam_deghost_dir = '',
+    // Anode idents that have a cascade archive in beam_deghost_dir; null => all
+    // of anode_indices.  (Run 39305 has the top drift only: [4,5,6,7].)
+    beam_deghost_anodes = null,
     // doc pdvd/120: the beam-particle PR stage (pipeline name
     // 'check_beam_particle'; runner mode run_pr_evt.sh -beam).  The per-event
     // beam window is derived HERE from the light stage's trigger metadata --
@@ -4597,6 +4609,7 @@ function(
                              dl_vtx_rerank=dl_vtx_rerank,
                              beam_window=[t * wc.us for t in beam_window_eff_us],   // doc pdvd/120: == beam_window_us unless a beam trigger is given
                              beam_window_only=beam_window_only,
+                             beam_deghost=(beam_deghost_dir != ''),   // doc pdvd/125
                              beam_pr_knobs=beam_pr_knobs,   // doc pdvd/120
                              beam_entry_point_cm=beam_entry_point_cm,
                              beam_dir=beam_dir,
@@ -4719,10 +4732,26 @@ function(
                              fast_xgb_forest=fast_xgb_forest,
                              tcn_knobs=tcn_knobs);
 
-    local graph = g.intern(
+    // doc pdvd/125: with beam_deghost_dir the pctree and the cascade image are
+    // joined (tensors concatenated, distinct datapaths) in front of the MABC.
+    local dg_tree = clus_maker.deghost_tree(
+        if beam_deghost_anodes == null then anodes
+        else [a for a in anodes if std.member(beam_deghost_anodes, a.data.ident)],
+        beam_deghost_dir);
+    local dg_join = g.pnode({
+        type: 'PointTreeConcat',
+        name: 'pr_deghost',
+        data: { multiplicity: 2 },
+    }, nin=2, nout=1);
+    local graph = if beam_deghost_dir == '' then g.intern(
         innodes=[source],
         outnodes=[pr],
         edges=[g.edge(source, pr, 0, 0)],
+    ) else g.intern(
+        innodes=[source, dg_tree],
+        centernodes=[dg_join],
+        outnodes=[pr],
+        edges=[g.edge(source, dg_join, 0, 0), g.edge(dg_tree, dg_join, 0, 1), g.edge(dg_join, pr, 0, 0)],
     );
 
     local app = {
