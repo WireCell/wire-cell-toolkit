@@ -200,6 +200,12 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
         t_tagger->Branch("act_role", &ti.act_role);
         t_tagger->Branch("act_in_pr", &ti.act_in_pr);
         t_tagger->Branch("act_is_final", &ti.act_is_final);
+        // sbnd_xin/docs/133: the containment verdict the two top BDTs read
+        // (numu input 70, nue input 0), filled per candidate by
+        // TaggerCheckNeutrino on the candidate's main cluster.  Prototype
+        // tagger.h:2164 books it in T_tagger.  Not act_fc / T_cluster.fc
+        // (those are the TaggerCheckFC flag).
+        t_tagger->Branch("match_isFC", &ti.match_isFC, "match_isFC/F");
     }
 
     // sbnd_xin/docs/128-129 (P2 + P4): T_segment, one row per PR-graph

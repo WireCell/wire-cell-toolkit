@@ -884,7 +884,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
               // sbnd_xin/docs/109: book the selection-provenance branches
               // (T_tagger run/subrun/event, sel_cluster_id,
               // vertex_moved_cluster, has_vertex, flash_*, act_role,
-              // act_is_final; T_kine run/subrun/event, has_vertex).  C++
+              // act_is_final, match_isFC (sbnd_xin/docs/133); T_kine
+              // run/subrun/event, has_vertex).  C++
               // default false = branches not booked; key omitted when off =>
               // byte-identical pre-knob config AND schema.
               + (if nu_provenance then { nu_provenance: true } else {})

@@ -62,7 +62,9 @@ namespace WireCell {
             // TaggerCheckNeutrino's nu_provenance knob fills -- T_tagger
             // run/subrun/event, sel_cluster_id, vertex_moved_cluster,
             // has_vertex, flash_time_us/flash_pe/flash_tpc/flash_group,
-            // act_role, act_in_pr, act_is_final; T_kine run/subrun/event, has_vertex.
+            // act_role, act_in_pr, act_is_final, match_isFC (sbnd_xin/docs/133:
+            // the BDT containment input, always filled, booked only here);
+            // T_kine run/subrun/event, has_vertex.
             // C++ default false => branches not booked => schema
             // byte-identical (this writer is shared with PDHD/PDVD).
             bool m_nu_provenance{false};
