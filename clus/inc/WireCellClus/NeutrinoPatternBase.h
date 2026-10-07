@@ -4,6 +4,7 @@
 #include "WireCellClus/PRShower.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
 #include "WireCellClus/PRVertexScoreboard.h"
+#include "WireCellClus/PRDlVtxDump.h"
 #include "WireCellClus/IClusGeomHelper.h"
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellIface/IFiducial.h"
@@ -234,6 +235,8 @@ namespace WireCell::Clus::PR {
         double transfer_max{0};            ///< snap guard D (internal units); s_dual range in union
         bool   allow_cluster_swap{true};
         double vtx_weight{0};              ///< union: weight of the OFF-vertex proximity term
+        // ---- ai-helper issue 35: the OFF pass's recorded network calls (dl_vtx_dump)
+        std::vector<DlVtxCall> dump_calls;
     };
 
     /// The snap-and-guard arithmetic of the "snap" mode, pure so a doctest can
@@ -1454,6 +1457,15 @@ namespace WireCell::Clus::PR {
         // const-read discipline as m_vertex_scoreboard applies (never
         // operator[] on map_vertex_num, never iterate pointer-keyed maps).
         bool   m_vtx_harvest{false};
+
+        // ---- ai-helper issue 35 -- dl_vtx_dump.  Record every DL network call
+        // of determine_overall_main_vertex_DL (exact input cloud, raw payload,
+        // the decision it fed) into m_dlvtx_calls, tagged with m_dl_vtx_dump_pass
+        // ("prod", or "off" in the dual-chain OFF pass's copy).  Recording only:
+        // no decision reads it.  Default false => nothing recorded, byte-identical.
+        bool        m_dl_vtx_dump{false};
+        std::string m_dl_vtx_dump_pass{"prod"};
+        std::vector<DlVtxCall> m_dlvtx_calls;
 
         // ---- doc sbnd_xin/docs/pr/31 §12 -- the §10.12 port-fidelity round:
         // the five surviving bug-class findings of the topology/PID/direction
