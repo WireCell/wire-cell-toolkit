@@ -32,6 +32,7 @@
 #include "WireCellIface/IConfigurable.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
+#include "WireCellIface/ISCEField.h"
 #include "WireCellUtil/Logging.h"
 
 #include <array>
@@ -81,6 +82,13 @@ namespace WireCell {
             // per-input row index the multi-APA merge invalidates).  DEFAULT
             // FALSE => tracking-pr.root byte-identical.
             bool m_flash_by_gid{false};
+            // ai-helper issue 35: optional TrueFwd (true->reco) SCE map, used only to
+            // shift the MC truth vertex into the DL cloud's frame in T_dlvtx_call.
+            ISCEField::pointer m_sce{nullptr};
+            // ai-helper issue 35: true => T_dlvtx_call / T_dlvtx_cloud are always written (empty when no call
+            // was recorded), so the file schema does not depend on the event.  False (default) => written only
+            // when a call was recorded (and then only because TaggerCheckNeutrino.dl_vtx_dump was on).
+            bool m_dl_vtx_dump{false};
             // sbnd_xin/docs/109 group 1: write TaggerCheckNeutrino's selection
             // census (Grouping::get_nu_census) as T_bundle (one row per
             // in-beam-window flash bundle, with the reason it did or did not
@@ -148,6 +156,11 @@ namespace WireCell {
             // auxiliary truth tables (larwirecell wclsTruthInformationAttacher);
             // nothing is written when the event carries none (data).
             void write_truth(TFile* output_tf, const Clus::Facade::Ensemble& ensemble) const;
+            // ai-helper issue 35: T_dlvtx_call / T_dlvtx_cloud from the candidates'
+            // recorded DL-vertex network calls (TaggerCheckNeutrino dl_vtx_dump);
+            // nothing is written when no call was recorded.
+            void write_dlvtx(TFile* output_tf, Clus::Facade::Grouping& grouping,
+                             const Clus::Facade::Ensemble& ensemble) const;
         };
     }  // namespace Root
 }  // namespace WireCell

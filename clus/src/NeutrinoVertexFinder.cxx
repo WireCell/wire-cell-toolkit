@@ -4839,6 +4839,50 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                             vec_xyzq[0].size(), cand_vertices.size());
     }
 
+    // ai-helper issue 35 -- dl_vtx_dump: record this network call.  A COPY of
+    // the exact input (SCN_Vertex consumes vec_xyzq below), the traditional
+    // answer the decision is measured against; payload and decision are
+    // filled in below.  Recording only.  No points => the net never runs =>
+    // nothing recorded.
+    int dump_i = -1;
+    // row of a candidate vertex inside the cloud's vertex block (-1: not one)
+    auto dump_row_of = [&cand_vertices](const VertexPtr& v) -> int {
+        for (size_t i = 0; i < cand_vertices.size(); ++i) if (cand_vertices[i] == v) return static_cast<int>(i);
+        return -1;
+    };
+    if (m_dl_vtx_dump && !vec_xyzq[0].empty()) {
+        DlVtxCall c;
+        c.pass = m_dl_vtx_dump_pass;
+        c.top_k = flag_rerank ? std::max(1, dl_vtx_top_k) : 1;
+        c.rerank = flag_rerank;
+        c.x = vec_xyzq[0];
+        c.y = vec_xyzq[1];
+        c.z = vec_xyzq[2];
+        c.q = vec_xyzq[3];
+        c.n_vertex_rows = static_cast<int>(cand_vertices.size());
+        c.cloud_no_exclusion = cloud_no_excl;
+        if (dual_hint && dual_hint->has_vertex) {
+            c.hint_valid = true;
+            c.hint_x = dual_hint->vertex.x() / units::cm;
+            c.hint_y = dual_hint->vertex.y() / units::cm;
+            c.hint_z = dual_hint->vertex.z() / units::cm;
+        }
+        c.q_scale = dQdx_scale;
+        c.q_offset = dQdx_offset;
+        auto trad_it = map_cluster_main_vertices.find(main_cluster);
+        if (trad_it != map_cluster_main_vertices.end() && trad_it->second) {
+            const auto& tv = trad_it->second;
+            const auto pt = tv->fit().valid() ? tv->fit().point : tv->wcpt().point;
+            c.trad_valid = true;
+            c.trad_x = pt.x() / units::cm;
+            c.trad_y = pt.y() / units::cm;
+            c.trad_z = pt.z() / units::cm;
+            c.trad_row = dump_row_of(tv);
+        }
+        m_dlvtx_calls.push_back(std::move(c));
+        dump_i = static_cast<int>(m_dlvtx_calls.size()) - 1;
+    }
+
     if (vec_xyzq[0].empty()) {
         // doc pr/75: no point cloud to feed the net -- the DL never ran, which
         // is NOT the same as running and declining.
@@ -4868,13 +4912,19 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                                 dnn_vtx.size() / 4);
         } else {
             dnn_vtx = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, top_k_arg);
+            if (dump_i >= 0) m_dlvtx_calls[dump_i].payload = dnn_vtx;   // ai-helper issue 35: this call's own inference, before any pooling
             if (dual_voxels) {
+                if (dump_i >= 0) m_dlvtx_calls[dump_i].n_off_voxels = static_cast<int>(dual_hint->voxels.size() / 4);
                 dnn_vtx.insert(dnn_vtx.end(), dual_hint->voxels.begin(), dual_hint->voxels.end());
                 SPDLOG_LOGGER_DEBUG(s_log, "dual_chain: union mode, {} OFF-pass voxels pooled with {} ON voxels",
                                     dual_hint->voxels.size() / 4, (dnn_vtx.size() - dual_hint->voxels.size()) / 4);
             }
         }
         MS t_scn_inference(Clock::now() - t0); t0 = Clock::now();
+        if (dump_i >= 0 && dual_voxels && dual_hint->mode == "voxels") {   // ai-helper issue 35: no inference here, the payload is the OFF pass's
+            m_dlvtx_calls[dump_i].payload = dnn_vtx;
+            m_dlvtx_calls[dump_i].payload_from_off = true;
+        }
 
         // -----------------------------------------------------------------------
         // Shared output variables: determined by either the legacy or rerank path
@@ -4902,6 +4952,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // ===================================================================
             if (dnn_vtx.size() != 3) {
                 SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DNN output size {}", dnn_vtx.size());
+                if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 2;   // ai-helper issue 35
                 return false;
             }
 
@@ -5261,6 +5312,14 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
         }
 
+        if (dump_i >= 0 && flag_pass && min_vertex) {   // ai-helper issue 35: this call's own pick, before the dual-chain snap
+            auto& c = m_dlvtx_calls[dump_i];
+            const auto pt = min_vertex->fit().valid() ? min_vertex->fit().point : min_vertex->wcpt().point;
+            c.rerank_valid = true;
+            c.rerank_x = pt.x() / units::cm; c.rerank_y = pt.y() / units::cm; c.rerank_z = pt.z() / units::cm;
+            c.rerank_row = dump_row_of(min_vertex);
+        }
+
         // doc sbnd_xin/docs/pr/112 sec 11 -- dual chain, "snap" mode: the OFF
         // chain's final vertex, snapped to the nearest production candidate
         // the cluster gate admits, REPLACES the rerank's own choice iff the
@@ -5329,6 +5388,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                     "determine_overall_main_vertex_DL: keeping protected two-end-break "
                     "vertex over the DL choice (doc pr/48)");
                 flag_pass = false;
+                if (dump_i >= 0) m_dlvtx_calls[dump_i].two_end_veto = true;   // ai-helper issue 35
                 // doc pr/75: doc pr/52 §1 route 6.  Overwrites the rerank
                 // verdict recorded above -- the DL won its own stage and was
                 // then overruled, which is a distinct failure class from a
@@ -5380,6 +5440,18 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
         }
 
+        if (dump_i >= 0) {   // ai-helper issue 35: the decision this call fed
+            auto& c = m_dlvtx_calls[dump_i];
+            c.accepted = flag_pass;
+            c.dual_transferred = dual_transferred;
+            if (flag_pass && min_vertex) {
+                const auto pt = min_vertex->fit().valid() ? min_vertex->fit().point : min_vertex->wcpt().point;
+                c.dl_x = pt.x() / units::cm;
+                c.dl_y = pt.y() / units::cm;
+                c.dl_z = pt.z() / units::cm;
+                c.dl_row = dump_row_of(min_vertex);
+            }
+        }
         if (flag_pass) {
             flag_change = true;
             SPDLOG_LOGGER_TRACE(s_log,
@@ -5456,6 +5528,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     }
     catch (const std::exception& ex) {
         SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: DL vertex failed: {}", ex.what());
+        if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 1;   // ai-helper issue 35: cloud recorded, no payload
     }
 #endif  // HAVE_PYTHON_INC
 
@@ -5518,15 +5591,33 @@ std::vector<float> PatternAlgorithms::dual_chain_scn_voxels(Graph& graph, const 
         }
     }
     if (vec_xyzq[0].empty() || dl_weights.empty()) return out;
+    // ai-helper issue 35 -- dl_vtx_dump: this is the OFF pass's network call in the
+    // voxels / union modes (snap mode's goes through determine_overall_main_vertex_DL).
+    // Recorded as pass "off-voxels": exact input and payload, no decision fields.
+    int dump_i = -1;
+    if (m_dl_vtx_dump) {
+        DlVtxCall c;
+        c.pass = "off-voxels";
+        c.top_k = std::max(1, dl_vtx_top_k);
+        c.rerank = true;
+        c.x = vec_xyzq[0]; c.y = vec_xyzq[1]; c.z = vec_xyzq[2]; c.q = vec_xyzq[3];
+        c.n_vertex_rows = n_candidates;
+        c.q_scale = dQdx_scale; c.q_offset = dQdx_offset;
+        m_dlvtx_calls.push_back(std::move(c));
+        dump_i = static_cast<int>(m_dlvtx_calls.size()) - 1;
+    }
     try {
         out = WCPPyUtil::SCN_Vertex("SCN_Vertex", "SCN_Vertex", dl_weights, vec_xyzq, "float32", false, std::max(1, dl_vtx_top_k));
+        if (dump_i >= 0) m_dlvtx_calls[dump_i].payload = out;
         if (out.size() < 4 || out.size() % 4 != 0) {
             SPDLOG_LOGGER_WARN(s_log, "dual_chain_scn_voxels: unexpected payload size {}", out.size());
+            if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 2;
             out.clear();
         }
     }
     catch (const std::exception& ex) {
         SPDLOG_LOGGER_WARN(s_log, "dual_chain_scn_voxels: DL inference failed: {}", ex.what());
+        if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 1;
         out.clear();
     }
 #endif

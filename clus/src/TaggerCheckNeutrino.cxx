@@ -478,6 +478,7 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_vertex_scoreboard       = get(config, "vertex_scoreboard",       m_vertex_scoreboard);
     // doc sbnd_xin/docs/pr/79 §10: live-feature harvest (requires the board).
     m_dl_vtx_harvest          = get(config, "dl_vtx_harvest",          m_dl_vtx_harvest);
+    m_dl_vtx_dump             = get(config, "dl_vtx_dump",             m_dl_vtx_dump);   // ai-helper issue 35
     if (m_dl_vtx_harvest && !m_vertex_scoreboard) {
         SPDLOG_LOGGER_WARN(log, "TaggerCheckNeutrino: dl_vtx_harvest requires vertex_scoreboard; harvest inert");
     }
@@ -1083,6 +1084,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["good_point_pitch_frac"]   = m_good_point_pitch_frac;// doc pdvd/32 round 3: 0 = legacy (no per-plane pitch floor in the PR good-point tests)
     cfg["sgp_edge_probe"]          = m_sgp_edge_probe;       // doc pr/73: false = legacy (per-edge DEBUG sentinel never emits)
     cfg["vertex_scoreboard"]       = m_vertex_scoreboard;    // doc pr/75: false = legacy (no vertex scoreboard recorded)
+    cfg["dl_vtx_dump"]             = m_dl_vtx_dump;          // ai-helper issue 35: false = no T_dlvtx_* record of the network calls
     cfg["dl_vtx_harvest"]          = m_dl_vtx_harvest;       // doc pr/79 §10: false = legacy (no live-feature harvest; requires vertex_scoreboard)
     cfg["sgp_weak_scale"]          = m_sgp_weak_scale;       // doc pr/51 round 6: 0 = legacy (round-5 gap flavor verbatim)
     cfg["sgp_weak_qref"]           = m_sgp_weak_qref;        // doc pr/51 round 6: charge ref, calc_charge_wcp units (inert at weak scale 0)
@@ -3232,6 +3234,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         pattern_algos.m_vertex_scoreboard   = m_vertex_scoreboard;                 // doc pr/75: diagnostic-only
         // doc pr/79 §10: the conjunction, so fill sites may assume the board is active.
         pattern_algos.m_vtx_harvest         = m_vertex_scoreboard && m_dl_vtx_harvest;
+        pattern_algos.m_dl_vtx_dump         = m_dl_vtx_dump;                       // ai-helper issue 35: recording only
         // doc pr/51 round 6: weak-charge deficit term (charge units, no conversion).
         pattern_algos.m_sgp_weak_scale      = m_sgp_weak_scale;
         pattern_algos.m_sgp_weak_qref       = m_sgp_weak_qref;
@@ -4497,6 +4500,15 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                tagger_info.act_cluster_id.size());
         }
 
+        // ai-helper issue 35 -- dl_vtx_dump: the candidate's network calls, the
+        // OFF pass's first (they ran first), onto its TrackFitting for the
+        // T_dlvtx_* writer.
+        if (m_dl_vtx_dump) {
+            std::vector<PR::DlVtxCall> calls = dual_hint.dump_calls;
+            calls.insert(calls.end(), pattern_algos.m_dlvtx_calls.begin(), pattern_algos.m_dlvtx_calls.end());
+            track_fitter->set_dlvtx_calls(std::move(calls));
+        }
+
         // doc sbnd_xin/docs/pr/75 -- stash the vertex scoreboard for PrDisplayDump.
         // Here and not earlier on purpose: this point is AFTER pr/50's
         // snap_main_vertex_to_kink and the final improve_vertex, so final_vertex_id
@@ -4709,6 +4721,7 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
 
     hint.has_vertex = false;
     hint.voxels.clear();
+    hint.dump_calls.clear();
     hint.n_candidates = 0;
     if (!main_cluster_in) return;
 
@@ -4752,6 +4765,15 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
     pattern_algos.m_vertex_scoreboard = false;
     pattern_algos.m_vtx_harvest = false;
     pattern_algos.m_vtx_board.clear();
+    // ai-helper issue 35: the OFF pass records its network calls too (tagged
+    // "off") and hands them to production through the hint on every exit.
+    pattern_algos.m_dl_vtx_dump_pass = "off";
+    pattern_algos.m_dlvtx_calls.clear();
+    struct DumpHandOff {
+        PR::PatternAlgorithms& algos;
+        PR::DualChainHint& h;
+        ~DumpHandOff() { h.dump_calls = std::move(algos.m_dlvtx_calls); }
+    } dump_hand_off{pattern_algos, hint};
 
     IndexedVertexSet vertices_in_long_muon;
     IndexedSegmentSet segments_in_long_muon;

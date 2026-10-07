@@ -108,6 +108,11 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
     m_save_in_scope = get<bool>(cfg, "save_in_scope", m_save_in_scope);
     // doc 99: DEFAULT FALSE keeps the legacy (per-input row index) resolution.
     m_flash_by_gid = get<bool>(cfg, "flash_by_gid", m_flash_by_gid);
+    // ai-helper issue 35: optional; only the T_dlvtx_call truth vertex uses it.
+    if (cfg.isMember("sce_field") && !cfg["sce_field"].asString().empty()) {
+        m_sce = Factory::find_tn<ISCEField>(cfg["sce_field"].asString());
+    }
+    m_dl_vtx_dump = get<bool>(cfg, "dl_vtx_dump", m_dl_vtx_dump);   // ai-helper issue 35
     // sbnd_xin/docs/109: DEFAULT FALSE / empty keep tracking-pr.root byte-identical.
     m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
     m_fix_cluster_flags = get<bool>(cfg, "fix_cluster_flags", m_fix_cluster_flags);
@@ -138,6 +143,7 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["output_filename"] = "tracking-pr.root";
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
+    cfg["dl_vtx_dump"] = m_dl_vtx_dump;   // ai-helper issue 35: false = T_dlvtx_* only when a call was recorded
     cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["nu_provenance"] = m_nu_provenance;          // sbnd_xin/docs/109; false = no T_bundle/T_flash, no Trun census branches
     cfg["fix_cluster_flags"] = m_fix_cluster_flags;  // sbnd_xin/docs/109; false = legacy T_cluster flag columns
@@ -226,6 +232,7 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
         write_nu_census(output_tf, grouping);
     }
     write_truth(output_tf, ensemble);
+    write_dlvtx(output_tf, grouping, ensemble);
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -294,6 +301,218 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth(TFile* output_tf, const Clu
         write_truth_table(output_tf, "T_truth_pf", pf, m_evt_runNo, m_evt_subRunNo, m_evt_eventNo, log);
     }
     log->debug("SbndPrMagnifyTrackingVisitor: truth trees written");
+}
+
+// ai-helper issue 35: the DL-vertex network calls, exactly as recorded.
+//   T_dlvtx_call   one row per call: run/subrun/event, nu_index (candidate),
+//                  call_index, pass (0 production, 1 dual-chain OFF pass in snap
+//                  mode, 2 the OFF graph's own top-K call of the voxels/union
+//                  modes), status (0 ok, 1 the network threw: payload empty, 2
+//                  unexpected payload size), top_k, rerank, n_points,
+//                  n_vertex_rows, q_scale/q_offset, payload (this call's own raw
+//                  SCN return: [x,y,z] or [x,y,z,score]*K, cm), payload_from_off,
+//                  n_off_voxels (union mode: OFF voxels pooled after the record),
+//                  cloud_no_exclusion, the decision (trad_*, rerank_* = the call's
+//                  own pick before the dual-chain snap, accepted, dl_*,
+//                  dual_transferred, two_end_veto; *_row = index inside the cloud's
+//                  vertex block, -1 if none), the dual-chain hint vertex the
+//                  production call was given (hint_*), the candidate's final main
+//                  vertex (final_*), and on MC the truth: truth_* / truth_reco_*
+//                  = the max-edep interaction of truth_nu, raw and shifted into
+//                  the cloud's frame by the TrueFwd SCE map (truth_sce_applied
+//                  says whether an sce_field was configured; truth_valid needs
+//                  edep > 0), plus EVERY interaction of the event as vectors
+//                  (truth_n, truth_all_*: nu_idx, pdg, ccnc, E, edep, t, x/y/z raw
+//                  and reco) so the reader can pick the one that belongs to each
+//                  candidate.  cm, GeV.
+//   T_dlvtx_cloud  one row per network-input point: run/subrun/event, nu_index,
+//                  call_index, pass, ipoint, is_vertex (leading vertex block), x,y,z,q.
+// Re-running pyutil/python/SCN_Vertex.py on a call's cloud with its top_k must
+// reproduce its payload (status 0 rows).  With the dl_vtx_dump config key the
+// two trees are written for every event (empty when nothing was recorded);
+// without it only when a call was recorded.
+void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Facade::Grouping& grouping,
+                                                     const Clus::Facade::Ensemble& ensemble) const
+{
+    const auto fitters = collect_nu_fitters(grouping);
+    size_t ncalls = 0;
+    for (const auto& tf : fitters) if (tf) ncalls += tf->get_dlvtx_calls().size();
+    if (!ncalls && !m_dl_vtx_dump) return;
+
+    // MC truth: every interaction of truth_nu, and the one that deposits most.
+    bool has_truth = false; int truth_sce_applied = m_sce ? 1 : 0;
+    double tx = 0, ty = 0, tz = 0, trx = 0, try_ = 0, trz = 0;
+    int truth_n = 0;
+    std::vector<int> t_nu_idx, t_pdg, t_ccnc;
+    std::vector<double> t_E, t_edep, t_t, t_x, t_y, t_z, t_rx, t_ry, t_rz;
+    if (const auto nu = ensemble.aux_tensor("truth_nu")) {
+        const auto md = nu->metadata();
+        const auto shape = nu->shape();
+        std::map<std::string, size_t> col;
+        for (Json::ArrayIndex i = 0; i < md["columns"].size(); ++i) col[md["columns"][i].asString()] = i;
+        if (shape.size() == 2 && shape[0] > 0 && nu->element_type() == typeid(double)
+            && col.count("vtx_x") && col.count("vtx_y") && col.count("vtx_z") && col.count("edep")) {
+            const double* d = reinterpret_cast<const double*>(nu->data());
+            const size_t nc = shape[1];
+            auto get = [&](size_t r, const char* name, double dflt) { return col.count(name) ? d[r * nc + col[name]] : dflt; };
+            auto shift = [&](double x, double y, double z, double& rx, double& ry, double& rz) {
+                rx = x; ry = y; rz = z;
+                if (!m_sce) return;
+                // TrueFwd map: reco = true + displacement (internal units).  SBND:
+                // apa 0 = east (x < 0), apa 1 = west, the labeler's convention.
+                const double X = x * units::cm, Y = y * units::cm, Z = z * units::cm;
+                const int apa = X < 0 ? 0 : 1;
+                rx = (X + m_sce->displacement_x(apa, X, Y, Z)) / units::cm;
+                ry = (Y + m_sce->displacement_y(apa, X, Y, Z)) / units::cm;
+                rz = (Z + m_sce->displacement_z(apa, X, Y, Z)) / units::cm;
+            };
+            size_t best = 0;
+            for (size_t r = 0; r < shape[0]; ++r) {
+                if (get(r, "edep", 0) > get(best, "edep", 0)) best = r;
+                double rx, ry, rz; shift(get(r, "vtx_x", 0), get(r, "vtx_y", 0), get(r, "vtx_z", 0), rx, ry, rz);
+                t_nu_idx.push_back(static_cast<int>(get(r, "nu_idx", -1))); t_pdg.push_back(static_cast<int>(get(r, "pdg", 0)));
+                t_ccnc.push_back(static_cast<int>(get(r, "ccnc", -1))); t_E.push_back(get(r, "E", 0)); t_edep.push_back(get(r, "edep", 0));
+                t_t.push_back(get(r, "t", 0));
+                t_x.push_back(get(r, "vtx_x", 0)); t_y.push_back(get(r, "vtx_y", 0)); t_z.push_back(get(r, "vtx_z", 0));
+                t_rx.push_back(rx); t_ry.push_back(ry); t_rz.push_back(rz);
+            }
+            truth_n = static_cast<int>(shape[0]);
+            tx = t_x[best]; ty = t_y[best]; tz = t_z[best]; trx = t_rx[best]; try_ = t_ry[best]; trz = t_rz[best];
+            has_truth = t_edep[best] > 0;   // a max-edep interaction that deposited nothing is no label
+        }
+    }
+
+    int runNo = m_evt_runNo, subRunNo = m_evt_subRunNo, eventNo = m_evt_eventNo;
+    int nu_index = 0, call_index = 0, pass = 0, status = 0, top_k = 0, rerank = 0, n_points = 0, n_vertex_rows = 0;
+    int payload_from_off = 0, n_off_voxels = 0, cloud_no_exclusion = 0, trad_valid = 0, trad_row = -1;
+    int rerank_valid = 0, rerank_row = -1, accepted = 0, dl_row = -1, dual_transferred = 0, two_end_veto = 0, final_valid = 0, truth_valid = 0;
+    int hint_valid = 0; double hint_x = 0, hint_y = 0, hint_z = 0;
+    double q_scale = 0, q_offset = 0, trad_x = 0, trad_y = 0, trad_z = 0, rerank_x = 0, rerank_y = 0, rerank_z = 0, dl_x = 0, dl_y = 0, dl_z = 0;
+    double final_x = 0, final_y = 0, final_z = 0;
+    double truth_x = 0, truth_y = 0, truth_z = 0, truth_reco_x = 0, truth_reco_y = 0, truth_reco_z = 0;
+    std::vector<float> payload;
+    TTree* tc = new TTree("T_dlvtx_call", "T_dlvtx_call");
+    tc->SetDirectory(output_tf);
+    tc->Branch("runNo", &runNo, "runNo/I");
+    tc->Branch("subRunNo", &subRunNo, "subRunNo/I");
+    tc->Branch("eventNo", &eventNo, "eventNo/I");
+    tc->Branch("nu_index", &nu_index, "nu_index/I");
+    tc->Branch("call_index", &call_index, "call_index/I");
+    tc->Branch("pass", &pass, "pass/I");
+    tc->Branch("status", &status, "status/I");
+    tc->Branch("top_k", &top_k, "top_k/I");
+    tc->Branch("rerank", &rerank, "rerank/I");
+    tc->Branch("n_points", &n_points, "n_points/I");
+    tc->Branch("n_vertex_rows", &n_vertex_rows, "n_vertex_rows/I");
+    tc->Branch("q_scale", &q_scale, "q_scale/D");
+    tc->Branch("q_offset", &q_offset, "q_offset/D");
+    tc->Branch("payload", &payload);
+    tc->Branch("payload_from_off", &payload_from_off, "payload_from_off/I");
+    tc->Branch("n_off_voxels", &n_off_voxels, "n_off_voxels/I");
+    tc->Branch("cloud_no_exclusion", &cloud_no_exclusion, "cloud_no_exclusion/I");
+    tc->Branch("trad_valid", &trad_valid, "trad_valid/I");
+    tc->Branch("trad_x", &trad_x, "trad_x/D");
+    tc->Branch("trad_y", &trad_y, "trad_y/D");
+    tc->Branch("trad_z", &trad_z, "trad_z/D");
+    tc->Branch("trad_row", &trad_row, "trad_row/I");
+    tc->Branch("rerank_valid", &rerank_valid, "rerank_valid/I");
+    tc->Branch("rerank_x", &rerank_x, "rerank_x/D");
+    tc->Branch("rerank_y", &rerank_y, "rerank_y/D");
+    tc->Branch("rerank_z", &rerank_z, "rerank_z/D");
+    tc->Branch("rerank_row", &rerank_row, "rerank_row/I");
+    tc->Branch("accepted", &accepted, "accepted/I");
+    tc->Branch("dl_x", &dl_x, "dl_x/D");
+    tc->Branch("dl_y", &dl_y, "dl_y/D");
+    tc->Branch("dl_z", &dl_z, "dl_z/D");
+    tc->Branch("dl_row", &dl_row, "dl_row/I");
+    tc->Branch("dual_transferred", &dual_transferred, "dual_transferred/I");
+    tc->Branch("two_end_veto", &two_end_veto, "two_end_veto/I");
+    tc->Branch("hint_valid", &hint_valid, "hint_valid/I");
+    tc->Branch("hint_x", &hint_x, "hint_x/D");
+    tc->Branch("hint_y", &hint_y, "hint_y/D");
+    tc->Branch("hint_z", &hint_z, "hint_z/D");
+    tc->Branch("final_valid", &final_valid, "final_valid/I");
+    tc->Branch("final_x", &final_x, "final_x/D");
+    tc->Branch("final_y", &final_y, "final_y/D");
+    tc->Branch("final_z", &final_z, "final_z/D");
+    tc->Branch("truth_valid", &truth_valid, "truth_valid/I");
+    tc->Branch("truth_sce_applied", &truth_sce_applied, "truth_sce_applied/I");
+    tc->Branch("truth_x", &truth_x, "truth_x/D");
+    tc->Branch("truth_y", &truth_y, "truth_y/D");
+    tc->Branch("truth_z", &truth_z, "truth_z/D");
+    tc->Branch("truth_reco_x", &truth_reco_x, "truth_reco_x/D");
+    tc->Branch("truth_reco_y", &truth_reco_y, "truth_reco_y/D");
+    tc->Branch("truth_reco_z", &truth_reco_z, "truth_reco_z/D");
+    tc->Branch("truth_n", &truth_n, "truth_n/I");
+    tc->Branch("truth_all_nu_idx", &t_nu_idx);
+    tc->Branch("truth_all_pdg", &t_pdg);
+    tc->Branch("truth_all_ccnc", &t_ccnc);
+    tc->Branch("truth_all_E", &t_E);
+    tc->Branch("truth_all_edep", &t_edep);
+    tc->Branch("truth_all_t", &t_t);
+    tc->Branch("truth_all_x", &t_x);
+    tc->Branch("truth_all_y", &t_y);
+    tc->Branch("truth_all_z", &t_z);
+    tc->Branch("truth_all_reco_x", &t_rx);
+    tc->Branch("truth_all_reco_y", &t_ry);
+    tc->Branch("truth_all_reco_z", &t_rz);
+
+    int ipoint = 0, is_vertex = 0;
+    float px = 0, py = 0, pz = 0, pq = 0;
+    TTree* tp = new TTree("T_dlvtx_cloud", "T_dlvtx_cloud");
+    tp->SetDirectory(output_tf);
+    tp->Branch("runNo", &runNo, "runNo/I");
+    tp->Branch("subRunNo", &subRunNo, "subRunNo/I");
+    tp->Branch("eventNo", &eventNo, "eventNo/I");
+    tp->Branch("nu_index", &nu_index, "nu_index/I");
+    tp->Branch("call_index", &call_index, "call_index/I");
+    tp->Branch("pass", &pass, "pass/I");
+    tp->Branch("ipoint", &ipoint, "ipoint/I");
+    tp->Branch("is_vertex", &is_vertex, "is_vertex/I");
+    tp->Branch("x", &px, "x/F");
+    tp->Branch("y", &py, "y/F");
+    tp->Branch("z", &pz, "z/F");
+    tp->Branch("q", &pq, "q/F");
+
+    for (size_t ni = 0; ni < fitters.size(); ++ni) {
+        const auto& tf = fitters[ni];
+        if (!tf) continue;
+        nu_index = static_cast<int>(ni);
+        final_valid = 0; final_x = final_y = final_z = 0;
+        if (const auto mv = tf->get_main_vertex()) {
+            const auto pt = mv->fit().valid() ? mv->fit().point : mv->wcpt().point;
+            final_valid = 1;
+            final_x = pt.x() / units::cm; final_y = pt.y() / units::cm; final_z = pt.z() / units::cm;
+        }
+        const auto& calls = tf->get_dlvtx_calls();
+        for (size_t ci = 0; ci < calls.size(); ++ci) {
+            const auto& c = calls[ci];
+            call_index = static_cast<int>(ci);
+            pass = c.pass == "off" ? 1 : c.pass == "off-voxels" ? 2 : 0;
+            status = c.status;
+            top_k = c.top_k; rerank = c.rerank ? 1 : 0;
+            n_points = static_cast<int>(c.x.size()); n_vertex_rows = c.n_vertex_rows;
+            q_scale = c.q_scale; q_offset = c.q_offset;
+            payload = c.payload; payload_from_off = c.payload_from_off ? 1 : 0; n_off_voxels = c.n_off_voxels;
+            cloud_no_exclusion = c.cloud_no_exclusion ? 1 : 0;
+            hint_valid = c.hint_valid ? 1 : 0; hint_x = c.hint_x; hint_y = c.hint_y; hint_z = c.hint_z;
+            trad_valid = c.trad_valid ? 1 : 0; trad_x = c.trad_x; trad_y = c.trad_y; trad_z = c.trad_z; trad_row = c.trad_row;
+            rerank_valid = c.rerank_valid ? 1 : 0; rerank_x = c.rerank_x; rerank_y = c.rerank_y; rerank_z = c.rerank_z; rerank_row = c.rerank_row;
+            accepted = c.accepted ? 1 : 0; dl_x = c.dl_x; dl_y = c.dl_y; dl_z = c.dl_z; dl_row = c.dl_row;
+            dual_transferred = c.dual_transferred ? 1 : 0; two_end_veto = c.two_end_veto ? 1 : 0;
+            truth_valid = has_truth ? 1 : 0;
+            truth_x = tx; truth_y = ty; truth_z = tz;
+            truth_reco_x = trx; truth_reco_y = try_; truth_reco_z = trz;
+            tc->Fill();
+            for (size_t i = 0; i < c.x.size(); ++i) {
+                ipoint = static_cast<int>(i);
+                is_vertex = static_cast<int>(i) < c.n_vertex_rows ? 1 : 0;
+                px = c.x[i]; py = c.y[i]; pz = c.z[i]; pq = c.q[i];
+                tp->Fill();
+            }
+        }
+    }
+    log->debug("SbndPrMagnifyTrackingVisitor: T_dlvtx_call {} rows, T_dlvtx_cloud {} rows", tc->GetEntries(), tp->GetEntries());
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_bad_channels(TFile* output_tf, Clus::Facade::Grouping& grouping,
