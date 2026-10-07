@@ -2,7 +2,7 @@
 
 This page shows where the deep-learning (DL) neutrino-vertex inference sits in the SBND pattern recognition: what runs before it, what it reads, and what runs after it (ai-helper issue 35, M1).
 
-It was surveyed at toolkit `c3cce7f3`, at the SBND production operating point. That is `pr()`'s defaults, the step-2 `wct-pr.jsonnet` / 1-step `clus_pr` `TaggerCheckNeutrino` configuration:
+It was surveyed at toolkit `c3cce7f3`, at the SBND production operating point. Re-checked at the merge of master `0319ea67` (2026-10-07): the flow is unchanged; master's `main_vertex_swap_apply: true` applies the traditional step's main-cluster swap, so on a swap event the cluster the DL step (and the `dl_vtx_dump` record) sees is the swapped one. With the knob off the merged branch's step-1 tars, `tracking-pr.root` and Bee output equal master's on MC-10 and NCpi0-19 (ai-helper issue 35, log f). That is `pr()`'s defaults, the step-2 `wct-pr.jsonnet` / 1-step `clus_pr` `TaggerCheckNeutrino` configuration:
 - `nu_per_bundle = true`;
 - `fit_exclusion = true`;
 - `dl_weights = uboone/scn_vtx/t48k-m16-l5-lr5d-res0.5-CP24.pth`;
