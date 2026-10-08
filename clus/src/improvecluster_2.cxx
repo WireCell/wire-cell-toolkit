@@ -6,9 +6,11 @@
 
 #include "improvecluster_1.h"  // Include the ImproveCluster_1 header
 #include "SteinerGrapher.h"
+#include "RetileDump.h"
 #include "WireCellClus/ResampleLive.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Exceptions.h"
+#include <atomic>
 #include <chrono>
 
 #include <vector>
@@ -59,6 +61,15 @@ namespace WireCell::Clus {
         //                  grouping's CTPC the way ClusteringResampleLive does.
         std::string m_retile_mode{"full"};
 
+        // doc pdvd/129 phase 1.  dump_dir (C++ default "" = off: nothing is
+        // written and the retile is byte-identical).  Set => for every cluster
+        // retiled in "full" mode the final pass's tiled blobs are written
+        // BEFORE remove_bad_blobs, as an imaging cluster archive plus a JSON
+        // side file (RetileDump.h).  Study only; the returned cluster is
+        // unchanged.  The reduced retile modes do not dump.
+        std::string m_dump_dir{""};
+        mutable std::atomic<int> m_dump_serial{0};
+
         // The non-"full" modes.  orig_cluster is the reinitialized source.
         std::unique_ptr<node_t> mutate_reduced(Cluster& orig_cluster) const;
 
@@ -95,6 +106,7 @@ namespace WireCell::Clus {
         // before the base configure (which needs live detector volumes) so a
         // typo fails on its own message.
         m_retile_mode = get<std::string>(cfg, "retile_mode", m_retile_mode);
+        m_dump_dir = get<std::string>(cfg, "dump_dir", m_dump_dir);
         if (m_retile_mode != "full" && m_retile_mode != "no_paint" &&
             m_retile_mode != "footprint" && m_retile_mode != "none") {
             raise<ValueError>("ImproveCluster_2: unknown retile_mode '%s' "
@@ -116,6 +128,7 @@ namespace WireCell::Clus {
 
         cfg["terminal_charge_threshold"] = m_steiner_terminal_charge;
         cfg["retile_mode"] = m_retile_mode;
+        cfg["dump_dir"] = m_dump_dir;
 
         return cfg;
     }
@@ -230,6 +243,10 @@ namespace WireCell::Clus {
         // make a new node from the existing grouping
         auto& new_cluster = m_grouping->make_child(); // make a new cluster inside 
 
+        // doc pdvd/129: study dump, off unless dump_dir is set
+        const bool dumping = !m_dump_dir.empty();
+        std::map<int, std::vector<RetileDump::Face>> dump_faces;   // apa -> faces
+
         for (auto it = wpid_set.begin(); it != wpid_set.end(); ++it) {
             int apa = it->apa();
             int face = it->face();
@@ -240,6 +257,8 @@ namespace WireCell::Clus {
             // get original activities ...
             t0 = Clock::now();
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
+            std::set<RetileDump::cell_t> dump_before;
+            if (dumping) dump_before = RetileDump::sentinel_cells(map_slices_measures);
             SPDLOG_LOGGER_TRACE(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // doc pdhd/08 stage 1.  One cell-provenance set shared by the two
@@ -268,6 +287,25 @@ namespace WireCell::Clus {
             SPDLOG_LOGGER_TRACE(log, "new cluster {} iblobs for apa {} face {}", iblobs.size(), apa, face);
 
             auto niblobs = iblobs.size();
+            RetileDump::Face* dface = nullptr;
+            if (dumping) {
+                auto& dfs = dump_faces[apa];
+                dfs.emplace_back();
+                dface = &dfs.back();
+                dface->face = face;
+                dface->iblobs = iblobs;
+                dface->sampled.assign(niblobs, 0);
+                dface->cells = RetileDump::classify(dump_before, map_slices_measures);
+                if (!map_slices_measures.empty()) {
+                    dface->tick_span = map_slices_measures.begin()->first.second - map_slices_measures.begin()->first.first;
+                }
+                for (const Blob* b : orig_cluster->children()) {
+                    if (b->wpid().apa() != apa || b->wpid().face() != face) continue;
+                    dface->orig.push_back({b->slice_index_min(), b->u_wire_index_min(), b->u_wire_index_max(),
+                                           b->v_wire_index_min(), b->v_wire_index_max(),
+                                           b->w_wire_index_min(), b->w_wire_index_max()});
+                }
+            }
             // start to sampling points 
             int npoints = 0;
             t0 = Clock::now();
@@ -281,6 +319,7 @@ namespace WireCell::Clus {
                 // DO NOT EXTEND FURTHER! see #426, #430
 
                 if (pcs["3d"].size()==0) continue; // no points ...
+                if (dface) dface->sampled[bind] = 1;
                 // Access 3D coordinates
                 auto pc3d = pcs["3d"];  // Get the 3D point cloud dataset
                 auto x_coords = pc3d.get("x")->elements<double>();  // Get X coordinates
@@ -321,6 +360,11 @@ namespace WireCell::Clus {
             auto count_pts = [&]() { size_t n = 0; for (const Blob* b : new_cluster.children()) n += b->nbpoints(); return n; };
             const size_t npts_before = m_bad_blob_report ? count_pts() : 0;
             for (const Blob* blob : blobs_to_remove) {
+                if (dface) {
+                    dface->removed.push_back({blob->slice_index_min(), blob->u_wire_index_min(), blob->u_wire_index_max(),
+                                              blob->v_wire_index_min(), blob->v_wire_index_max(),
+                                              blob->w_wire_index_min(), blob->w_wire_index_max()});
+                }
                 Blob& b = const_cast<Blob&>(*blob);
                 new_cluster.remove_child(b);
             }
@@ -331,6 +375,13 @@ namespace WireCell::Clus {
             }
             SPDLOG_LOGGER_TRACE(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
             SPDLOG_LOGGER_TRACE(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
+        }
+
+        if (dumping) {
+            const int serial = m_dump_serial++;
+            for (const auto& [dapa, dfs] : dump_faces) {
+                RetileDump::write(m_dump_dir, orig_cluster->ident(), serial, dapa, dfs);
+            }
         }
 
 

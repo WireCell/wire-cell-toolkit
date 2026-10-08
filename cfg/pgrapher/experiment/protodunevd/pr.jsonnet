@@ -152,6 +152,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // the retile samplers above (so charge_stepped is kept).  null => key
               // omitted => byte-identical compiled config.  Study knob, not flipped.
               retile_mode=null,
+              // doc pdvd/129 phase 1: ImproveCluster_2 dump_dir (C++ default "" = off).
+              // Set => the retiler writes each retiled cluster's tiled blobs, before
+              // its own filter, as an imaging cluster archive + a JSON side file.
+              // Study only: the PR output does not change.  null => key omitted =>
+              // byte-identical compiled config.
+              retile_dump_dir=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1521,7 +1527,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             hack_max_bridge=if retile_hack_max_bridge == null then null else retile_hack_max_bridge * wc.cm)
             // doc pdvd/113: key omitted when null => byte-identical (same idiom as steiner's
             // terminal_charge_threshold below).
-            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode } },
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode,
+                         [if retile_dump_dir != null then 'dump_dir']: retile_dump_dir } },
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes

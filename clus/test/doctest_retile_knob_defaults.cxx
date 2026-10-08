@@ -34,4 +34,8 @@ TEST_CASE("pdhd doc08: the retiler's anti-ghost knobs all default to the legacy 
     CHECK(cfg["hack_max_bridge"].asDouble() == 0.0);        // 0 = uncapped = the prototype
     REQUIRE_MESSAGE(cfg.isMember("bad_blob_run_merge"), "missing knob: bad_blob_run_merge");
     CHECK(cfg["bad_blob_run_merge"].asDouble() == 0.0);     // 0 = judge each run alone
+
+    // doc pdvd/129 phase 1
+    REQUIRE_MESSAGE(cfg.isMember("dump_dir"), "missing knob: dump_dir");
+    CHECK(cfg["dump_dir"].asString() == "");               // "" = no dump
 }

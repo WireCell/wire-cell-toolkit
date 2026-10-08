@@ -186,6 +186,9 @@ function(
     // 'none' (no tiling: the cluster's own blobs re-sampled with the retile samplers, so
     // charge_stepped is kept).  Set as code: PDVD_PR_TLA="-S retile_mode='none'".
     retile_mode = null,
+    // doc pdvd/129 phase 1: ImproveCluster_2 dump_dir.  null => key omitted => byte-identical config.
+    // Set as a string: PDVD_PR_TLA="-A retile_dump_dir=<dir>".  Study only, no output change.
+    retile_dump_dir = null,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4592,6 +4595,7 @@ function(
                              retile_sampler_wire_product=retile_sampler_wire_product,
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
                              retile_mode=retile_mode,   // doc pdvd/113
+                             retile_dump_dir=retile_dump_dir,   // doc pdvd/129
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdvd/48; + doc pdvd/51 override bag
