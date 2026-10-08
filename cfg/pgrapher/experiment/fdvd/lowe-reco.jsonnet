@@ -16,9 +16,16 @@
 //   light   opwf:    TensorFileSource(opwf_) -> FdvdOpHitFinder -> OpFlashFinder(frozen doc 04 point) -> QL port 2
 //                    (flash_finder='adjophits': -> FdvdAdjOpFlashFinder(adjflash.jsonnet + adj) instead, doc 21)
 //           opflash: TensorFileSource(opflash_) (an OpFlashFinder archive)                            -> QL port 2
-//   drift   drift_model + frames: the matcher runs FdvdDriftRegressor itself (TorchTensorSetService with the
-//           TorchScript M3, fdvd_sim/stageB/export_drift_ts.py; SP gauss frames read from the per-CRM archives
-//           named by frames = '<dir>/sp-anode%d.tar.gz'), or
+//   drift   drift_model + frames: the matcher runs the drift regressor itself (TorchTensorSetService; SP gauss
+//           frames read from the per-CRM archives named by frames = '<dir>/sp-anode%d.tar.gz'):
+//             drift_views = 3 (jsonnet default since fdvd_sim doc 38, owner 2026-10-07): FdvdDriftRegressor3View
+//               with the three-view model, wire-cell-data fdvd/drift/e4-fdvd35-fast-s0-bf16.ts; the calibration
+//               must carry that model's veto block (fdvd/drift/fdvd-lowe-qlcal-{adjophits,opflash}-e4fdvd35.json,
+//               chosen by flash_finder);
+//             drift_views = 1: FdvdDriftRegressor with the collection-only TorchScript M3
+//               (fdvd_sim/stageB/export_drift_ts.py), the doc 16-34 chain.  C++ default 1: the 'views' key is
+//               omitted for 1, so a caller that passes drift_views=1 compiles to the byte-identical earlier config;
+//           or
 //           drift_in: TensorFileSource(drift_) ("drift" [n, 3] = rep blob, mu, sigma)                 -> QL port 3
 //   FdvdLowEQLMatching -> [FdvdLowERootWriter(rootfile), pass-through] -> TensorFileSink(lowe_; dump_mode if outfile '')
 // Inputs are the per-CRM imaging archives (the "assembled" mode of doc 16: exactly what the python chain
@@ -45,7 +52,7 @@ local adjflash = import 'pgrapher/experiment/fdvd/adjflash.jsonnet';
 //                     flash per group (the AdjOpHits arm).  Key omitted when null.
 
 function(indir, library, calibration, outfile='', rootfile='', opwf='', opflash='', drift_in='', drift_model='', frames='',
-         drift_device='cpu', drift_views=1, dump_crops=false, pipe='simple', iso_cm=30, event=0, bee_zip='', dump_tables=false,
+         drift_device='cpu', drift_views=3, dump_crops=false, pipe='simple', iso_cm=30, event=0, bee_zip='', dump_tables=false,
          anode_indices=std.range(0, std.length(tools.anodes) - 1),
          flash_finder='opflash', adj={}, arms=null, specs=null, merge_equal_time=null)
   assert (opwf != '') != (opflash != '') : 'give exactly one of opwf / opflash';
