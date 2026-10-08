@@ -21,6 +21,7 @@
 #include "WireCellUtil/Units.h"
 
 #include <cmath>
+#include <map>
 #include <set>
 
 using namespace WireCell;
@@ -56,6 +57,34 @@ TEST_CASE("icarus/04 electron_lifetime: set_parameter round trip")
     TrackFitting tf;
     tf.set_parameter("electron_lifetime", 3 * units::ms);
     CHECK(tf.get_parameter("electron_lifetime") == doctest::Approx(3 * units::ms));
+}
+
+TEST_CASE("icarus/06 electron_lifetime_apa<N>: off by default, round trip, bad names rejected")
+{
+    TrackFitting tf;
+    CHECK(tf.get_parameters().electron_lifetime_apa.empty());
+    CHECK(tf.get_parameter("electron_lifetime_apa2") == 0.0);
+    tf.set_parameter("electron_lifetime_apa2", 8.6 * units::ms);
+    CHECK(tf.get_parameter("electron_lifetime_apa2") == doctest::Approx(8.6 * units::ms));
+    CHECK(tf.get_parameter("electron_lifetime_apa3") == 0.0);
+    // The scalar is not touched by a per-anode value.
+    CHECK(tf.get_parameter("electron_lifetime") == 0.0);
+    CHECK_THROWS(tf.set_parameter("electron_lifetime_apa", 1.0));
+    CHECK_THROWS(tf.set_parameter("electron_lifetime_apaX", 1.0));
+    CHECK_THROWS(tf.get_parameter("electron_lifetime_apa-1"));
+}
+
+TEST_CASE("icarus/06 electron_lifetime_for: the anode's value when set and positive, else the scalar")
+{
+    const double scalar = 4.1 * units::ms;
+    const std::map<int, double> none;
+    CHECK(TrackFitting::electron_lifetime_for(none, 0, scalar) == scalar);
+    const std::map<int, double> by{{0, 4.0 * units::ms}, {1, 4.2 * units::ms}, {2, 0.0}};
+    CHECK(TrackFitting::electron_lifetime_for(by, 0, scalar) == 4.0 * units::ms);
+    CHECK(TrackFitting::electron_lifetime_for(by, 1, scalar) == 4.2 * units::ms);
+    CHECK(TrackFitting::electron_lifetime_for(by, 2, scalar) == scalar);   // 0 = not set
+    CHECK(TrackFitting::electron_lifetime_for(by, 3, scalar) == scalar);   // absent
+    CHECK(TrackFitting::electron_lifetime_for(by, -1, scalar) == scalar);  // no anode
 }
 
 TEST_CASE("icarus/04 G1: fallback_apa_face keeps (0,0) wherever it exists")

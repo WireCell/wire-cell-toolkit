@@ -10,6 +10,7 @@
 #include "WireCellClus/PRDlVtxDump.h"
 
 #include <Eigen/IterativeLinearSolvers>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 #include <array>
@@ -306,6 +307,15 @@ namespace WireCell::Clus {
             // (legacy, byte-identical).  Only read when electron_lifetime > 0.
             // Reported as a double for the set_parameter(name, value) plumbing.
             double electron_lifetime_allow_unmatched = 0;
+
+            // wcp-porting-img icarus/docs/06 -- per-anode lifetime, set as
+            // "electron_lifetime_apa<N>" (N = the anode ident; ICARUS: 0 EE,
+            // 1 EW, 2 WE, 3 WW, the channels of tpc_elifetime_data.db).  A
+            // point in anode N is corrected with this tau when it is set and
+            // positive, else with electron_lifetime.  Empty = OFF = every
+            // anode uses electron_lifetime (legacy, byte-identical).  Only
+            // read when electron_lifetime > 0.  WCT time units.
+            std::map<int, double> electron_lifetime_apa;
 
             // doc pdvd/45 sec 13 -- do_single_tracking's 2nd-pass projection loop
             // looks up wpid_offsets/wpid_slopes for the (apa, face) that
@@ -1116,6 +1126,11 @@ namespace WireCell::Clus {
         /// t_d = |drift_distance| / drift_speed.  1 when tau <= 0 (knob off) or
         /// the drift speed is not positive.  Pure; see Parameters::electron_lifetime.
         static double electron_lifetime_factor(double drift_distance, double drift_speed, double lifetime);
+
+        /// icarus/docs/06: the lifetime of anode `apa`: its entry in `by_apa`
+        /// when present and positive, else `fallback`.  Pure; see
+        /// Parameters::electron_lifetime_apa.
+        static double electron_lifetime_for(const std::map<int, double>& by_apa, int apa, double fallback);
 
         /// doc pdvd/81: un-whitened prediction of a SUBSET of trajectory rows:
         /// out(i) = row_scale[i] * sum_k R(i,k) * pos(k) * (col_mask[k] != 0).

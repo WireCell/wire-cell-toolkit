@@ -236,6 +236,16 @@ TrackFitting::TrackFitting(FittingType fitting_type)
 // Parameter management methods
 // ============================================================================
 
+// icarus/docs/06: the anode ident N of a parameter named "electron_lifetime_apa<N>".
+static int electron_lifetime_apa_ident(const std::string& name)
+{
+    const std::string digits = name.substr(std::string("electron_lifetime_apa").size());
+    if (digits.empty() || digits.find_first_not_of("0123456789") != std::string::npos) {
+        raise<ValueError>("TrackFitting: Unknown parameter name '%s'", name.c_str());
+    }
+    return std::stoi(digits);
+}
+
 void TrackFitting::set_parameter(const std::string& name, double value) {
     // Map parameter names to struct members
     if (name == "traj_cover_probe") {          // doc pr/67, log-only
@@ -258,6 +268,13 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.electron_lifetime_allow_unmatched = value;
         if (value != 0) {
             SPDLOG_LOGGER_INFO(s_log, "electron_lifetime_allow_unmatched: clusters without a matched flash are corrected too (their cluster_t0 is taken as the true t0)");
+        }
+    } else if (name.rfind("electron_lifetime_apa", 0) == 0) {   // icarus/docs/06, WCT time units
+        const int apa = electron_lifetime_apa_ident(name);
+        m_params.electron_lifetime_apa[apa] = value;
+        if (value > 0) {
+            SPDLOG_LOGGER_INFO(s_log, "electron_lifetime: anode {} tau = {:.4g} ms (overrides electron_lifetime for points in this anode)",
+                               apa, value / units::ms);
         }
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         m_params.excl_t0_frame = value;
@@ -450,6 +467,9 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.electron_lifetime;
     } else if (name == "electron_lifetime_allow_unmatched") {   // wcfm/docs/25
         return m_params.electron_lifetime_allow_unmatched;
+    } else if (name.rfind("electron_lifetime_apa", 0) == 0) {   // icarus/docs/06
+        auto it = m_params.electron_lifetime_apa.find(electron_lifetime_apa_ident(name));
+        return it == m_params.electron_lifetime_apa.end() ? 0.0 : it->second;
     } else if (name == "excl_t0_frame") {              // doc pdvd/45
         return m_params.excl_t0_frame;
     } else if (name == "proj_skip_unmapped_face") {    // doc pdvd/45 sec 13
@@ -8825,6 +8845,12 @@ double Clus::TrackFitting::electron_lifetime_factor(double drift_distance, doubl
     return std::exp(std::abs(drift_distance) / drift_speed / lifetime);
 }
 
+double Clus::TrackFitting::electron_lifetime_for(const std::map<int, double>& by_apa, int apa, double fallback)
+{
+    auto it = by_apa.find(apa);
+    return (it != by_apa.end() && it->second > 0) ? it->second : fallback;
+}
+
 double Clus::TrackFitting::electron_lifetime_at(const Facade::Cluster* cluster, const WireCell::Point& p, int apa, int face)
 {
     if (!(m_params.electron_lifetime > 0)) return 1.0;
@@ -8848,7 +8874,8 @@ double Clus::TrackFitting::electron_lifetime_at(const Facade::Cluster* cluster, 
     const double xorig = anode->faces()[face]->planes()[2]->wires().front()->center().x();
     const double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
     ++m_lifetime_ncorr;
-    return electron_lifetime_factor(p.x() - xorig, drift_speed, m_params.electron_lifetime);
+    return electron_lifetime_factor(p.x() - xorig, drift_speed,
+                                    electron_lifetime_for(m_params.electron_lifetime_apa, apa, m_params.electron_lifetime));
 }
 
 double Clus::TrackFitting::electron_lifetime_unmatched_at(const WireCell::Point& p, int apa, int face)
@@ -8867,7 +8894,8 @@ double Clus::TrackFitting::electron_lifetime_unmatched_at(const WireCell::Point&
     const double xorig = anode->faces()[face]->planes()[2]->wires().front()->center().x();
     const double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
     ++m_lifetime_ncorr;
-    return electron_lifetime_factor(p.x() - xorig, drift_speed, m_params.electron_lifetime);
+    return electron_lifetime_factor(p.x() - xorig, drift_speed,
+                                    electron_lifetime_for(m_params.electron_lifetime_apa, apa, m_params.electron_lifetime));
 }
 
 int Clus::TrackFitting::dqdx_path_point_role(int i, int n, const std::vector<std::pair<int, int>>& paf)
