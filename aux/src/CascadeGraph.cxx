@@ -1,9 +1,8 @@
-// Level-graph builder of CascadeDeghosting (wcfm doc 14).  See WireCellImg/CascadeGraph.h.
+// Level-graph builder of CascadeDeghosting (wcfm doc 14).  See WireCellAux/CascadeGraph.h.
 // Python references (wcp-porting-img wcfm/scripts): gnn_dataset.py build_graph L152-276, inslice_adjacency L72-99,
 // wire_adjacency L102-131; d12_cascade.py contract_level L223-299, guard_prune L340-357.
 
-#include "WireCellImg/CascadeGraph.h"
-#include "WireCellImg/GeomClusteringUtil.h"
+#include "WireCellAux/CascadeGraph.h"
 
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellIface/IAnodeFace.h"
@@ -20,7 +19,7 @@
 #include <thread>
 
 using namespace WireCell;
-using namespace WireCell::Img;
+using namespace WireCell::Aux;
 
 int Cascade::SliceCharge::index(const ISlice::pointer& s) const
 {
@@ -445,57 +444,21 @@ namespace {
         return std::round((two->start() - one->start()) / one->span());
     }
 
-    // per slice index, the node indices (ascending); the non-empty ones in slice-index (time) order
-    std::vector<std::vector<int64_t>> slice_sets(const std::vector<int>& sidx, size_t nslices, std::vector<int>& set_slice)
-    {
-        std::vector<std::vector<int64_t>> per(nslices);
-        for (size_t i = 0; i < sidx.size(); ++i) per[sidx[i]].push_back((int64_t) i);
-        std::vector<std::vector<int64_t>> sets;
-        set_slice.clear();
-        for (size_t s = 0; s < nslices; ++s) {
-            if (per[s].empty()) continue;
-            sets.push_back(std::move(per[s]));
-            set_slice.push_back((int) s);
-        }
-        return sets;
-    }
 }  // namespace
 
-std::vector<std::array<int64_t, 2>> Cascade::geom_pairs_graph(const std::vector<IBlob::pointer>& blobs,
-                                                              const std::vector<int>& sidx,
-                                                              const std::vector<ISlice::pointer>& slice_of,
-                                                              const std::string& policy)
+// per slice index, the node indices (ascending); the non-empty ones in slice-index (time) order
+std::vector<std::vector<int64_t>> Cascade::slice_sets(const std::vector<int>& sidx, size_t nslices, std::vector<int>& set_slice)
 {
-    const size_t N = blobs.size();
-    std::vector<int> set_slice;
-    const auto per = slice_sets(sidx, slice_of.size(), set_slice);
-    IBlobSet::vector sets;
-    for (size_t k = 0; k < per.size(); ++k) {
-        IBlob::vector v;
-        for (auto i : per[k]) v.push_back(blobs[i]);
-        sets.push_back(std::make_shared<Aux::SimpleBlobSet>(set_slice[k], slice_of[set_slice[k]], v));
+    std::vector<std::vector<int64_t>> per(nslices);
+    for (size_t i = 0; i < sidx.size(); ++i) per[sidx[i]].push_back((int64_t) i);
+    std::vector<std::vector<int64_t>> sets;
+    set_slice.clear();
+    for (size_t s = 0; s < nslices; ++s) {
+        if (per[s].empty()) continue;
+        sets.push_back(std::move(per[s]));
+        set_slice.push_back((int) s);
     }
-    cluster_indexed_graph_t grind;
-    for (auto it = sets.begin(); it != sets.end(); ++it) {
-        Img::geom_clustering(grind, it, sets.end(), policy);
-    }
-    std::unordered_map<const IBlob*, int64_t> bidx;  // lookup only
-    bidx.reserve(N);
-    for (size_t i = 0; i < N; ++i) bidx[blobs[i].get()] = (int64_t) i;
-    std::vector<std::array<int64_t, 2>> bb;
-    const auto& g = grind.graph();
-    for (auto e : boost::make_iterator_range(boost::edges(g))) {
-        const auto& na = g[boost::source(e, g)];
-        const auto& nb = g[boost::target(e, g)];
-        if (na.code() != 'b' || nb.code() != 'b') continue;
-        const int64_t a = bidx.at(std::get<IBlob::pointer>(na.ptr).get());
-        const int64_t b = bidx.at(std::get<IBlob::pointer>(nb.ptr).get());
-        if (a == b) continue;
-        bb.push_back({std::min(a, b), std::max(a, b)});
-    }
-    std::sort(bb.begin(), bb.end());
-    bb.erase(std::unique(bb.begin(), bb.end()), bb.end());
-    return bb;
+    return sets;
 }
 
 // Img::geom_clustering (GeomClusteringUtil.cxx L40-104) without the cluster graph.  For a "beg" blob set and each

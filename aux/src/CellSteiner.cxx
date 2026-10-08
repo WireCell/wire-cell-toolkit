@@ -1,8 +1,8 @@
-// Steiner-style repair of the kept cells (wcfm doc 14).  See WireCellImg/CellSteiner.h.
+// Steiner-style repair of the kept cells (wcfm doc 14).  See WireCellAux/CellSteiner.h.
 // Python reference: wcp-porting-img wcfm/scripts/d11_repair.py repair_v L77-132 (variant V2),
 // d10_connectivity.py repair L114-158.
 
-#include "WireCellImg/CellSteiner.h"
+#include "WireCellAux/CellSteiner.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,7 +11,7 @@
 #include <queue>
 #include <tuple>
 
-using namespace WireCell::Img;
+using namespace WireCell::Aux;
 
 namespace {
     struct DSU {

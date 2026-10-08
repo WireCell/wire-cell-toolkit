@@ -8,7 +8,7 @@
 //
 // split_blob_once and the recursion are copied from BlobCutting.cxx (lines 56-173 at toolkit af93ac68).
 
-#include "WireCellImg/CascadeGraph.h"
+#include "WireCellAux/CascadeGraph.h"
 
 #include "WireCellUtil/RayClustering.h"  // surrounding()
 #include "WireCellUtil/RayTiling.h"
@@ -98,10 +98,10 @@ namespace {
 
     // BlobCutting.cxx split_blob_recursively, with the node depth carried along
     void split_recursively(const RayGrid::Coordinates& coords, const RayGrid::Blob& blob, int depth,
-                           int length_threshold, const Img::Cascade::CutParams& par,
+                           int length_threshold, const Aux::Cascade::CutParams& par,
                            std::vector<std::pair<RayGrid::Blob, int>>& out)
     {
-        if (!Img::Cascade::needs_cutting(blob, length_threshold) || par.max_depth - depth <= 0) {
+        if (!Aux::Cascade::needs_cutting(blob, length_threshold) || par.max_depth - depth <= 0) {
             out.emplace_back(blob, depth);
             return;
         }
@@ -116,7 +116,7 @@ namespace {
     }
 }  // namespace
 
-bool Img::Cascade::needs_cutting(const RayGrid::Blob& blob, int length_threshold)
+bool Aux::Cascade::needs_cutting(const RayGrid::Blob& blob, int length_threshold)
 {
     for (const auto& strip : blob.strips()) {
         if (is_wire_layer(strip) && strip_width(strip) > length_threshold) {
@@ -126,7 +126,7 @@ bool Img::Cascade::needs_cutting(const RayGrid::Blob& blob, int length_threshold
     return false;
 }
 
-std::vector<std::pair<RayGrid::Blob, int>> Img::Cascade::cut_shape(const RayGrid::Coordinates& coords,
+std::vector<std::pair<RayGrid::Blob, int>> Aux::Cascade::cut_shape(const RayGrid::Coordinates& coords,
                                                                    const RayGrid::Blob& blob, int depth, int width,
                                                                    const CutParams& par)
 {
