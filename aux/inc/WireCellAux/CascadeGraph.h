@@ -57,6 +57,9 @@ namespace WireCell::Aux::Cascade {
     /// From the s-nodes of a cluster graph.  Activity entries with uncertainty >= uncer_cut (dummy or
     /// masked channels) are ignored; a channel seen in several passes' slices of one time keeps the max.
     SliceCharge make_slice_charge(const cluster_graph_t& gr, double scale, double uncer_cut);
+    /// The same from a list of slices (pdvd doc 130: the clustering retiler's slices); the graph version is this on
+    /// the graph's s-nodes in vertex order.
+    SliceCharge make_slice_charge(const std::vector<ISlice::pointer>& slices_in, double scale, double uncer_cut);
 
     /// The same slice indexing, with the charge taken from the frame's traces of `tag` ("" = all traces):
     /// charge(s, ch) = float(scale x sum over the slice's ticks of the trace), 0 for a channel without a trace.

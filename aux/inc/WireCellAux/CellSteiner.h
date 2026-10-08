@@ -33,6 +33,12 @@ namespace WireCell::Aux::Cascade {
         double budget{5.5};
         double cost_max{10.0};
         double q_unit{1e4};        // qhat is in these units (Q0)
+        // Length pricing of the gap cells (pdvd doc 129 owner decision 2; doc 130 phase 3).  Both act only when
+        // steiner_repair is given per-edge lengths: len_cost x length is added to every edge weight (0 = off), and a
+        // Dijkstra step or a bridge whose path length exceeds max_bridge_len is refused (0 = no cap).  Defaults off
+        // = the repair of wcfm doc 14, byte for byte.
+        double len_cost{0.0};
+        double max_bridge_len{0.0};
     };
 
     struct SteinerResult {
@@ -42,9 +48,12 @@ namespace WireCell::Aux::Cascade {
     };
 
     /// edges: undirected pairs (each once) over the cells, e.g. bb + bb_in of the final level.
+    /// edge_len: optional, one length per edge (any unit, the same as par.max_bridge_len); nullptr = no length
+    /// pricing whatever par.len_cost / par.max_bridge_len say.
     SteinerResult steiner_repair(size_t n, const std::vector<std::array<int64_t, 2>>& edges,
                                  const std::vector<float>& logit, const std::vector<float>& qhat,
-                                 const std::vector<bool>& keep, const SteinerParams& par);
+                                 const std::vector<bool>& keep, const SteinerParams& par,
+                                 const std::vector<double>* edge_len = nullptr);
 
     /// Connected-component labels of the cells in `mask` over the edges (-1 elsewhere), labelled in order of
     /// the lowest cell index.

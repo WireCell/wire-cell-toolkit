@@ -189,6 +189,23 @@ function(
     // doc pdvd/129 phase 1: ImproveCluster_2 dump_dir.  null => key omitted => byte-identical config.
     // Set as a string: PDVD_PR_TLA="-A retile_dump_dir=<dir>".  Study only, no output change.
     retile_dump_dir = null,
+    // doc pdvd/130 phase 3: deghosting inside the Steiner-stage retile (ImproveCluster_2 retile_deghost,
+    // C++ absent = off).  false => key omitted, no model service, no WireCellPytorch => byte-identical
+    // compiled config.  Runner: run_pr_evt.sh -beam-retile-deghost sets retile_deghost=true and
+    // retile_deghost_ml_levels=<the imaging job's ml_levels rows>; PDVD_RETILE_DEGHOST_FILTER /
+    // _SCOPE / _DUMP_DIR set the rest (see pr.jsonnet).
+    retile_deghost = false,
+    retile_deghost_filter = 'run',
+    retile_deghost_scope = 'bundle',
+    retile_deghost_ml_levels = null,
+    retile_deghost_model_dir = 'fm/protodunevd/deghost',
+    retile_deghost_model_suffix = '',
+    retile_deghost_device = 'cpu',
+    retile_deghost_repair_q_floor = 1.6e4,
+    retile_deghost_nthreads = 4,
+    retile_deghost_bridge_len_cost = 0,
+    retile_deghost_bridge_max_cm = 0,
+    retile_deghost_dump_dir = null,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4596,6 +4613,18 @@ function(
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
                              retile_mode=retile_mode,   // doc pdvd/113
                              retile_dump_dir=retile_dump_dir,   // doc pdvd/129
+                             retile_deghost=retile_deghost,   // doc pdvd/130 phase 3
+                             retile_deghost_filter=retile_deghost_filter,
+                             retile_deghost_scope=retile_deghost_scope,
+                             retile_deghost_ml_levels=retile_deghost_ml_levels,
+                             retile_deghost_model_dir=retile_deghost_model_dir,
+                             retile_deghost_model_suffix=retile_deghost_model_suffix,
+                             retile_deghost_device=retile_deghost_device,
+                             retile_deghost_repair_q_floor=retile_deghost_repair_q_floor,
+                             retile_deghost_nthreads=retile_deghost_nthreads,
+                             retile_deghost_bridge_len_cost=retile_deghost_bridge_len_cost,
+                             retile_deghost_bridge_max_cm=retile_deghost_bridge_max_cm,
+                             retile_deghost_dump_dir=retile_deghost_dump_dir,
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdvd/48; + doc pdvd/51 override bag
@@ -4785,7 +4814,8 @@ function(
         data: {
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
-                     + (if needs_root then ['WireCellRoot'] else []),
+                     + (if needs_root then ['WireCellRoot'] else [])
+                     + (if retile_deghost then ['WireCellPytorch'] else []),   // doc pdvd/130 phase 3
             apps: ['Pgrapher'],
         },
     };

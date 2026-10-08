@@ -48,7 +48,10 @@ namespace WireCell::Clus::RetileDump {
         std::vector<std::array<int, 4>> cells;           // classify()
     };
 
-    void write(const std::string& dir, int cluster_ident, int serial, int apa, const std::vector<Face>& faces);
+    /// prefix: the file stem ("retile" = the phase 1 dump; pdvd doc 130 phase 3 writes "rdin" / "rdout", the
+    /// model's input and output cells of the retile_deghost step).
+    void write(const std::string& dir, int cluster_ident, int serial, int apa, const std::vector<Face>& faces,
+               const std::string& prefix = "retile");
 
 }  // namespace WireCell::Clus::RetileDump
 

@@ -214,3 +214,51 @@ TEST_CASE("bad blob runs: a run over the bound still dies with the merge on")
     CHECK(r.removed_by_run.size() == 31);
     CHECK(r.removed_by_merge.empty());   // it died on its own span, not on the merge
 }
+
+TEST_CASE("bad blob runs: run_eligible restricts the run bound, not the vote (pdvd doc 130)")
+{
+    // test (i)'s chain: a 30 cm unsupported middle in a supported chain
+    Chain c(60);
+    for (int i = 15; i < 45; ++i) c.supported[i] = false;
+    const auto ref = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice);
+    REQUIRE(ref.removed_by_run.size() == 30);
+    REQUIRE(ref.removed_by_vote.empty());
+    {
+        // every blob eligible: identical to no mask
+        std::vector<bool> all(c.n, true);
+        const auto r = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 0.0, all);
+        CHECK(r.removed_by_run == ref.removed_by_run);
+        CHECK(r.runs.size() == ref.runs.size());
+        CHECK(r.component == ref.component);
+    }
+    {
+        // the middle is measured charge (not eligible): the run bound does not touch it
+        std::vector<bool> none(c.n, false);
+        const auto r = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 0.0, none);
+        CHECK(r.removed_by_run.empty());
+        CHECK(r.runs.empty());
+        CHECK(r.removed_by_vote.empty());
+    }
+    {
+        // only 10 cm of the middle is eligible: a 10 cm run, under the bound, stays
+        std::vector<bool> part(c.n, false);
+        for (int i = 20; i < 30; ++i) part[i] = true;
+        const auto r = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 0.0, part);
+        REQUIRE(r.runs.size() == 1);
+        CHECK(r.runs[0].blobs.size() == 10);
+        CHECK(r.removed_by_run.empty());
+        // ... and a 25 cm eligible stretch goes
+        for (int i = 30; i < 45; ++i) part[i] = true;
+        const auto r2 = analyze(c.n, c.edges, c.supported, c.centers, 20 * units::cm, c.slice, 0.0, part);
+        CHECK(r2.removed_by_run.size() == 25);
+    }
+    {
+        // the vote is untouched by the mask: a detached unsupported component still goes
+        Chain d(10);
+        for (int i = 6; i < 10; ++i) d.supported[i] = false;
+        d.edges.erase(std::remove(d.edges.begin(), d.edges.end(), std::make_pair(5, 6)), d.edges.end());
+        std::vector<bool> none(d.n, false);
+        const auto r = analyze(d.n, d.edges, d.supported, d.centers, 20 * units::cm, d.slice, 0.0, none);
+        CHECK(r.removed_by_vote.size() == 4);
+    }
+}

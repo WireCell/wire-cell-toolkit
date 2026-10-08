@@ -136,10 +136,14 @@ namespace WireCell::Clus::BadBlobRuns {
 
     /// The round-3 filter.  `slice` may be empty (nslices then reports 0).
     /// `run_merge` > 0 enables step 4 (doc pdhd/08).
+    /// `run_eligible` (pdvd doc 130, setting "painted_run"): when not empty,
+    /// only the unsupported blobs flagged true form runs and can be removed
+    /// by the run bound (the vote is unchanged); empty = every blob, the
+    /// historical rule.
     inline Result analyze(int n, const std::vector<std::pair<int, int>>& edges,
                           const std::vector<bool>& supported, const std::vector<Point>& centers,
                           double max_run, const std::vector<int>& slice = {},
-                          double run_merge = 0.0)
+                          double run_merge = 0.0, const std::vector<bool>& run_eligible = {})
     {
         Result r;
         r.ncomp = label_components(n, edges, r.component);
@@ -157,6 +161,8 @@ namespace WireCell::Clus::BadBlobRuns {
         // Runs: components of the unsupported blobs inside good components.
         std::vector<int> keep(n, 0);
         for (int i = 0; i < n; ++i) keep[i] = (!supported[i] && r.good_component[r.component[i]]) ? 1 : 0;
+        if (!run_eligible.empty())
+            for (int i = 0; i < n; ++i) if (!run_eligible[i]) keep[i] = 0;
         std::vector<std::pair<int, int>> uedges;
         for (const auto& e : edges)
             if (keep[e.first] && keep[e.second]) uedges.push_back(e);

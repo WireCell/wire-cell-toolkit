@@ -89,9 +89,10 @@ namespace WireCell::Clus::RetileDump {
         return out;
     }
 
-    void write(const std::string& dir, int cluster_ident, int serial, int apa, const std::vector<Face>& faces)
+    void write(const std::string& dir, int cluster_ident, int serial, int apa, const std::vector<Face>& faces,
+               const std::string& prefix)
     {
-        const std::string base = String::format("%s/retile-c%d-k%d-apa%d", dir, cluster_ident, serial, apa);
+        const std::string base = String::format("%s/%s-c%d-k%d-apa%d", dir, prefix, cluster_ident, serial, apa);
 
         cluster_indexed_graph_t grind;
         Json::Value jfaces = Json::arrayValue;

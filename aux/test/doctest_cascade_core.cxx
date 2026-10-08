@@ -4,6 +4,9 @@
 */
 #include "WireCellAux/CascadeGraph.h"
 #include "WireCellAux/CellSteiner.h"
+#include "WireCellAux/SimpleChannel.h"
+#include "WireCellAux/SimpleSlice.h"
+#include "WireCellIface/ICluster.h"
 
 #include "WireCellUtil/doctest.h"
 
@@ -159,4 +162,92 @@ TEST_CASE("steiner repair: bridge within budget, not beyond, weak island dropped
         CHECK(res.nbridges == 0);
         CHECK(res.nadded == 0);
     }
+}
+
+TEST_CASE("steiner repair: length pricing is off without lengths or costs; a length cap refuses a long bridge")
+{
+    // pdvd doc 130 phase 3: the same chain as above, 0 1 [2 3 4] 5 6, bridged through three P = 0.2 cells
+    auto chain = [](size_t n) {
+        std::vector<std::array<int64_t, 2>> e;
+        for (size_t i = 0; i + 1 < n; ++i) e.push_back({(int64_t) i, (int64_t) i + 1});
+        return e;
+    };
+    const float hi = 4.6f, lo = (float) std::log(0.2 / 0.8);
+    std::vector<float> logit{hi, hi, lo, lo, lo, hi, hi};
+    std::vector<float> qhat(7, 0.1f);
+    std::vector<bool> keep{true, true, false, false, false, true, true};
+    const auto e = chain(7);
+    Cascade::SteinerParams par;
+    const auto ref = Cascade::steiner_repair(7, e, logit, qhat, keep, par);
+    REQUIRE(ref.nbridges == 1);
+    REQUIRE(ref.nadded == 3);
+    std::vector<double> len(e.size(), 1.0);   // every edge 1 unit; the bridge walks 4 edges
+    {
+        // lengths given, defaults (no cost, no cap): identical
+        const auto r = Cascade::steiner_repair(7, e, logit, qhat, keep, par, &len);
+        CHECK(r.keep == ref.keep);
+        CHECK(r.nbridges == ref.nbridges);
+        CHECK(r.nadded == ref.nadded);
+    }
+    {
+        // a cost or a cap without lengths: identical (nothing to price)
+        auto p2 = par;
+        p2.len_cost = 100.0;
+        p2.max_bridge_len = 0.5;
+        const auto r = Cascade::steiner_repair(7, e, logit, qhat, keep, p2);
+        CHECK(r.keep == ref.keep);
+        CHECK(r.nbridges == 1);
+    }
+    {
+        // cap below the bridge length: refused; cap at the bridge length: accepted
+        auto p2 = par;
+        p2.max_bridge_len = 3.5;
+        const auto r = Cascade::steiner_repair(7, e, logit, qhat, keep, p2, &len);
+        CHECK(r.nbridges == 0);
+        CHECK(r.nadded == 0);
+        p2.max_bridge_len = 4.0;
+        const auto r2 = Cascade::steiner_repair(7, e, logit, qhat, keep, p2, &len);
+        CHECK(r2.nbridges == 1);
+        CHECK(r2.nadded == 3);
+    }
+    {
+        // a length cost pushes the bridge over the budget
+        auto p2 = par;
+        p2.len_cost = 10.0;
+        const auto r = Cascade::steiner_repair(7, e, logit, qhat, keep, p2, &len);
+        CHECK(r.nbridges == 0);
+        p2.len_cost = 1e-3;
+        const auto r2 = Cascade::steiner_repair(7, e, logit, qhat, keep, p2, &len);
+        CHECK(r2.nbridges == 1);
+    }
+}
+
+TEST_CASE("slice charge from a list of slices equals the cluster-graph version (pdvd doc 130)")
+{
+    // three slices, two at one start time (two tiling passes), channels with and without the dummy uncertainty
+    auto ch = [](int ident) { return std::make_shared<SimpleChannel>(ident, ident); };
+    IChannel::pointer c1 = ch(1), c2 = ch(2), c3 = ch(3);
+    auto s0 = std::make_shared<SimpleSlice>(nullptr, 0, 0.0, 4.0);
+    auto s1 = std::make_shared<SimpleSlice>(nullptr, 1, 4.0, 4.0);
+    auto s1b = std::make_shared<SimpleSlice>(nullptr, 2, 4.0, 4.0);
+    s0->activity()[c1] = ISlice::value_t(100.0, 0.0);
+    s0->activity()[c2] = ISlice::value_t(0.0, 1e12);      // sentinel: dropped
+    s1->activity()[c1] = ISlice::value_t(10.0, 0.0);
+    s1->activity()[c3] = ISlice::value_t(30.0, 0.0);
+    s1b->activity()[c1] = ISlice::value_t(20.0, 0.0);     // same time, larger: the max is kept
+    std::vector<ISlice::pointer> slices{s1b, s0, s1};
+    cluster_graph_t gr;
+    for (const auto& s : slices) boost::add_vertex(cluster_node_t(s), gr);
+    const auto a = Cascade::make_slice_charge(gr, 0.25, 1e11);
+    const auto b = Cascade::make_slice_charge(slices, 0.25, 1e11);
+    REQUIRE(a.slice_of.size() == 2);
+    REQUIRE(b.slice_of.size() == 2);
+    CHECK(a.slice_of[0]->start() == b.slice_of[0]->start());
+    CHECK(a.slice_of[1]->start() == b.slice_of[1]->start());
+    for (const auto& s : slices) CHECK(a.index(s) == b.index(s));
+    CHECK(b.charge(0, 1) == doctest::Approx(25.0));
+    CHECK(b.charge(0, 2) == doctest::Approx(0.0));
+    CHECK(b.charge(1, 1) == doctest::Approx(5.0));
+    CHECK(b.charge(1, 3) == doctest::Approx(7.5));
+    for (int si = 0; si < 2; ++si) for (int c = 1; c <= 3; ++c) CHECK(a.charge(si, c) == b.charge(si, c));
 }

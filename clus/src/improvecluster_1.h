@@ -59,7 +59,19 @@ namespace WireCell::Clus {
        std::vector<WireCell::IBlob::pointer> make_iblobs_improved(std::map<std::pair<int, int>, std::vector<WireCell::RayGrid::measure_t> >& map_slices_measures, int apa, int face) const;
 
 
-       std::vector<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const;
+       // pdvd doc 130 phase 3 (ImproveCluster_2 retile_deghost): one call's
+       // filter settings in place of the members.  nullptr (every production
+       // caller) = the members, byte-identical.  With opts the decision is
+       // always BadBlobRuns::analyze's vote (same- and adjacent-slice edges)
+       // plus, when max_run > 0, its run bound; run_eligible (may be null)
+       // restricts the run bound to the flagged blobs (setting "painted_run").
+       struct BadBlobOpts {
+           double max_run{0.0};
+           double run_merge{0.0};
+           const std::map<const Blob*, bool>* run_eligible{nullptr};   // lookup only, never iterated
+       };
+       std::vector<const Blob*> remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face,
+                                                 const BadBlobOpts* opts = nullptr) const;
 
        // doc pdvd/40 round 3: the knob-ON / census path of remove_bad_blobs
        // (BadBlobRuns.h holds the decision core).  all_new_blobs is the
@@ -68,7 +80,8 @@ namespace WireCell::Clus {
                                                       const std::vector<const Blob*>& all_new_blobs,
                                                       const std::map<int, BlobSet>& orig_time_blob_map,
                                                       const std::map<int, BlobSet>& new_time_blob_map,
-                                                      int tick_span, int apa, int face) const;
+                                                      int tick_span, int apa, int face,
+                                                      const BadBlobOpts* opts = nullptr) const;
 
        // doc pdvd/40 round 3.  The retile fabricates blobs along a whole-cluster
        // shortest path and remove_bad_blobs is its only anti-ghost filter.  The

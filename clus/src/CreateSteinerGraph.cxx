@@ -4,6 +4,7 @@
 #include "WireCellClus/Graphs.h"
 #include <algorithm>
 #include <chrono>
+#include <set>
 #include <unordered_set>
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -415,6 +416,54 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
                 (void)src->kd_steiner_points(kd_results);
             } catch (const std::exception& e) {
                 SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph [{}]: boundary probe skipped: {}", tag, e.what());
+            }
+        }
+
+        // pdvd doc 130 phase 3 (ImproveCluster_2 retile_deghost): the retiler
+        // tags the source cluster when its copy holds the deghosted cells; the
+        // copy's blobs then REPLACE the source's (ClusteringBeamDeghost's
+        // recipe: points already T0-corrected by the retiler, old blobs
+        // destroyed, cells moved node-wise, caches dropped).  The graphs built
+        // over the old points go with them; steiner_graph indexes steiner_pc
+        // and stays.  No tag (every production retiler) = nothing here.
+        if (src->get_scalar<int>("retile_deghost_writeback", 0) == 1) {
+            const std::vector<Blob*> old = src->children();
+            const std::vector<Blob*> cells = new_cluster.children();
+            // The cells must carry the arrays the cluster's blobs carry (x_t0cor etc. come from the retiler's
+            // T0 correction, which runs only when the default scope is the corrected one): a pipeline without
+            // switch_scope would otherwise leave this cluster's blobs schema-deviant from the others' and the
+            // point-tree serialisation refuses the mix (sim 900129/26208).  Then the cluster keeps its blobs.
+            auto pc_keys = [](const Blob* b) {
+                std::set<std::string> ks;
+                auto it = b->node()->value.local_pcs().find("3d");
+                if (it != b->node()->value.local_pcs().end()) for (const auto& k : it->second.keys()) ks.insert(k);
+                return ks;
+            };
+            if (!old.empty() && !cells.empty() && pc_keys(old.front()) != pc_keys(cells.front())) {
+                SPDLOG_LOGGER_WARN(log, "CreateSteinerGraph [{}]: retile_deghost write-back skipped: the cells' 3d arrays differ "
+                                   "from the cluster's blobs' (no T0 correction in this pipeline?)", tag);
+                src->set_scalar<int>("retile_deghost_writeback", 3);
+            }
+            else {
+            const size_t n_old = old.size();
+            for (Blob* b : old) src->destroy_child(b);
+            src->local_pcs().erase("perblob");
+            for (Blob* b : cells) {
+                auto node = new_cluster.remove_child(*b);
+                src->node()->insert(std::move(node));
+            }
+            std::vector<std::string> stale;
+            for (const auto& [name, gr] : src->graph_store()) {
+                if (name != "steiner_graph") stale.push_back(name);
+            }
+            for (const auto& name : stale) {
+                (void) src->take_graph(name);
+                src->remove_graph_algorithms(name);
+            }
+            src->invalidate_cache();
+            src->set_scalar<int>("retile_deghost_writeback", 2);
+            SPDLOG_LOGGER_INFO(log, "CreateSteinerGraph [{}]: retile_deghost write-back: blobs {} -> {}, points {}, graphs dropped {}",
+                               tag, n_old, cells.size(), src->npoints(), stale.size());
             }
         }
 

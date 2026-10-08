@@ -722,8 +722,10 @@ void ImproveCluster_1::hack_activity_improved(const Cluster& cluster, std::map<s
 
 
 std::vector<const WireCell::Clus::Facade::Blob*>
-ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face) const
+ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster, int tick_span, int apa, int face,
+                                   const BadBlobOpts* opts) const
 {
+    const double max_run = opts ? opts->max_run : m_bad_blob_max_run;   // pdvd doc 130: per-call settings
     // Get time-organized maps of original and new blobs.  A multi-APA
     // (cathode-crossing) cluster can retile to a shadow with blobs on only
     // one APA -- a missing (apa,face) entry on either side means there is
@@ -740,7 +742,7 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     // clusters span >1 face; cluster 119's 122 cm column sits on its second
     // face and was never examined).  With the run bound ON the cache is
     // refreshed here; OFF keeps the historical behaviour byte-for-byte.
-    if (m_bad_blob_max_run > 0) {
+    if (max_run > 0 || opts) {
         shad_cluster.invalidate_cache();
     }
     auto tbm_at = [](const auto& tbm, int apa, int face) -> const auto& {
@@ -798,8 +800,8 @@ ImproveCluster_1::remove_bad_blobs(const Cluster& cluster, Cluster& shad_cluster
     // see the legacy vote next to the run structure), and with bad_blob_max_run
     // <= 0 it returns exactly the legacy vote -- asserted in
     // doctest_bad_blob_runs.cxx.
-    if (m_bad_blob_max_run > 0 || m_bad_blob_report) {
-        return remove_bad_blobs_runs(cluster, all_new_blobs, orig_time_blob_map, new_time_blob_map, tick_span, apa, face);
+    if (max_run > 0 || m_bad_blob_report || opts) {
+        return remove_bad_blobs_runs(cluster, all_new_blobs, orig_time_blob_map, new_time_blob_map, tick_span, apa, face, opts);
     }
     
     // Create graph for new blobs - establish connectivity between adjacent time slices
@@ -918,9 +920,20 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
                                         const std::vector<const Blob*>& all_new_blobs,
                                         const std::map<int, BlobSet>& orig_time_blob_map,
                                         const std::map<int, BlobSet>& new_time_blob_map,
-                                        int tick_span, int apa, int face) const
+                                        int tick_span, int apa, int face, const BadBlobOpts* opts) const
 {
     const int N = all_new_blobs.size();
+    // pdvd doc 130: per-call settings (nullptr = the members)
+    const double max_run = opts ? opts->max_run : m_bad_blob_max_run;
+    const double run_merge = opts ? opts->run_merge : m_bad_blob_run_merge;
+    std::vector<bool> run_eligible;
+    if (opts && opts->run_eligible) {
+        run_eligible.assign(N, false);
+        for (int i = 0; i < N; ++i) {
+            auto it = opts->run_eligible->find(all_new_blobs[i]);
+            run_eligible[i] = (it != opts->run_eligible->end()) && it->second;
+        }
+    }
     std::map<const Blob*, int> map_blob_index;
     for (int i = 0; i < N; ++i) map_blob_index[all_new_blobs[i]] = i;
 
@@ -972,8 +985,8 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
     std::sort(edges_all.begin(), edges_all.end());
 
     const auto legacy_rm = BadBlobRuns::legacy_component_vote(N, edges_legacy, supported);
-    const auto res = BadBlobRuns::analyze(N, edges_all, supported, centers, m_bad_blob_max_run, slice,
-                                          m_bad_blob_run_merge);
+    const auto res = BadBlobRuns::analyze(N, edges_all, supported, centers, max_run, slice,
+                                          run_merge, run_eligible);
 
     if (m_bad_blob_report) {
         // cid = the Bee / calib-dump cluster id (get_cluster_id), the key the
@@ -1053,7 +1066,8 @@ ImproveCluster_1::remove_bad_blobs_runs(const Cluster& cluster,
     }
 
     std::vector<const Blob*> blobs_to_remove;
-    if (m_bad_blob_max_run > 0) {
+    if (max_run > 0 || opts) {
+        // with opts and max_run <= 0: analyze's vote alone (removed_by_run is empty)
         std::vector<int> rm(res.removed_by_vote);
         rm.insert(rm.end(), res.removed_by_run.begin(), res.removed_by_run.end());
         std::sort(rm.begin(), rm.end());

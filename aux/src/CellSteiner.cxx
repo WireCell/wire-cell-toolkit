@@ -76,8 +76,13 @@ std::vector<int> Cascade::components(size_t n, const std::vector<std::array<int6
 
 Cascade::SteinerResult Cascade::steiner_repair(size_t n, const std::vector<std::array<int64_t, 2>>& edges,
                                                const std::vector<float>& logit, const std::vector<float>& qhat,
-                                               const std::vector<bool>& keep_in, const SteinerParams& par)
+                                               const std::vector<bool>& keep_in, const SteinerParams& par,
+                                               const std::vector<double>* edge_len)
 {
+    // pdvd doc 130: length pricing is on only with lengths given and a non-zero cost or cap
+    const bool priced = edge_len && edge_len->size() == edges.size() && (par.len_cost != 0.0 || par.max_bridge_len > 0.0);
+    const double lcap = (priced && par.max_bridge_len > 0.0) ? par.max_bridge_len : std::numeric_limits<double>::infinity();
+    auto elen = [&](size_t k) { return priced ? (*edge_len)[k] : 0.0; };
     SteinerResult res;
     std::vector<bool> K = keep_in;
     std::vector<double> P(n);
@@ -119,10 +124,12 @@ Cascade::SteinerResult Cascade::steiner_repair(size_t n, const std::vector<std::
     }
     std::vector<double> w(edges.size());
     for (size_t k = 0; k < edges.size(); ++k) w[k] = 0.5 * (c[edges[k][0]] + c[edges[k][1]]) + 1e-6;
+    if (priced && par.len_cost != 0.0)
+        for (size_t k = 0; k < edges.size(); ++k) w[k] += par.len_cost * elen(k);
 
     // 3. multi-source Dijkstra, limited to the budget; ties by (distance, cell index)
     const double inf = std::numeric_limits<double>::infinity();
-    std::vector<double> dist(n, inf);
+    std::vector<double> dist(n, inf), dlen(n, 0.0);   // dlen: path length from the source (priced only)
     std::vector<int64_t> pred(n, -1), src(n, -1);
     std::vector<bool> done(n, false);
     using item = std::pair<double, int64_t>;
@@ -142,8 +149,11 @@ Cascade::SteinerResult Cascade::steiner_repair(size_t n, const std::vector<std::
             const int64_t v = adj.nbr[a];
             const double nd = d + w[adj.eid[a]];
             if (nd > par.budget) continue;
+            const double nl = dlen[u] + elen(adj.eid[a]);
+            if (nl > lcap) continue;
             if (nd < dist[v]) {
                 dist[v] = nd;
+                dlen[v] = nl;
                 pred[v] = u;
                 src[v] = src[u];
                 pq.push({nd, v});
@@ -165,6 +175,7 @@ Cascade::SteinerResult Cascade::steiner_repair(size_t n, const std::vector<std::
         if (fi == fj) continue;
         const double cost = dist[i] + w[k] + dist[j];
         if (cost > par.budget) continue;
+        if (dlen[i] + elen(k) + dlen[j] > lcap) continue;
         br.push_back({std::min(fi, fj), std::max(fi, fj), cost, i, j});
     }
     // np.lexsort((cost, b, a)) then first per (a, b)

@@ -52,14 +52,20 @@ float Cascade::SliceCharge::charge(int s, int ch) const
 
 Cascade::SliceCharge Cascade::make_slice_charge(const cluster_graph_t& gr, double scale, double uncer_cut)
 {
-    SliceCharge sc;
     std::vector<ISlice::pointer> slices;
     for (auto vtx : boost::make_iterator_range(boost::vertices(gr))) {
         const auto& node = gr[vtx];
         if (node.code() != 's') continue;
         slices.push_back(std::get<ISlice::pointer>(node.ptr));
     }
-    // by start time; vertex order breaks ties (stable)
+    return make_slice_charge(slices, scale, uncer_cut);
+}
+
+Cascade::SliceCharge Cascade::make_slice_charge(const std::vector<ISlice::pointer>& slices_in, double scale, double uncer_cut)
+{
+    SliceCharge sc;
+    std::vector<ISlice::pointer> slices = slices_in;
+    // by start time; input order breaks ties (stable)
     std::stable_sort(slices.begin(), slices.end(),
                      [](const ISlice::pointer& a, const ISlice::pointer& b) { return a->start() < b->start(); });
     for (const auto& s : slices) {
