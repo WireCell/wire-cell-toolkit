@@ -807,12 +807,31 @@ namespace WireCell::Clus {
                                    MS(Clock::now() - t_rd).count());
                 }
                 if (rd_dump) {
+                    // doc pdvd/132: a base cell the model did NOT keep (no kept cell lies within its wire ranges in
+                    // its slice) is flagged 3 in the rdin dump.  The base is fixed by ruling 2 of doc 131, so this
+                    // changes nothing in the output; it only lets the scan display show the cells the model would drop.
+                    std::vector<rd_key_t> kept_keys;
+                    if (rd_gap) for (const auto& cell : res.kept) kept_keys.push_back(rd_key(cell));
+                    auto rd_model_kept = [&](const IBlob::pointer& base) {
+                        const rd_key_t b = rd_key(base);
+                        for (const auto& k : kept_keys) {
+                            if (k[0] != b[0] || k[1] != b[1]) continue;
+                            if (b[2] <= k[2] && k[3] <= b[3] && b[4] <= k[4] && k[5] <= b[5] && b[6] <= k[6] && k[7] <= b[7]) return true;
+                        }
+                        return false;
+                    };
                     std::vector<RetileDump::Face> fin, fout;
                     for (const auto& f : ra.faces) {
                         fin.push_back(f.dump);
                         fin.back().sampled.assign(f.dump.iblobs.size(), 1);
-                        // gapfill: the base cells come first (flag 1), then the corridor candidates (flag 2)
-                        if (rd_gap) for (size_t i = f.nbase; i < fin.back().sampled.size(); ++i) fin.back().sampled[i] = 2;
+                        // gapfill: the base cells come first (flag 1, or 3 when the model would drop the cell), then
+                        // the corridor candidates (flag 2)
+                        if (rd_gap) {
+                            for (size_t i = 0; i < f.nbase && i < fin.back().iblobs.size(); ++i) {
+                                if (!rd_model_kept(fin.back().iblobs[i])) fin.back().sampled[i] = 3;
+                            }
+                            for (size_t i = f.nbase; i < fin.back().sampled.size(); ++i) fin.back().sampled[i] = 2;
+                        }
                         fout.push_back(f.dump);
                         fout.back().iblobs.clear();
                         for (const auto& cell : final_cells) if (cell->face()->which() == f.face) fout.back().iblobs.push_back(cell);
