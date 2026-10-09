@@ -117,7 +117,7 @@ namespace WireCell::Clus::RetileDump {
                     b[2 * p + 1] = strip.bounds.second;
                 }
                 for (int v : b) r.append(v);
-                r.append(i < f.sampled.size() && f.sampled[i] ? 1 : 0);
+                r.append(i < f.sampled.size() ? (int) f.sampled[i] : 0);   // 0/1 as before; doc 131 gapfill writes 2 for a corridor candidate
                 jb.append(r);
             }
             jf["blobs"] = jb;

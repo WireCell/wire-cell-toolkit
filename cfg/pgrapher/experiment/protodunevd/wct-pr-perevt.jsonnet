@@ -211,6 +211,7 @@ function(
     retile_deghost_mode = 'retile',
     retile_deghost_residual = true,
     retile_deghost_corridor_wires = 1,
+    retile_deghost_bridge_planes = 1,
     retile_deghost_gap_min_slices = 2,
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
@@ -4636,6 +4637,7 @@ function(
                              retile_deghost_mode=retile_deghost_mode,   // doc pdvd/131
                              retile_deghost_residual=retile_deghost_residual,
                              retile_deghost_corridor_wires=retile_deghost_corridor_wires,
+                             retile_deghost_bridge_planes=retile_deghost_bridge_planes,
                              retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,

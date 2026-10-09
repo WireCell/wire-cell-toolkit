@@ -125,6 +125,7 @@ namespace WireCell::Clus {
             std::string mode{"retile"};
             bool residual{true};             // residual charge (owner ruling: doc 131 step D)
             int corridor_wires{1};           // corridor half-width in wires per plane (ruling 3)
+            int bridge_planes{1};            // a gap sample may have bridge wires in at most this many planes (ruling 3: 1)
             int gap_min_slices{2};           // a gap spans at least this many slices
             double gap_max{20 * units::cm};  // longer gaps are left to the Steiner graph
             double reach{20 * units::cm};    // the owner map's region = the base's bounds widened by this
@@ -252,6 +253,7 @@ namespace WireCell::Clus {
         }
         rd.residual = get(j, "residual", rd.residual);
         rd.corridor_wires = std::max(0, get(j, "corridor_wires", rd.corridor_wires));
+        rd.bridge_planes = std::min(3, std::max(0, get(j, "bridge_planes", rd.bridge_planes)));
         rd.gap_min_slices = std::max(1, get(j, "gap_min_slices", rd.gap_min_slices));
         rd.gap_max = get(j, "gap_max", rd.gap_max);
         rd.reach = get(j, "reach", rd.reach);
@@ -281,8 +283,8 @@ namespace WireCell::Clus {
                            rp.repair, rp.steiner.budget, rd.bridge_len_cost, rd.bridge_max / units::cm, rd.charge_scale,
                            rp.nthreads, rd.dump_dir);
         if (rd.mode == "gapfill") {
-            SPDLOG_LOGGER_INFO(log, "retile_deghost mode=gapfill (doc pdvd/131): residual={} corridor_wires={} gap_min_slices={} "
-                               "gap_max={:.1f} cm reach={:.1f} cm", rd.residual, rd.corridor_wires, rd.gap_min_slices,
+            SPDLOG_LOGGER_INFO(log, "retile_deghost mode=gapfill (doc pdvd/131): residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
+                               "gap_max={:.1f} cm reach={:.1f} cm", rd.residual, rd.corridor_wires, rd.bridge_planes, rd.gap_min_slices,
                                rd.gap_max / units::cm, rd.reach / units::cm);
         }
     }
@@ -1083,7 +1085,7 @@ namespace WireCell::Clus {
                         }
                     }
                 }
-                if (GF::missing_planes(nlive) >= 2) { ++out.nskipped; continue; }
+                if (GF::missing_planes(nlive) > m_rd.bridge_planes) { ++out.nskipped; continue; }
                 auto& measures = msm[{pt.slice, pt.slice + tick_span}];
                 if (measures.empty()) {
                     measures.resize(5);
