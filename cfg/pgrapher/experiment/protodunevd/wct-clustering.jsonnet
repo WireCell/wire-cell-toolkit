@@ -76,9 +76,17 @@ function(
     // pre-merge id per cluster.  Changes the saved assoc_cluster_id /
     // assoc_cluster_main provenance (NOT cluster membership) and through it
     // the PR's unmerge_assoc split.  C++ default '' .  null => key omitted from
-    // every MultiAlgBlobClustering => byte-identical compiled config.
-    // Runner: PDVD_CLUS_TLA="-A clus_cluster_id_order=tree".
-    clus_cluster_id_order = null,
+    // every MultiAlgBlobClustering.
+    // PDVD PRODUCTION 'tree', owner flip 2026-10-09 (doc pdvd/133 sec 1.8):
+    // registered STM / Michel grade on the 120 tagger events PASS (is_stm
+    // efficiency -0.009, Michel purity -0.005, efficiency -0.005; bar -0.020),
+    // cluster membership and flash matching identical on 120 / 120.  NOT
+    // bit-identical to the pre-flip job: the saved pctree's assoc arrays and
+    // the PR output change.  Pre-flip job: PDVD_CLUS_TLA="-S clus_cluster_id_order=null"
+    // (compiled config byte-identical to before the flip).  The default of
+    // clus.jsonnet's own argument stays null, so pr.jsonnet (which imports it)
+    // is unchanged.
+    clus_cluster_id_order = 'tree',
     // Per-event light-vs-charge time-base offsets in MICROSECONDS, PER CRATE
     // (opflash metadata offset_bot_us/offset_top_us + the per-run residual;
     // see run_clus_evt.sh).  The BDE (bottom volume, anodes 0-3) and TDE (top
