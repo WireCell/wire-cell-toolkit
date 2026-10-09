@@ -92,6 +92,15 @@ function(
     // different files.  false (default) => both keys omitted => byte-identical
     // compiled config.  Runner flag: run_clus_evt.sh -save-assoc.
     clus_save_assoc_id = false,
+    // doc pdvd/133 sec 1.5 / 1.9: renumber cluster idents after every clustering
+    // step ('tree', what SBND runs) so clustering_isolated records a distinct
+    // pre-merge id per cluster.  Changes the saved assoc_cluster_id /
+    // assoc_cluster_main provenance (NOT cluster membership) and through it
+    // the PR's unmerge_assoc split.  Counterpart of pdvd's
+    // clus_cluster_id_order.  C++ default ''.  null => key omitted from every
+    // MultiAlgBlobClustering => byte-identical compiled config.
+    // Runner: PDHD_CLUS_TLA="-A clus_cluster_id_order=tree".
+    clus_cluster_id_order = null,
 
 )
 
@@ -109,7 +118,8 @@ local cluster_source(fname) = g.pnode({
 local trigger_offset = trigger_offset_us * wc.us;
 local clus = import 'pgrapher/experiment/pdhd/clus.jsonnet';
 local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, eventNo=event,
-                        time_offset=time_offset, trigger_offset=trigger_offset);
+                        time_offset=time_offset, trigger_offset=trigger_offset,
+                        cluster_id_order=clus_cluster_id_order);
 
 // Drift-side groups: x-aligned APAs viewed through a COMMON face, i.e. one
 // drift volume: even idents (APA0+APA2) image through face 0 (drift -x), odd
