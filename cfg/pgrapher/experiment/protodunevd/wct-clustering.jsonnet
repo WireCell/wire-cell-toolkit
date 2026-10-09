@@ -71,6 +71,14 @@ function(
     // gains three arrays (its clustering-global Bee member must stay identical --
     // that is the gate).  false => both keys omitted => byte-identical.
     clus_save_assoc_id = false,
+    // doc pdvd/133 sec 1.5: renumber cluster idents after every clustering step
+    // ('tree', what SBND runs) so clustering_isolated records a distinct
+    // pre-merge id per cluster.  Changes the saved assoc_cluster_id /
+    // assoc_cluster_main provenance (NOT cluster membership) and through it
+    // the PR's unmerge_assoc split.  C++ default '' .  null => key omitted from
+    // every MultiAlgBlobClustering => byte-identical compiled config.
+    // Runner: PDVD_CLUS_TLA="-A clus_cluster_id_order=tree".
+    clus_cluster_id_order = null,
     // Per-event light-vs-charge time-base offsets in MICROSECONDS, PER CRATE
     // (opflash metadata offset_bot_us/offset_top_us + the per-run residual;
     // see run_clus_evt.sh).  The BDE (bottom volume, anodes 0-3) and TDE (top
@@ -407,7 +415,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         wrapped_channel_charge=wrapped_channel_charge,
                         time_offset=time_offset, relax_containment_filter=relax_containment_filter,
                         trigger_offset=trigger_offset_bot, trigger_offset_top=trigger_offset_top,
-                        drift_speed_b=drift_speed_bot, drift_speed_t=drift_speed_top);
+                        drift_speed_b=drift_speed_bot, drift_speed_t=drift_speed_top,
+                        cluster_id_order=clus_cluster_id_order);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final

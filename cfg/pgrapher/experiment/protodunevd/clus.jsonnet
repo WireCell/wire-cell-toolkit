@@ -38,7 +38,18 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           drift_speed_b=null, drift_speed_t=null,
           // PDVD PRODUCTION ON, owner flip 2026-09-03 (doc pdvd/31 round 6).
           // See the knob's comment at bs_live_face below.
-          wrapped_channel_charge=true)
+          wrapped_channel_charge=true,
+          // doc pdvd/133 sec 1.5: MultiAlgBlobClustering "cluster_id_order" for
+          // every clustering stage of this job (per face, per APA, per group,
+          // all TPC).  'tree' => cluster idents are renumbered 1..N after every
+          // clustering step, as SBND's clustering job does.  Without it a
+          // cluster created mid-job keeps the unset ident (-1) until the next
+          // save, clustering_isolated records -1 as the pre-merge id of all
+          // such clusters (save_assoc_id), and the PR's unmerge_assoc pools
+          // them into ONE associated cluster (39336: three pieces 46 cm apart).
+          // C++ default '' (no renumbering).  null => key omitted =>
+          // byte-identical compiled config.
+          cluster_id_order=null)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -342,6 +353,7 @@ local clus_per_face (
         type: "MultiAlgBlobClustering",
         name: name,
         data:  {
+            [if cluster_id_order != null then 'cluster_id_order']: cluster_id_order,  // doc pdvd/133; null => omitted
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
@@ -454,6 +466,7 @@ local clus_per_apa (
         type: "MultiAlgBlobClustering",
         name: "clus_per_apa-%s"%[name],
         data:  {
+            [if cluster_id_order != null then 'cluster_id_order']: cluster_id_order,  // doc pdvd/133; null => omitted
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
@@ -609,6 +622,7 @@ local clus_per_group (
         type: "MultiAlgBlobClustering",
         name: "clus_per_group-%s"%group_name,
         data:  {
+            [if cluster_id_order != null then 'cluster_id_order']: cluster_id_order,  // doc pdvd/133; null => omitted
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             perf: true,
@@ -811,6 +825,7 @@ local clus_all_tpc (
         type: "MultiAlgBlobClustering",
         name: "clus_all_tpc",
         data:  {
+            [if cluster_id_order != null then 'cluster_id_order']: cluster_id_order,  // doc pdvd/133; null => omitted
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             // grouping2file_prefix: "grouping%s-%d"%[anode.name, face],
