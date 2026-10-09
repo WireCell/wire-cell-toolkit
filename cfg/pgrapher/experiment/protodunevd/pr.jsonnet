@@ -182,6 +182,16 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_deghost_bridge_len_cost=0,
               retile_deghost_bridge_max_cm=0,
               retile_deghost_dump_dir=null,
+              // doc pdvd/131: retile_deghost mode 'retile' (doc 130) or 'gapfill' (the cluster's blobs are the
+              // fixed base, no extension / painting / filter 1, gaps bridged by one-wire corridors at cell
+              // resolution, other clusters' wires never admitted, residual charge).  The four gapfill keys are
+              // emitted only when mode is 'gapfill', so the 'retile' config is byte-identical to doc 130's.
+              retile_deghost_mode='retile',
+              retile_deghost_residual=true,
+              retile_deghost_corridor_wires=1,
+              retile_deghost_gap_min_slices=2,
+              retile_deghost_gap_max_cm=20,
+              retile_deghost_reach_cm=20,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1582,6 +1592,13 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             bridge_len_cost: retile_deghost_bridge_len_cost,
             bridge_max: retile_deghost_bridge_max_cm * wc.cm,
             [if retile_deghost_dump_dir != null then 'dump_dir']: retile_deghost_dump_dir,
+            // doc pdvd/131 (C++ default mode "retile"; keys omitted unless gapfill)
+            [if retile_deghost_mode != 'retile' then 'mode']: retile_deghost_mode,
+            [if retile_deghost_mode != 'retile' then 'residual']: retile_deghost_residual,
+            [if retile_deghost_mode != 'retile' then 'corridor_wires']: retile_deghost_corridor_wires,
+            [if retile_deghost_mode != 'retile' then 'gap_min_slices']: retile_deghost_gap_min_slices,
+            [if retile_deghost_mode != 'retile' then 'gap_max']: retile_deghost_gap_max_cm * wc.cm,
+            [if retile_deghost_mode != 'retile' then 'reach']: retile_deghost_reach_cm * wc.cm,
         } else null,
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is

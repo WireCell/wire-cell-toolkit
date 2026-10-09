@@ -206,6 +206,14 @@ function(
     retile_deghost_bridge_len_cost = 0,
     retile_deghost_bridge_max_cm = 0,
     retile_deghost_dump_dir = null,
+    // doc pdvd/131: 'retile' (doc 130) | 'gapfill'; the rest only matter for gapfill (see pr.jsonnet).
+    // Runner: run_pr_evt.sh -beam-gapfill (= -beam-deghost + retile_deghost with mode gapfill).
+    retile_deghost_mode = 'retile',
+    retile_deghost_residual = true,
+    retile_deghost_corridor_wires = 1,
+    retile_deghost_gap_min_slices = 2,
+    retile_deghost_gap_max_cm = 20,
+    retile_deghost_reach_cm = 20,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4625,6 +4633,12 @@ function(
                              retile_deghost_bridge_len_cost=retile_deghost_bridge_len_cost,
                              retile_deghost_bridge_max_cm=retile_deghost_bridge_max_cm,
                              retile_deghost_dump_dir=retile_deghost_dump_dir,
+                             retile_deghost_mode=retile_deghost_mode,   // doc pdvd/131
+                             retile_deghost_residual=retile_deghost_residual,
+                             retile_deghost_corridor_wires=retile_deghost_corridor_wires,
+                             retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                             retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
+                             retile_deghost_reach_cm=retile_deghost_reach_cm,
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdvd/48; + doc pdvd/51 override bag

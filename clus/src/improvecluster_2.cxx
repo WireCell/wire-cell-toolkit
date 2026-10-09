@@ -9,6 +9,7 @@
 #include "RetileDump.h"
 #include "WireCellClus/ResampleLive.h"
 #include "WireCellClus/BeamParticleFunctions.h"
+#include "WireCellClus/GapFill.h"
 #include "WireCellAux/CascadeRun.h"
 #include "WireCellIface/ITensorForward.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -16,6 +17,7 @@
 #include "WireCellUtil/Units.h"
 #include <atomic>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <map>
 #include <set>
@@ -113,8 +115,27 @@ namespace WireCell::Clus {
             double bridge_len_cost{0.0};
             double bridge_max{0.0};
             std::string dump_dir;
+            // doc pdvd/131: mode "retile" (doc 130: tile the 20 cm extension and the painting, filter 1,
+            // the model) or "gapfill": the cluster's own blobs are the fixed base (with -beam-deghost the
+            // imaging-level cascade cells); no extension, no painting, no filter 1; the gaps of the base
+            // along the cluster's path are bridged by one-wire corridors tiled at cell resolution; wires
+            // owned by other clusters' original blobs (owner map of the retile's region) are never
+            // admitted; the model sees the residual charge (measured minus what others' blobs explain) and
+            // decides the corridor cells, the Steiner repair picks the chain.
+            std::string mode{"retile"};
+            bool residual{true};             // residual charge (owner ruling: doc 131 step D)
+            int corridor_wires{1};           // corridor half-width in wires per plane (ruling 3)
+            int gap_min_slices{2};           // a gap spans at least this many slices
+            double gap_max{20 * units::cm};  // longer gaps are left to the Steiner graph
+            double reach{20 * units::cm};    // the owner map's region = the base's bounds widened by this
         };
         RetileDeghost m_rd;
+        // doc pdvd/131 gapfill, one face: the base cells and the corridor candidates as IBlobs
+        struct GapFace {
+            std::vector<IBlob::pointer> base, cand;
+            size_t npath{0}, nuncovered{0}, ngaps{0}, nskipped{0}, nowner{0}, ncand_tiled{0};
+        };
+        GapFace rd_gapfill_face(const Cluster& orig, const std::vector<size_t>& path, int apa, int face) const;
         mutable std::atomic<int> m_rd_call{0};
         mutable const Grouping* m_rd_pick_grouping{nullptr};   // compared, never dereferenced
         mutable int m_rd_pick_gid{-1};
@@ -224,6 +245,16 @@ namespace WireCell::Clus {
         rp.steiner.len_cost = rd.bridge_len_cost;
         rp.steiner.max_bridge_len = rd.bridge_max;
         rd.dump_dir = get<std::string>(j, "dump_dir", "");
+        // doc pdvd/131
+        rd.mode = get<std::string>(j, "mode", rd.mode);
+        if (rd.mode != "retile" && rd.mode != "gapfill") {
+            raise<ValueError>("ImproveCluster_2 retile_deghost: unknown mode '%s' (retile, gapfill)", rd.mode.c_str());
+        }
+        rd.residual = get(j, "residual", rd.residual);
+        rd.corridor_wires = std::max(0, get(j, "corridor_wires", rd.corridor_wires));
+        rd.gap_min_slices = std::max(1, get(j, "gap_min_slices", rd.gap_min_slices));
+        rd.gap_max = get(j, "gap_max", rd.gap_max);
+        rd.reach = get(j, "reach", rd.reach);
         rd.levels.clear();
         for (const auto& jl : j["levels"]) {
             Aux::Cascade::LevelSpec lc;
@@ -249,6 +280,11 @@ namespace WireCell::Clus {
                            rd.filter, rd.scope, rd.beam_window_low / units::us, rd.beam_window_high / units::us, desc,
                            rp.repair, rp.steiner.budget, rd.bridge_len_cost, rd.bridge_max / units::cm, rd.charge_scale,
                            rp.nthreads, rd.dump_dir);
+        if (rd.mode == "gapfill") {
+            SPDLOG_LOGGER_INFO(log, "retile_deghost mode=gapfill (doc pdvd/131): residual={} corridor_wires={} gap_min_slices={} "
+                               "gap_max={:.1f} cm reach={:.1f} cm", rd.residual, rd.corridor_wires, rd.gap_min_slices,
+                               rd.gap_max / units::cm, rd.reach / units::cm);
+        }
     }
 
     bool ImproveCluster_2::rd_in_scope(const Cluster& cluster) const
@@ -410,16 +446,19 @@ namespace WireCell::Clus {
         // doc pdvd/130 phase 3: the deghosting step, for this cluster or not
         const bool rd_cluster = m_rd.on && rd_in_scope(*orig_cluster);
         const bool rd_dump = rd_cluster && !m_rd.dump_dir.empty();
+        const bool rd_gap = rd_cluster && m_rd.mode == "gapfill";   // doc pdvd/131
         struct RdFace {
             int face{0};
             double tick{0};
             std::vector<double> angles;
             size_t ntiled{0}, nsampled{0};
+            size_t nbase{0}, ngaps{0}, ncand{0}, nskipped{0}, nuncovered{0}, npath{0}, nowner{0};   // gapfill
             RetileDump::Face dump;   // iblobs = this face's model input
         };
         struct RdApa {
             std::vector<const Blob*> blobs;        // the survivors (to be replaced by the kept cells)
             std::vector<IBlob::pointer> in;        // their tiled blobs, face by face, in tiling order
+            std::vector<IBlob::pointer> base;      // gapfill: the fixed base cells (a prefix-free subset of `in`)
             std::vector<RdFace> faces;
         };
         std::map<int, RdApa> rd_apa;
@@ -429,6 +468,36 @@ namespace WireCell::Clus {
             int apa = it->apa();
             int face = it->face();
             const auto& angles = m_wpid_angles.at(*it);
+
+            if (rd_gap) {
+                // doc pdvd/131 gapfill: this face gets no extension, no painting and no filter 1; the base
+                // cells and the corridor candidates go to the per-anode model below.
+                t0 = Clock::now();
+                auto gf = rd_gapfill_face(*orig_cluster, orig_path_point_indices, apa, face);
+                auto& ra = rd_apa[apa];
+                ra.faces.emplace_back();
+                auto& rf = ra.faces.back();
+                rf.face = face;
+                rf.tick = m_grouping->get_tick().at(apa).at(face);
+                rf.angles = angles;
+                rf.dump.face = face;
+                rf.dump.tick_span = m_grouping->get_nticks_per_slice().at(apa).at(face);
+                rf.nbase = gf.base.size(); rf.ngaps = gf.ngaps; rf.ncand = gf.cand.size(); rf.nskipped = gf.nskipped;
+                rf.nuncovered = gf.nuncovered; rf.npath = gf.npath; rf.nowner = gf.nowner;
+                rf.ntiled = rf.nsampled = gf.base.size() + gf.cand.size();
+                for (const auto& b : gf.base) { ra.in.push_back(b); ra.base.push_back(b); rf.dump.iblobs.push_back(b); }
+                for (const auto& b : gf.cand) { ra.in.push_back(b); rf.dump.iblobs.push_back(b); }
+                if (rd_dump) {
+                    for (const Blob* b : orig_cluster->children()) {
+                        if (b->wpid().apa() != apa || b->wpid().face() != face) continue;
+                        rf.dump.orig.push_back({b->slice_index_min(), b->u_wire_index_min(), b->u_wire_index_max(),
+                                                b->v_wire_index_min(), b->v_wire_index_max(),
+                                                b->w_wire_index_min(), b->w_wire_index_max()});
+                    }
+                }
+                SPDLOG_LOGGER_TRACE(log, "timing: rd_gapfill_face (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
+                continue;
+            }
 
             std::map<std::pair<int, int>, std::vector<WRG::measure_t> > map_slices_measures;
             
@@ -671,10 +740,35 @@ namespace WireCell::Clus {
                     Blob& b = const_cast<Blob&>(*blob);
                     new_cluster.remove_child(b);
                 }
+                // doc pdvd/131 gapfill: the base is fixed.  Every base cell is sampled whatever the model said of it;
+                // of the model's kept cells only those that are not base cells (the corridor cells) are added.
+                using rd_key_t = std::array<int, 8>;
+                auto rd_key = [&](const IBlob::pointer& b) {
+                    rd_key_t k{};
+                    k[0] = b->face()->which();
+                    const double tk = m_grouping->get_tick().at(apa).at(b->face()->which());
+                    k[1] = (int) std::lround(b->slice()->start() / tk);
+                    for (const auto& strip : b->shape().strips()) {
+                        if (strip.layer < 2 || strip.layer > 4) continue;
+                        k[2 + 2 * (strip.layer - 2)] = strip.bounds.first;
+                        k[3 + 2 * (strip.layer - 2)] = strip.bounds.second;
+                    }
+                    return k;
+                };
+                std::set<rd_key_t> base_keys;
+                if (rd_gap) for (const auto& b : ra.base) base_keys.insert(rd_key(b));
+                std::vector<IBlob::pointer> final_cells;   // what is sampled, in order
+                if (rd_gap) final_cells = ra.base;
+                size_t ncand_kept = 0;
+                for (const auto& cell : res.kept) {
+                    if (rd_gap && base_keys.count(rd_key(cell))) continue;
+                    final_cells.push_back(cell);
+                    ++ncand_kept;
+                }
                 size_t nsampled = 0;
                 std::map<int, size_t> kept_by_face;
-                for (size_t k = 0; k < res.kept.size(); ++k) {
-                    const auto& cell = res.kept[k];
+                for (size_t k = 0; k < final_cells.size(); ++k) {
+                    const auto& cell = final_cells[k];
                     const int face = cell->face()->which();
                     ++kept_by_face[face];
                     const RdFace* rf = nullptr;
@@ -691,19 +785,35 @@ namespace WireCell::Clus {
                     per_face += fmt::format(" [face {}: tiled {} sampled {} after filter 1 {} kept {}]", f.face, f.ntiled, f.nsampled,
                                             f.dump.iblobs.size(), kept_by_face[f.face]);
                 }
+                if (rd_gap) {
+                    std::string gf_face;
+                    for (const auto& f : ra.faces) {
+                        gf_face += fmt::format(" [face {}: base {} path {} uncovered {} gaps {} candidates {} skipped {} owner {}]",
+                                               f.face, f.nbase, f.npath, f.nuncovered, f.ngaps, f.ncand, f.nskipped, f.nowner);
+                    }
+                    SPDLOG_LOGGER_INFO(log, "retile_gapfill ident={} apa={}: base {} + candidates {} -> candidates kept {} (model kept {}, "
+                                       "threshold {}, weak dropped {}, bridges {}, added {}) sampled {}{} ({:.1f} ms)",
+                                       orig_cluster->ident(), apa, ra.base.size(), ra.in.size() - ra.base.size(), ncand_kept,
+                                       res.kept.size(), res.nkeep_thr, res.srep.nweak_cells, res.srep.nbridges, res.srep.nadded,
+                                       nsampled, gf_face, MS(Clock::now() - t_rd).count());
+                }
+                else {
                 SPDLOG_LOGGER_INFO(log, "retile_deghost ident={} apa={} filter={}: model in {} -> kept {} (threshold {}, weak dropped {}, "
                                    "bridges {}, added {}) sampled {}{} ({:.1f} ms)",
                                    orig_cluster->ident(), apa, m_rd.filter, ra.in.size(), res.kept.size(), res.nkeep_thr,
                                    res.srep.nweak_cells, res.srep.nbridges, res.srep.nadded, nsampled, per_face,
                                    MS(Clock::now() - t_rd).count());
+                }
                 if (rd_dump) {
                     std::vector<RetileDump::Face> fin, fout;
                     for (const auto& f : ra.faces) {
                         fin.push_back(f.dump);
                         fin.back().sampled.assign(f.dump.iblobs.size(), 1);
+                        // gapfill: the base cells come first (flag 1), then the corridor candidates (flag 2)
+                        if (rd_gap) for (size_t i = f.nbase; i < fin.back().sampled.size(); ++i) fin.back().sampled[i] = 2;
                         fout.push_back(f.dump);
                         fout.back().iblobs.clear();
-                        for (const auto& cell : res.kept) if (cell->face()->which() == f.face) fout.back().iblobs.push_back(cell);
+                        for (const auto& cell : final_cells) if (cell->face()->which() == f.face) fout.back().iblobs.push_back(cell);
                         fout.back().sampled.assign(fout.back().iblobs.size(), 1);
                     }
                     RetileDump::write(m_rd.dump_dir, orig_cluster->ident(), rd_call, apa, fin, "rdin");
@@ -746,6 +856,273 @@ namespace WireCell::Clus {
         SPDLOG_LOGGER_TRACE(log, "timing: mutate() TOTAL took {} ms", MS(Clock::now()-t_mutate_start).count());
         return m_grouping->remove_child(new_cluster);
 
+    }
+
+    // doc pdvd/131.  One face of the "gapfill" mode: the base (the cluster's own blobs as cells), the owner map
+    // of the region, the path's coverage and gaps, the corridor candidates tiled at cell resolution.
+    ImproveCluster_2::GapFace ImproveCluster_2::rd_gapfill_face(const Cluster& orig, const std::vector<size_t>& path,
+                                                                int apa, int face) const
+    {
+        namespace RL = WireCell::Clus::ResampleLive;
+        namespace GF = WireCell::Clus::GapFill;
+        GapFace out;
+        const auto& iface = m_face.at(apa).at(face);
+        const auto& ianode = m_anode.at(apa);
+        const double tick = m_grouping->get_tick().at(apa).at(face);
+        const int tick_span = m_grouping->get_nticks_per_slice().at(apa).at(face);
+        const double vdrift = m_grouping->get_drift_speed().at(apa).at(face);
+        const auto& coords = iface->raygrid();
+        const int which = iface->which();
+        const auto& pinfo = m_plane_infos.at(apa).at(face);
+        std::array<int, 3> nw{};
+        for (int p = 0; p < 3; ++p) nw[p] = pinfo[p].total_wires;
+
+        // The base: the cluster's own blobs on this face, as index boxes, in children order.
+        std::vector<GF::Box> boxes;
+        std::vector<const Blob*> bblobs;
+        int smin_all = INT_MAX, smax_all = INT_MIN;
+        std::array<int, 3> wlo{INT_MAX, INT_MAX, INT_MAX}, whi{INT_MIN, INT_MIN, INT_MIN};
+        for (const Blob* b : orig.children()) {
+            if (b->wpid().apa() != apa || b->wpid().face() != face) continue;
+            GF::Box bx;
+            bx.smin = b->slice_index_min();
+            bx.smax = b->slice_index_max();
+            bx.w = {std::make_pair(b->u_wire_index_min(), b->u_wire_index_max()),
+                    std::make_pair(b->v_wire_index_min(), b->v_wire_index_max()),
+                    std::make_pair(b->w_wire_index_min(), b->w_wire_index_max())};
+            boxes.push_back(bx);
+            bblobs.push_back(b);
+            smin_all = std::min(smin_all, bx.smin);
+            smax_all = std::max(smax_all, bx.smax);
+            for (int p = 0; p < 3; ++p) { wlo[p] = std::min(wlo[p], bx.w[p].first); whi[p] = std::max(whi[p], bx.w[p].second); }
+        }
+        if (boxes.empty()) return out;
+        std::map<int, std::vector<size_t>> boxes_by_slice;   // smin -> box indices
+        for (size_t i = 0; i < boxes.size(); ++i) boxes_by_slice[boxes[i].smin].push_back(i);
+
+        // The region: the base's bounds widened by the reach (ticks along the drift, wires per plane).
+        const int reach_ticks = (vdrift > 0 && tick > 0) ? (int) std::ceil(m_rd.reach / (vdrift * tick)) : 0;
+        const int rs0 = smin_all - reach_ticks, rs1 = smax_all + reach_ticks;
+        std::array<int, 3> rlo{}, rhi{};
+        for (int p = 0; p < 3; ++p) {
+            const double y0 = m_grouping->convert_time_wire_2Dpoint(smin_all, 0, apa, face, p).second;
+            const double y1 = m_grouping->convert_time_wire_2Dpoint(smin_all, 1, apa, face, p).second;
+            const double pitch = std::abs(y1 - y0);
+            const int rw = pitch > 0 ? (int) std::ceil(m_rd.reach / pitch) : 0;
+            rlo[p] = std::max(0, wlo[p] - rw);
+            rhi[p] = std::min(nw[p], whi[p] + rw);
+        }
+
+        // The owner map (doc 131 step B): other clusters' original blobs with a slice inside the region.  The
+        // bundle-mates (same matched flash) are not "other".  Blobs are visited in a sorted order (the per-slice
+        // sets are pointer-keyed).
+        GF::OwnerMap owner;
+        const int gid = (m_rd.scope == "bundle") ? m_rd_pick_gid : -1;
+        for (const Cluster* c : m_grouping->children()) {
+            if (c == &orig) continue;
+            if (gid >= 0 && c->get_scalar<int>("matched_flash_gid", -1) == gid) continue;
+            const auto& tbm = c->time_blob_map();
+            auto ia = tbm.find(apa);
+            if (ia == tbm.end()) continue;
+            auto ifc = ia->second.find(face);
+            if (ifc == ia->second.end()) continue;
+            std::vector<const Blob*> obs;
+            for (auto it = ifc->second.lower_bound(rs0); it != ifc->second.end() && it->first < rs1; ++it) {
+                for (const Blob* b : it->second) obs.push_back(b);
+            }
+            std::sort(obs.begin(), obs.end(), [](const Blob* a, const Blob* b) {
+                return std::make_tuple(a->slice_index_min(), a->u_wire_index_min(), a->v_wire_index_min(), a->w_wire_index_min(),
+                                       a->u_wire_index_max(), a->v_wire_index_max(), a->w_wire_index_max())
+                     < std::make_tuple(b->slice_index_min(), b->u_wire_index_min(), b->v_wire_index_min(), b->w_wire_index_min(),
+                                       b->u_wire_index_max(), b->v_wire_index_max(), b->w_wire_index_max());
+            });
+            for (const Blob* b : obs) {
+                const std::array<std::pair<int, int>, 3> r = {std::make_pair(b->u_wire_index_min(), b->u_wire_index_max()),
+                                                              std::make_pair(b->v_wire_index_min(), b->v_wire_index_max()),
+                                                              std::make_pair(b->w_wire_index_min(), b->w_wire_index_max())};
+                bool inside = false;
+                for (int p = 0; p < 3; ++p) if (r[p].second > rlo[p] && r[p].first < rhi[p]) inside = true;
+                if (!inside) continue;
+                const double q = b->charge();
+                for (int s = b->slice_index_min(); s < b->slice_index_max(); s += tick_span) {
+                    for (int p = 0; p < 3; ++p) owner.add(p, s, r[p].first, r[p].second, std::isfinite(q) ? q : 0.0);
+                }
+            }
+        }
+        out.nowner = owner.size();
+
+        // The base cells as IBlobs: activity as retile_mode "none" (CTPC row, else dead registry, else absent;
+        // bounds +- 2 wires), the live charge reduced to the residual (step D); one SimpleSlice per slice start.
+        const int wire_margin = 2;
+        std::map<int, ISlice::map_t> act;
+        auto live_q = [&](int p, int s, int w, double& q, double& err) {
+            const auto* row = m_grouping->wire_charge_row(apa, face, p, s);
+            if (!row) return false;
+            auto it = row->find(w);
+            if (it == row->end()) return false;
+            q = it->second.first;
+            err = it->second.second;
+            if (m_rd.residual) q = GF::residual(q, owner.other_share(p, s, w));
+            return true;
+        };
+        for (const GF::Box& bx : boxes) {
+            auto& a = act[bx.smin];
+            for (int p = 0; p < 3; ++p) {
+                const auto& wires = iface->planes()[p]->wires();
+                const int lo = std::max(0, bx.w[p].first - wire_margin);
+                const int hi = std::min((int) wires.size() - 1, bx.w[p].second + wire_margin);
+                auto live = [&](int w, double& q, double& err) { return live_q(p, bx.smin, w, q, err); };
+                auto dead = [&](int w) { return m_grouping->is_wire_dead(apa, face, p, w, bx.smin); };
+                for (const auto& wv : RL::compose_activity(lo, hi, live, dead)) {
+                    auto ich = ianode->channel(wires[wv.wire]->channel());
+                    if (!ich) continue;
+                    a[ich] = ISlice::value_t(wv.charge, wv.error);
+                }
+            }
+        }
+        std::map<int, ISlice::pointer> slice_of;
+        for (const auto& [s, a] : act) {
+            slice_of[s] = std::make_shared<Aux::SimpleSlice>(nullptr, s, s * tick, tick_span * tick, a);
+        }
+        int ident = 0;
+        for (const GF::Box& bx : boxes) {
+            const RL::plane_bounds_t bounds = {bx.w[0], bx.w[1], bx.w[2]};
+            RayGrid::Blob shape = RL::shape_from_bounds(coords, bounds);
+            out.base.push_back(std::make_shared<Aux::SimpleBlob>(ident++, 0.0f, 0.0f, shape, slice_of.at(bx.smin), iface));
+        }
+
+        // The path on this face, resampled at 0.3 cm as the painting does (hack_activity_improved), each sample
+        // converted to the aligned slice start and the three wire indices.
+        const double step = 0.3 * units::cm;
+        std::vector<GF::PathPt> pts;
+        std::vector<geo_point_t> ppts;
+        std::vector<bool> pon;
+        {
+            bool have = false;
+            geo_point_t prev;
+            bool prev_on = false;
+            for (size_t idx : path) {
+                const geo_point_t pt = orig.point3d_raw(idx);
+                const auto wp = orig.wire_plane_id(idx);
+                const bool on = (wp.apa() == apa && wp.face() == face);
+                if (!have) {
+                    ppts.push_back(pt); pon.push_back(on);
+                    have = true; prev = pt; prev_on = on;
+                    continue;
+                }
+                const double dis = (pt - prev).magnitude();
+                if (dis < step) {
+                    ppts.push_back(pt); pon.push_back(on);
+                }
+                else {
+                    const int ncount = (int) (dis / step) + 1;
+                    for (int i = 0; i < ncount; ++i) {
+                        ppts.push_back(prev + (pt - prev) * ((i + 1.0) / ncount));
+                        pon.push_back(on && prev_on);
+                    }
+                    pon.back() = on;
+                }
+                prev = pt; prev_on = on;
+            }
+        }
+        double s_acc = 0;
+        for (size_t i = 0; i < ppts.size(); ++i) {
+            if (i) s_acc += (ppts[i] - ppts[i - 1]).magnitude();
+            GF::PathPt pp;
+            pp.s = s_acc;
+            pp.on_face = pon[i];
+            if (pp.on_face) {
+                int t0 = 0;
+                for (int p = 0; p < 3; ++p) {
+                    auto [tind, wind] = m_grouping->convert_3Dpoint_time_ch(ppts[i], apa, which, p);
+                    if (p == 0) t0 = tind;
+                    pp.wire[p] = wind;
+                }
+                pp.slice = (int) std::lround(t0 * 1.0 / tick_span) * tick_span;
+            }
+            pts.push_back(pp);
+        }
+        out.npath = pts.size();
+        std::vector<bool> covered(pts.size(), false);
+        for (size_t i = 0; i < pts.size(); ++i) {
+            if (!pts[i].on_face) continue;
+            // boxes whose slice start lies within one slice of the sample
+            for (auto it = boxes_by_slice.lower_bound(pts[i].slice - 2 * tick_span); it != boxes_by_slice.end() && it->first <= pts[i].slice + tick_span; ++it) {
+                for (size_t bi : it->second) {
+                    if (GF::covers(boxes[bi], pts[i].slice, pts[i].wire, 1, tick_span)) { covered[i] = true; break; }
+                }
+                if (covered[i]) break;
+            }
+            if (!covered[i]) ++out.nuncovered;
+        }
+        const auto gaps = GF::find_gaps(pts, covered, m_rd.gap_min_slices, m_rd.gap_max);
+        out.ngaps = gaps.size();
+        if (gaps.empty()) return out;
+
+        // The corridors (step C): around every sample of a gap, +- corridor_wires per plane in the sample's slice;
+        // wires owned by another cluster are never admitted; live wires carry the residual charge; dead wires and,
+        // in at most one plane, live wires without charge are bridge wires (the tiling sentinel).
+        std::map<std::pair<int, int>, std::vector<WRG::measure_t>> msm;
+        for (const auto& g : gaps) {
+            for (size_t i = g.first; i <= g.last; ++i) {
+                const auto& pt = pts[i];
+                if (!pt.on_face) continue;
+                std::array<int, 3> nlive{};
+                std::array<std::vector<std::pair<int, double>>, 3> adm;   // (wire, value) per plane; value 1e-3 = sentinel
+                for (int p = 0; p < 3; ++p) {
+                    for (int w = pt.wire[p] - m_rd.corridor_wires; w <= pt.wire[p] + m_rd.corridor_wires; ++w) {
+                        if (w < 0 || w >= nw[p]) continue;
+                        if (owner.is_other(p, pt.slice, w)) continue;
+                        double q = 0, err = 0;
+                        if (live_q(p, pt.slice, w, q, err) && q > 0) {
+                            adm[p].emplace_back(w, q);
+                            ++nlive[p];
+                        }
+                        else {
+                            adm[p].emplace_back(w, 1e-3);   // dead, or live without charge: a bridge wire
+                        }
+                    }
+                }
+                if (GF::missing_planes(nlive) >= 2) { ++out.nskipped; continue; }
+                auto& measures = msm[{pt.slice, pt.slice + tick_span}];
+                if (measures.empty()) {
+                    measures.resize(5);
+                    measures[0].push_back(1);
+                    measures[1].push_back(1);
+                    for (int p = 0; p < 3; ++p) measures[2 + p].resize(nw[p], 0);
+                }
+                for (int p = 0; p < 3; ++p) {
+                    for (const auto& [w, v] : adm[p]) {
+                        auto& m = measures[2 + p][w];
+                        if (v == 1e-3) { if (m == 0) m = 1e-3; }   // a live value already there wins
+                        else m = v;
+                    }
+                }
+            }
+        }
+        auto cand = make_iblobs_improved(msm, apa, face);
+        out.ncand_tiled = cand.size();
+        // candidates inside a base cell (same slice, every range within) are not new
+        for (const auto& cb : cand) {
+            const int s = (int) std::lround(cb->slice()->start() / tick);
+            std::array<std::pair<int, int>, 3> r{};
+            for (const auto& strip : cb->shape().strips()) {
+                if (strip.layer < 2 || strip.layer > 4) continue;
+                r[strip.layer - 2] = strip.bounds;
+            }
+            bool inside = false;
+            auto it = boxes_by_slice.find(s);
+            if (it != boxes_by_slice.end()) {
+                for (size_t bi : it->second) {
+                    const auto& bx = boxes[bi];
+                    bool in = true;
+                    for (int p = 0; p < 3; ++p) if (r[p].first < bx.w[p].first || r[p].second > bx.w[p].second) in = false;
+                    if (in) { inside = true; break; }
+                }
+            }
+            if (!inside) out.cand.push_back(cb);
+        }
+        return out;
     }
 
     // doc pdvd/113.  The reduced retiles.  Each mirrors the "full" path's
