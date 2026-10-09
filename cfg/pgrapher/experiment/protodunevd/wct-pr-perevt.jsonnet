@@ -213,6 +213,9 @@ function(
     retile_deghost_corridor_wires = 1,
     retile_deghost_bridge_planes = 1,
     retile_deghost_gap_min_slices = 2,
+    // doc pdvd/133 issue 2: > 0 = in the gapfill mode, apply the model's verdict to the base cells
+    // of slices with at least this many base cells (the isochronous band).  0 omits the key.
+    retile_deghost_base_verdict_min_cells = 0,
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
@@ -3477,6 +3480,10 @@ function(
     // byte-identical.  Validation: -A fit_blob_coverage_defer=true (or the
     // SBND_FIT_BLOB_COVERAGE_DEFER=true runner env).
     fit_blob_coverage_defer = false,
+    // doc pdvd/133 issue 1 -- the least-squares weight of 2D cells claimed by an out-of-scope
+    // cluster (TrackFitting fit_blob_coverage_weight, C++ default 0.1; 0 = doc 126 step 5 hard
+    // veto).  null omits the key => CheckBeamParticle does not forward it => byte-identical.
+    fit_blob_coverage_weight = null,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
     // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
     // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
@@ -4488,6 +4495,7 @@ function(
         [if kink_walk_dqdx_stop then 'kink_walk_dqdx_stop']: true,
         [if kink_break_protect then 'kink_break_protect']: true,
         [if fit_blob_coverage != null then 'fit_blob_coverage']: fit_blob_coverage,
+        [if fit_blob_coverage_weight != null then 'fit_blob_coverage_weight']: fit_blob_coverage_weight,
         [if fit_blob_coverage_defer then 'fit_blob_coverage_defer']: true,
         [if vertex_kink_snap then 'vertex_kink_snap']: true,
         [if vks_radius != null then 'vks_radius']: vks_radius,
@@ -4639,6 +4647,7 @@ function(
                              retile_deghost_corridor_wires=retile_deghost_corridor_wires,
                              retile_deghost_bridge_planes=retile_deghost_bridge_planes,
                              retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                             retile_deghost_base_verdict_min_cells=retile_deghost_base_verdict_min_cells,
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              mip_dqdx_median=mip_dqdx_median,

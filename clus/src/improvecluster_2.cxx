@@ -126,6 +126,7 @@ namespace WireCell::Clus {
             bool residual{true};             // residual charge (owner ruling: doc 131 step D)
             int corridor_wires{1};           // corridor half-width in wires per plane (ruling 3)
             int bridge_planes{1};            // a gap sample may have bridge wires in at most this many planes (ruling 3: 1)
+            int base_verdict_min_cells{0};   // doc pdvd/133: > 0 = apply the model's verdict to base cells in slices with >= this many base cells
             int gap_min_slices{2};           // a gap spans at least this many slices
             double gap_max{20 * units::cm};  // longer gaps are left to the Steiner graph
             double reach{20 * units::cm};    // the owner map's region = the base's bounds widened by this
@@ -254,6 +255,7 @@ namespace WireCell::Clus {
         rd.residual = get(j, "residual", rd.residual);
         rd.corridor_wires = std::max(0, get(j, "corridor_wires", rd.corridor_wires));
         rd.bridge_planes = std::min(3, std::max(0, get(j, "bridge_planes", rd.bridge_planes)));
+        rd.base_verdict_min_cells = std::max(0, get(j, "base_verdict_min_cells", rd.base_verdict_min_cells));
         rd.gap_min_slices = std::max(1, get(j, "gap_min_slices", rd.gap_min_slices));
         rd.gap_max = get(j, "gap_max", rd.gap_max);
         rd.reach = get(j, "reach", rd.reach);
@@ -284,8 +286,8 @@ namespace WireCell::Clus {
                            rp.nthreads, rd.dump_dir);
         if (rd.mode == "gapfill") {
             SPDLOG_LOGGER_INFO(log, "retile_deghost mode=gapfill (doc pdvd/131): residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
-                               "gap_max={:.1f} cm reach={:.1f} cm", rd.residual, rd.corridor_wires, rd.bridge_planes, rd.gap_min_slices,
-                               rd.gap_max / units::cm, rd.reach / units::cm);
+                               "gap_max={:.1f} cm reach={:.1f} cm base_verdict_min_cells={}", rd.residual, rd.corridor_wires, rd.bridge_planes,
+                               rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm, rd.base_verdict_min_cells);
         }
     }
 
@@ -759,8 +761,35 @@ namespace WireCell::Clus {
                 };
                 std::set<rd_key_t> base_keys;
                 if (rd_gap) for (const auto& b : ra.base) base_keys.insert(rd_key(b));
+                // doc pdvd/133 issue 2 (knob base_verdict_min_cells, default 0 = off): in a (face, slice) that
+                // holds at least that many base cells -- a near-isochronous band, where the fit zigzags -- a base
+                // cell the model did not keep (no model-kept cell within its wire ranges in its slice) is dropped.
+                // Elsewhere ruling 2 of doc 131 stands: every base cell is kept.
+                std::vector<rd_key_t> kept_keys;
+                if (rd_gap) for (const auto& cell : res.kept) kept_keys.push_back(rd_key(cell));
+                auto rd_model_kept = [&](const IBlob::pointer& base) {
+                    const rd_key_t b = rd_key(base);
+                    for (const auto& k : kept_keys) {
+                        if (k[0] != b[0] || k[1] != b[1]) continue;
+                        if (b[2] <= k[2] && k[3] <= b[3] && b[4] <= k[4] && k[5] <= b[5] && b[6] <= k[6] && k[7] <= b[7]) return true;
+                    }
+                    return false;
+                };
+                std::map<std::pair<int, int>, int> base_per_slice;
+                if (rd_gap && m_rd.base_verdict_min_cells > 0) {
+                    for (const auto& b : ra.base) { const rd_key_t k = rd_key(b); ++base_per_slice[{k[0], k[1]}]; }
+                }
                 std::vector<IBlob::pointer> final_cells;   // what is sampled, in order
-                if (rd_gap) final_cells = ra.base;
+                size_t nbase_verdict = 0;
+                if (rd_gap) {
+                    for (const auto& b : ra.base) {
+                        if (m_rd.base_verdict_min_cells > 0) {
+                            const rd_key_t k = rd_key(b);
+                            if (base_per_slice[{k[0], k[1]}] >= m_rd.base_verdict_min_cells && !rd_model_kept(b)) { ++nbase_verdict; continue; }
+                        }
+                        final_cells.push_back(b);
+                    }
+                }
                 size_t ncand_kept = 0;
                 for (const auto& cell : res.kept) {
                     if (rd_gap && base_keys.count(rd_key(cell))) continue;
@@ -794,10 +823,10 @@ namespace WireCell::Clus {
                                                f.face, f.nbase, f.npath, f.nuncovered, f.ngaps, f.ncand, f.nskipped, f.nowner);
                     }
                     SPDLOG_LOGGER_INFO(log, "retile_gapfill ident={} apa={}: base {} + candidates {} -> candidates kept {} (model kept {}, "
-                                       "threshold {}, weak dropped {}, bridges {}, added {}) sampled {}{} ({:.1f} ms)",
+                                       "threshold {}, weak dropped {}, bridges {}, added {}) base dropped by verdict {} (min cells {}) sampled {}{} ({:.1f} ms)",
                                        orig_cluster->ident(), apa, ra.base.size(), ra.in.size() - ra.base.size(), ncand_kept,
                                        res.kept.size(), res.nkeep_thr, res.srep.nweak_cells, res.srep.nbridges, res.srep.nadded,
-                                       nsampled, gf_face, MS(Clock::now() - t_rd).count());
+                                       nbase_verdict, m_rd.base_verdict_min_cells, nsampled, gf_face, MS(Clock::now() - t_rd).count());
                 }
                 else {
                 SPDLOG_LOGGER_INFO(log, "retile_deghost ident={} apa={} filter={}: model in {} -> kept {} (threshold {}, weak dropped {}, "
@@ -810,16 +839,6 @@ namespace WireCell::Clus {
                     // doc pdvd/132: a base cell the model did NOT keep (no kept cell lies within its wire ranges in
                     // its slice) is flagged 3 in the rdin dump.  The base is fixed by ruling 2 of doc 131, so this
                     // changes nothing in the output; it only lets the scan display show the cells the model would drop.
-                    std::vector<rd_key_t> kept_keys;
-                    if (rd_gap) for (const auto& cell : res.kept) kept_keys.push_back(rd_key(cell));
-                    auto rd_model_kept = [&](const IBlob::pointer& base) {
-                        const rd_key_t b = rd_key(base);
-                        for (const auto& k : kept_keys) {
-                            if (k[0] != b[0] || k[1] != b[1]) continue;
-                            if (b[2] <= k[2] && k[3] <= b[3] && b[4] <= k[4] && k[5] <= b[5] && b[6] <= k[6] && k[7] <= b[7]) return true;
-                        }
-                        return false;
-                    };
                     std::vector<RetileDump::Face> fin, fout;
                     for (const auto& f : ra.faces) {
                         fin.push_back(f.dump);

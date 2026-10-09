@@ -138,6 +138,10 @@ public:
         // TrackFitting parameters carried by TaggerCheckNeutrino's config
         // rather than by the runtime JSON (TaggerCheckNeutrino.cxx:3558-3572).
         m_fit_blob_coverage = get<double>(config, "fit_blob_coverage", m_fit_blob_coverage);
+        // doc pdvd/133 issue 1: the least-squares weight of 2D cells claimed by an out-of-scope cluster
+        // (TrackFitting fit_blob_coverage_weight, C++ default 0.1).  < 0 (default) = not forwarded, the
+        // fitter keeps its own default => byte-identical; 0 = a hard veto (doc 126 step 5).
+        m_fit_blob_coverage_weight = get<double>(config, "fit_blob_coverage_weight", m_fit_blob_coverage_weight);
         m_dqdx_fit_keep_all_points = get<bool>(config, "dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points);
         m_excl_t0_frame = get<bool>(config, "excl_t0_frame", m_excl_t0_frame);
 
@@ -177,6 +181,7 @@ public:
         cfg["entry_long_muon_absorb"] = m_entry_long_muon_absorb;
         cfg["kine_charge_t0_frame"] = m_kine_charge_t0_frame;
         cfg["fit_blob_coverage"] = m_fit_blob_coverage;
+        cfg["fit_blob_coverage_weight"] = m_fit_blob_coverage_weight;
         cfg["dqdx_fit_keep_all_points"] = m_dqdx_fit_keep_all_points;
         cfg["excl_t0_frame"] = m_excl_t0_frame;
         default_neutrino_knobs(cfg);
@@ -219,6 +224,7 @@ private:
     bool m_kine_charge_t0_frame{true};
     std::vector<double> m_fv_tolerance;
     double m_fit_blob_coverage{-1.0};
+    double m_fit_blob_coverage_weight{-1.0};   // doc pdvd/133: < 0 = ride the TrackFitting default (0.1)
     bool m_dqdx_fit_keep_all_points{false};
     bool m_excl_t0_frame{false};
     std::shared_ptr<TrackFitting> m_track_fitter;
@@ -1882,6 +1888,7 @@ void CheckBeamParticle::visit(Ensemble& ensemble) const
     tf->set_detector_volume(m_dv);
     tf->set_pc_transforms(m_pcts);
     tf->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
+    if (m_fit_blob_coverage_weight >= 0) tf->set_parameter("fit_blob_coverage_weight", m_fit_blob_coverage_weight);   // doc pdvd/133
     tf->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
     tf->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);   // TaggerCheckNeutrino.cxx:3560
     if (m_excl_t0_frame) tf->set_parameter("excl_t0_frame", 1.0);

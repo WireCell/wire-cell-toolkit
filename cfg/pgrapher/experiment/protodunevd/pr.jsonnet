@@ -191,6 +191,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_deghost_corridor_wires=1,
               retile_deghost_bridge_planes=1,
               retile_deghost_gap_min_slices=2,
+              retile_deghost_base_verdict_min_cells=0,   // doc pdvd/133; C++ default 0 = off, key omitted when 0
               retile_deghost_gap_max_cm=20,
               retile_deghost_reach_cm=20,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
@@ -1599,6 +1600,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             [if retile_deghost_mode != 'retile' then 'corridor_wires']: retile_deghost_corridor_wires,
             [if retile_deghost_mode != 'retile' then 'bridge_planes']: retile_deghost_bridge_planes,
             [if retile_deghost_mode != 'retile' then 'gap_min_slices']: retile_deghost_gap_min_slices,
+            [if retile_deghost_mode != 'retile' && retile_deghost_base_verdict_min_cells > 0 then 'base_verdict_min_cells']: retile_deghost_base_verdict_min_cells,
             [if retile_deghost_mode != 'retile' then 'gap_max']: retile_deghost_gap_max_cm * wc.cm,
             [if retile_deghost_mode != 'retile' then 'reach']: retile_deghost_reach_cm * wc.cm,
         } else null,
