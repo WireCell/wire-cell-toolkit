@@ -98,9 +98,17 @@ function(
     // assoc_cluster_main provenance (NOT cluster membership) and through it
     // the PR's unmerge_assoc split.  Counterpart of pdvd's
     // clus_cluster_id_order.  C++ default ''.  null => key omitted from every
-    // MultiAlgBlobClustering => byte-identical compiled config.
-    // Runner: PDHD_CLUS_TLA="-A clus_cluster_id_order=tree".
-    clus_cluster_id_order = null,
+    // MultiAlgBlobClustering.
+    // PDHD PRODUCTION 'tree', owner flip 2026-10-09 (doc pdvd/133 sec 1.9):
+    // registered STM / Michel grade on the 61 tagger events PASS (is_stm
+    // purity +0.015, efficiency +0.006, Michel unchanged; bar -0.020), cluster
+    // membership and flash matching identical on 61 / 61.  NOT bit-identical
+    // to the pre-flip job: clustering-stage cluster ids are renumbered (Bee
+    // cluster_id, calib dumps), the saved pctree's assoc arrays and the PR
+    // output change.  Pre-flip job: PDHD_CLUS_TLA="-S clus_cluster_id_order=null"
+    // (compiled config byte-identical to before the flip).  The default of
+    // clus.jsonnet's own argument stays null, so pr.jsonnet is unchanged.
+    clus_cluster_id_order = 'tree',
 
 )
 
