@@ -130,6 +130,16 @@ function(
     ql_beam_pref_rescue_scale = null,
     ql_beam_pref_max_ks = null,
     ql_beam_pref_min_pred_frac = null,
+    // doc pdvd/135 sec 7: the beam pair against the cathode-crossing evidence
+    // (both need ql_beam_pref).  ql_beam_pref_over_xtpc: a gated beam-window
+    // bundle survives the joint-pin / scenario-1 eviction when its ks +
+    // ql_beam_pref_over_xtpc_ks_margin (C++ 0.0) is below the best kept cathode
+    // bundle's, and the fit decides.  ql_beam_pref_postcull_exempt: such a bundle
+    // is not removed by the post-fit unflagged cut.  C++ default false for both;
+    // default false here => no key => compiled config byte-identical.
+    ql_beam_pref_over_xtpc = false,
+    ql_beam_pref_over_xtpc_ks_margin = null,
+    ql_beam_pref_postcull_exempt = false,
     // doc pdvd/119 sec 8: write each matched cluster's anode into the Bee op
     // dump (op_cluster_anodes), read by the Bee side panel to place a cluster in
     // its drift volume (from the uncorrected x a cluster within v*t of the
@@ -661,7 +671,10 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                       beam_pref_lasso_weight=ql_beam_pref_lasso_weight,
                       beam_pref_rescue_scale=ql_beam_pref_rescue_scale,
                       beam_pref_max_ks=ql_beam_pref_max_ks,
-                      beam_pref_min_pred_frac=ql_beam_pref_min_pred_frac);
+                      beam_pref_min_pred_frac=ql_beam_pref_min_pred_frac,
+                      beam_pref_over_xtpc=ql_beam_pref_over_xtpc,
+                      beam_pref_over_xtpc_ks_margin=ql_beam_pref_over_xtpc_ks_margin,
+                      beam_pref_postcull_exempt=ql_beam_pref_postcull_exempt);
 local calib_dump_joint =
     if calib then '%s/calib-evt%s.json' % [output_dir, std.toString(event)]
     else '';

@@ -456,6 +456,23 @@ namespace WireCell::Match {
         // the round-1 behavior; the SBND shim sets 0.3 / 0.02.
         double m_beam_pref_max_ks{1e9};
         double m_beam_pref_min_pred_frac{0.0};
+        // Beam pair against the cathode-crossing evidence (PDVD doc 135, run 39279
+        // beam15 sample; both default OFF => the two culls below are exactly as
+        // described above). Each needs m_beam_pref on and applies only to a bundle
+        // that passes the quality gate (in_beam_pref_window(bundle)).
+        //  - m_beam_pref_over_xtpc: in cull_inconsistent, a cluster holding a
+        //    joint-pin or scenario-1 cathode bundle keeps its beam-window bundle
+        //    too when that bundle's light pattern is better than the best kept
+        //    cathode bundle by the margin (beam ks + margin < cathode ks); the
+        //    LASSO then arbitrates. Without it the beam bundle is dropped before
+        //    the fit (evts 164463, 174208, 279298 scenario-1; 174048, 143123 pin:
+        //    beam ks 0.015-0.022 against cathode ks 0.22-0.56).
+        //  - m_beam_pref_postcull_exempt: in cull_unflagged_lowquality a
+        //    beam-window bundle counts as flagged (evt 173968: fit strength 0.98,
+        //    ks 0.030, then dropped for chi2/ndf 31.5).
+        bool   m_beam_pref_over_xtpc{false};
+        double m_beam_pref_over_xtpc_ks_margin{0.0};
+        bool   m_beam_pref_postcull_exempt{false};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).

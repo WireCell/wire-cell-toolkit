@@ -208,3 +208,20 @@ TEST_CASE("qlmatching cathode_x_wct_units (doc icarus/03)")
     CHECK(Match::ql_cathode_x_wct(210.29, true) == doctest::Approx(210.29 * units::cm));
     CHECK(Match::ql_cathode_x_wct(-210.29, true) == doctest::Approx(-2102.9 * units::mm));
 }
+
+TEST_CASE("qlmatching beam_pref against cathode evidence (doc pdvd/135)")
+{
+    // Both branches default OFF and round-trip: with them off a beam-window
+    // bundle is still dropped by the joint-pin / scenario-1 eviction of
+    // cull_inconsistent and by the post-fit unflagged cut, as before (SBND
+    // production runs beam_pref on, so these must not ride on that knob).
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("beam_pref_over_xtpc"));
+    CHECK(cfg["beam_pref_over_xtpc"].asBool() == false);
+    REQUIRE(cfg.isMember("beam_pref_over_xtpc_ks_margin"));
+    CHECK(cfg["beam_pref_over_xtpc_ks_margin"].asDouble() == doctest::Approx(0.0));
+    REQUIRE(cfg.isMember("beam_pref_postcull_exempt"));
+    CHECK(cfg["beam_pref_postcull_exempt"].asBool() == false);
+    CHECK(cfg["beam_pref"].asBool() == false);
+}

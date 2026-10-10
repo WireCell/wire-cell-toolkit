@@ -156,7 +156,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // Keys omitted when off => compiled config byte-identical.
          beam_pref=false, beam_pref_window=null, beam_pref_lasso_weight=null,
          beam_pref_rescue_scale=null, beam_pref_max_ks=null,
-         beam_pref_min_pred_frac=null) {
+         beam_pref_min_pred_frac=null,
+         // Beam pair against the cathode evidence (doc pdvd/135 sec 7; need
+         // beam_pref).  over_xtpc: a gated beam-window bundle survives the
+         // joint-pin / scenario-1 eviction of cull_inconsistent when its ks +
+         // margin is below the best kept cathode bundle's.  postcull_exempt: a
+         // gated beam-window bundle counts as flagged in the post-fit unflagged
+         // cut.  C++ defaults false / 0.0 / false; keys omitted when off.
+         beam_pref_over_xtpc=false, beam_pref_over_xtpc_ks_margin=null,
+         beam_pref_postcull_exempt=false) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -633,6 +641,12 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
                 beam_pref_max_ks,
             [if beam_pref && beam_pref_window != null && beam_pref_min_pred_frac != null then 'beam_pref_min_pred_frac']:
                 beam_pref_min_pred_frac,
+            // Beam pair against the cathode evidence (doc pdvd/135 sec 7).  C++
+            // default false; keys omitted when off => byte-identical config.
+            [if beam_pref && beam_pref_window != null && beam_pref_over_xtpc then 'beam_pref_over_xtpc']: true,
+            [if beam_pref && beam_pref_window != null && beam_pref_over_xtpc && beam_pref_over_xtpc_ks_margin != null
+                then 'beam_pref_over_xtpc_ks_margin']: beam_pref_over_xtpc_ks_margin,
+            [if beam_pref && beam_pref_window != null && beam_pref_postcull_exempt then 'beam_pref_postcull_exempt']: true,
             // lasso_boundary_weight is set via the production literal above
             // (doc 28: a conditional key here would duplicate that field and
             // crash the compile whenever the sweep arg is non-null).

@@ -388,6 +388,9 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_beam_pref_rescue_scale = get(cfg, "beam_pref_rescue_scale", m_beam_pref_rescue_scale);
     m_beam_pref_max_ks        = get(cfg, "beam_pref_max_ks",        m_beam_pref_max_ks);
     m_beam_pref_min_pred_frac = get(cfg, "beam_pref_min_pred_frac", m_beam_pref_min_pred_frac);
+    m_beam_pref_over_xtpc           = get(cfg, "beam_pref_over_xtpc",           m_beam_pref_over_xtpc);
+    m_beam_pref_over_xtpc_ks_margin = get(cfg, "beam_pref_over_xtpc_ks_margin", m_beam_pref_over_xtpc_ks_margin);
+    m_beam_pref_postcull_exempt     = get(cfg, "beam_pref_postcull_exempt",     m_beam_pref_postcull_exempt);
 
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
@@ -884,6 +887,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_pref_rescue_scale"] = m_beam_pref_rescue_scale;
     cfg["beam_pref_max_ks"]        = m_beam_pref_max_ks;
     cfg["beam_pref_min_pred_frac"] = m_beam_pref_min_pred_frac;
+    cfg["beam_pref_over_xtpc"]           = m_beam_pref_over_xtpc;
+    cfg["beam_pref_over_xtpc_ks_margin"] = m_beam_pref_over_xtpc_ks_margin;
+    cfg["beam_pref_postcull_exempt"]     = m_beam_pref_postcull_exempt;
 
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;
@@ -2142,8 +2148,11 @@ void QLMatching::cull_unflagged_lowquality(ApaRun& run)
     TimingTPCBundleSelection to_be_removed;
     for (auto* flash : flash_iter_order(run.flash_bundles_map)) {
         for (const auto& b : run.flash_bundles_map.at(flash)) {
+            // A beam-window bundle counts as flagged when beam_pref_postcull_exempt is
+            // on (PDVD doc 135, evt 173968). Knob off => qflag unchanged.
             const bool qflag = b->get_consistent_flag() || b->get_flag_xtpc_consistent() ||
-                               b->get_flag_xtpc_scenario1() || b->get_flag_xtpc_pin();
+                               b->get_flag_xtpc_scenario1() || b->get_flag_xtpc_pin() ||
+                               (m_beam_pref_postcull_exempt && in_beam_pref_window(b));
             if (m_postcull_unflagged && !qflag) {
                 const double c2n = b->get_ndf() > 0 ? b->get_chi2() / b->get_ndf() : 1e9;
                 if (b->get_ks_dis() > m_postcull_ks_max || c2n > m_postcull_c2n_max) {
@@ -2304,12 +2313,31 @@ void QLMatching::cull_inconsistent(ApaRun& run)
             if (b->get_flag_xtpc_scenario1()) has_sc1 = true;
             if (keep_flag(b)) has_keep = true;
         }
+        // Beam pair against the cathode evidence (beam_pref_over_xtpc, PDVD doc 135;
+        // off => beam_spared() is always false and both branches are unchanged): a
+        // beam-window bundle passing the quality gate survives the pin / scenario-1
+        // eviction when its ks beats the best kept cathode bundle by the margin.
+        double best_xtpc_ks = std::numeric_limits<double>::max();
+        if (m_beam_pref_over_xtpc && (has_pin || has_sc1))
+            for (auto& b : bundles)
+                if (has_pin ? b->get_flag_xtpc_pin() : b->get_flag_xtpc_scenario1())
+                    best_xtpc_ks = std::min(best_xtpc_ks, b->get_ks_dis());
+        auto beam_spared = [&](const TimingTPCBundle::pointer& b) {
+            if (!m_beam_pref_over_xtpc || !in_beam_pref_window(b)) return false;
+            if (!(b->get_ks_dis() + m_beam_pref_over_xtpc_ks_margin < best_xtpc_ks)) return false;
+            log->debug("QLCULLINC apa{} cluster {} KEEP beam-window bundle flash {} "
+                       "(beam_pref_over_xtpc: ks {:.3f} beats best cathode bundle {:.3f}; LASSO arbitrates)",
+                       (int)run.anode->ident(), cluster->ident(),
+                       b->get_flash()->get_flash_id(), b->get_ks_dis(), best_xtpc_ks);
+            return true;
+        };
         if (has_pin) {
             // Joint-pin (xtpc_joint_pin only): a direction-confirmed crosser half keeps ONLY
             // its pinned bundle, binding the pair to one coincident flash. Overrides even the
             // scenario-1 priority below (which keeps all sc1 bundles, allowing a split).
             for (auto& b : bundles)
                 if (!b->get_flag_xtpc_pin()) {
+                    if (beam_spared(b)) continue;
                     to_be_removed.push_back(b);
                     log->debug("QLCULLINC apa{} cluster {} drop bundle flash {} "
                                "(cluster kept xtpc JOINT-PIN crosser)",
@@ -2328,6 +2356,7 @@ void QLMatching::cull_inconsistent(ApaRun& run)
                         best_sc1_ks = std::min(best_sc1_ks, b->get_ks_dis());
             for (auto& b : bundles)
                 if (!b->get_flag_xtpc_scenario1()) {
+                    if (beam_spared(b)) continue;
                     if (m_sc1_evict_ks_margin >= 0.0 && b->get_consistent_flag()
                         && best_sc1_ks > b->get_ks_dis() + m_sc1_evict_ks_margin) {
                         log->debug("QLCULLINC apa{} cluster {} KEEP consistent bundle flash {} "
