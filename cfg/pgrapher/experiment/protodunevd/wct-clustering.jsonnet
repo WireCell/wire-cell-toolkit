@@ -124,31 +124,39 @@ function(
     // weight multiplied by ql_beam_pref_lasso_weight (C++ 1.0), empty-flash rescue
     // steal bar scaled by ql_beam_pref_rescue_scale (C++ 1.0); quality gate
     // ql_beam_pref_max_ks (C++ 1e9) / ql_beam_pref_min_pred_frac (C++ 0).
-    // Default false => no key => compiled config byte-identical.
-    ql_beam_pref = false,
-    ql_beam_pref_lasso_weight = null,
+    // PDVD PRODUCTION DEFAULT ON since 2026-10-10 (owner, doc pdvd/135 sec 9),
+    // with the measured setting of the arm d135s2: lasso weight 0.05, ks <= 0.10,
+    // pred >= 0.3 measured, over_xtpc, postcull_exempt and seed_only below.  C++
+    // defaults stay off.  Only an event with a beam label changes; without one no
+    // key is written.  NOT bit-identical to the pre-flip job on beam-labelled
+    // events; -S ql_beam_pref=false compiles the pre-flip config byte for byte
+    // (every key below is suppressed without beam_pref).
+    ql_beam_pref = true,
+    ql_beam_pref_lasso_weight = 0.05,
     ql_beam_pref_rescue_scale = null,
-    ql_beam_pref_max_ks = null,
-    ql_beam_pref_min_pred_frac = null,
+    ql_beam_pref_max_ks = 0.10,
+    ql_beam_pref_min_pred_frac = 0.3,
     // doc pdvd/135 sec 7: the beam pair against the cathode-crossing evidence
     // (both need ql_beam_pref).  ql_beam_pref_over_xtpc: a gated beam-window
     // bundle survives the joint-pin / scenario-1 eviction when its ks +
     // ql_beam_pref_over_xtpc_ks_margin (C++ 0.0) is below the best kept cathode
     // bundle's, and the fit decides.  ql_beam_pref_postcull_exempt: such a bundle
     // is not removed by the post-fit unflagged cut.  C++ default false for both;
-    // default false here => no key => compiled config byte-identical.
-    ql_beam_pref_over_xtpc = false,
+    // PDVD default true since 2026-10-10 (doc pdvd/135 sec 9); false here, or
+    // ql_beam_pref=false => no key.
+    ql_beam_pref_over_xtpc = true,
     ql_beam_pref_over_xtpc_ks_margin = null,
-    ql_beam_pref_postcull_exempt = false,
+    ql_beam_pref_postcull_exempt = true,
     // doc pdvd/135 sec 8: seed-only preference (needs ql_beam_pref).  Only a
     // gated beam-window bundle whose cluster has a point within
     // ql_beam_pref_seed_max_dist_cm (C++ 30 cm) of the nominal beam entry
     // ql_beam_pref_seed_entry_cm, at the flash's drift time, keeps the
     // preference; every other bundle of the beam flash is treated as without
     // ql_beam_pref.  The entry is the CheckBeamParticle one (wct-pr-perevt.jsonnet,
-    // doc pdvd/120 sec 1).  C++ default false; default false here => no key =>
-    // compiled config byte-identical.
-    ql_beam_pref_seed_only = false,
+    // doc pdvd/120 sec 1).  C++ default false; PDVD default true since 2026-10-10
+    // (doc pdvd/135 sec 9); false here, or ql_beam_pref=false => no key.  The
+    // entry and the 30 cm were chosen on run 39279 (1.5 GeV/c).
+    ql_beam_pref_seed_only = true,
     ql_beam_pref_seed_entry_cm = [110.0, 159.0, 0.6],
     ql_beam_pref_seed_max_dist_cm = null,
     // doc pdvd/119 sec 8: write each matched cluster's anode into the Bee op
