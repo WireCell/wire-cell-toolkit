@@ -164,7 +164,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // gated beam-window bundle counts as flagged in the post-fit unflagged
          // cut.  C++ defaults false / 0.0 / false; keys omitted when off.
          beam_pref_over_xtpc=false, beam_pref_over_xtpc_ks_margin=null,
-         beam_pref_postcull_exempt=false) {
+         beam_pref_postcull_exempt=false,
+         // Seed-only preference (doc pdvd/135 sec 8; needs beam_pref).  Only a
+         // gated beam-window bundle whose cluster has a point within
+         // beam_pref_seed_max_dist of beam_pref_seed_entry [x, y, z] (drift
+         // coordinate at the flash's time) keeps the preference.  C++ defaults
+         // false / 30 cm / [0, 0, 0]; keys omitted when off.
+         beam_pref_seed_only=false, beam_pref_seed_entry=null,
+         beam_pref_seed_max_dist=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -647,6 +654,14 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if beam_pref && beam_pref_window != null && beam_pref_over_xtpc && beam_pref_over_xtpc_ks_margin != null
                 then 'beam_pref_over_xtpc_ks_margin']: beam_pref_over_xtpc_ks_margin,
             [if beam_pref && beam_pref_window != null && beam_pref_postcull_exempt then 'beam_pref_postcull_exempt']: true,
+            // Seed-only preference (doc pdvd/135 sec 8).  C++ default false; keys
+            // omitted when off (or without an entry point) => byte-identical config.
+            [if beam_pref && beam_pref_window != null && beam_pref_seed_only && beam_pref_seed_entry != null
+                then 'beam_pref_seed_only']: true,
+            [if beam_pref && beam_pref_window != null && beam_pref_seed_only && beam_pref_seed_entry != null
+                then 'beam_pref_seed_entry']: beam_pref_seed_entry,
+            [if beam_pref && beam_pref_window != null && beam_pref_seed_only && beam_pref_seed_entry != null
+                && beam_pref_seed_max_dist != null then 'beam_pref_seed_max_dist']: beam_pref_seed_max_dist,
             // lasso_boundary_weight is set via the production literal above
             // (doc 28: a conditional key here would duplicate that field and
             // crash the compile whenever the sweep arg is non-null).

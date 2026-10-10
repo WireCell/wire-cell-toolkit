@@ -391,6 +391,12 @@ void QLMatching::configure(const WireCell::Configuration& cfg)
     m_beam_pref_over_xtpc           = get(cfg, "beam_pref_over_xtpc",           m_beam_pref_over_xtpc);
     m_beam_pref_over_xtpc_ks_margin = get(cfg, "beam_pref_over_xtpc_ks_margin", m_beam_pref_over_xtpc_ks_margin);
     m_beam_pref_postcull_exempt     = get(cfg, "beam_pref_postcull_exempt",     m_beam_pref_postcull_exempt);
+    m_beam_pref_seed_only     = get(cfg, "beam_pref_seed_only",     m_beam_pref_seed_only);
+    m_beam_pref_seed_max_dist = get(cfg, "beam_pref_seed_max_dist", m_beam_pref_seed_max_dist);
+    if (cfg.isMember("beam_pref_seed_entry") && cfg["beam_pref_seed_entry"].isArray()
+        && cfg["beam_pref_seed_entry"].size() == 3) {
+        for (int i = 0; i < 3; ++i) m_beam_pref_seed_entry[i] = cfg["beam_pref_seed_entry"][i].asDouble();
+    }
 
     m_pe_err_floor      = get(cfg, "pe_err_floor",      m_pe_err_floor);
     m_pe_err_frac       = get(cfg, "pe_err_frac",       m_pe_err_frac);
@@ -890,6 +896,9 @@ WireCell::Configuration QLMatching::default_configuration() const
     cfg["beam_pref_over_xtpc"]           = m_beam_pref_over_xtpc;
     cfg["beam_pref_over_xtpc_ks_margin"] = m_beam_pref_over_xtpc_ks_margin;
     cfg["beam_pref_postcull_exempt"]     = m_beam_pref_postcull_exempt;
+    cfg["beam_pref_seed_only"]     = m_beam_pref_seed_only;
+    cfg["beam_pref_seed_max_dist"] = m_beam_pref_seed_max_dist;
+    for (int i = 0; i < 3; ++i) cfg["beam_pref_seed_entry"][i] = m_beam_pref_seed_entry[i];
 
     cfg["pe_err_floor"]       = m_pe_err_floor;
     cfg["pe_err_frac"]        = m_pe_err_frac;
@@ -1091,6 +1100,11 @@ bool QLMatching::operator()(const input_vector& invec, output_pointer& out)
     // Per-TPC consistency cull, now AFTER the cross-TPC flag pass so it can honour the
     // xtpc flags (xtpc-priority). When no xtpc flag is set (non-SBND / xtpc_flag:false)
     // this reproduces the historical cull_inconsistent exactly => bit-identical.
+    // Seed-only beam preference (beam_pref_seed_only, PDVD doc 135 sec 8; off =>
+    // not called): mark the seed bundles of the beam-window flash before the cull
+    // and the fit read in_beam_pref_window(bundle).
+    if (m_beam_pref && m_beam_pref_seed_only)
+        for (auto& run : runs) flag_beam_seed(run);
     for (std::size_t k = 0; k < invec.size(); ++k) cull_inconsistent(runs[k]);
     const double t_cull = ms_since(t_cull0);
 
@@ -2404,6 +2418,43 @@ void QLMatching::cull_inconsistent(ApaRun& run)
 // Prototype flag-based per-column L1 down-weight (ToyMatching.cxx:1437), generalized to
 // the same boundary/near-PMT/window-truncated group as the ladder's B4 branch. A
 // down-weighted bundle is shrunk less and so more likely to survive the strength cutoff.
+// Seed bundles of the beam-window flash (beam_pref_seed_only, PDVD doc 135 sec 8).
+// A bundle is a seed when it passes the beam_pref window + quality gate and its
+// cluster (main + associated) has a point within beam_pref_seed_max_dist of the
+// nominal beam entry, the drift coordinate taken at the flash's time: the cluster
+// points are raw, so the entry is moved by -flash_x_offset instead (the same offset
+// build_bundles applies). One log line per beam-window bundle near the entry or
+// passing the gate.
+void QLMatching::flag_beam_seed(ApaRun& run)
+{
+    for (auto* cluster : cluster_iter_order(run.cluster_bundles_map, run.global_cluster_idx_map)) {
+        for (auto& b : run.cluster_bundles_map[cluster]) {
+            const auto* flash = b->get_flash();
+            if (!in_beam_pref_window(flash)) continue;
+            const double flash_x_offset = run.sign_offset
+                * (flash->get_time() + trigger_offset_for(run.input_idx)) * drift_speed_for(run.input_idx);
+            const geo_point_t entry_raw(m_beam_pref_seed_entry[0] - flash_x_offset,
+                                        m_beam_pref_seed_entry[1], m_beam_pref_seed_entry[2]);
+            double dist = std::numeric_limits<double>::max();
+            if (b->get_main_cluster()->npoints() > 0)
+                dist = b->get_main_cluster()->get_closest_dis(entry_raw);
+            for (auto* oc : b->get_other_clusters())
+                if (oc->npoints() > 0) dist = std::min(dist, oc->get_closest_dis(entry_raw));
+            const bool gate = beam_pref_quality(b);
+            const bool seed = gate && dist < m_beam_pref_seed_max_dist;
+            b->set_flag_beam_seed(seed);
+            if (gate || dist < 3.0 * m_beam_pref_seed_max_dist) {
+                const double meas = flash->get_total_PE();
+                log->debug("QLBEAMSEED apa{} cluster {} flash {} entry_dist {:.1f} cm ks {:.3f} pred/meas {:.2f} gate {} -> {}",
+                           (int)run.anode->ident(), cluster->ident(), flash->get_flash_id(),
+                           dist / units::cm, b->get_ks_dis(),
+                           meas > 0 ? b->get_total_pred_light() / meas : 0.0,
+                           gate ? 1 : 0, seed ? "SEED" : "no seed");
+            }
+        }
+    }
+}
+
 double QLMatching::lasso_flag_factor(const TimingTPCBundle::pointer& bundle) const
 {
     double factor = 1.0;
@@ -4312,6 +4363,8 @@ void QLMatching::dump_calib(const std::vector<ApaRun>& runs)
             jb["xtpc_consistent"]      = b->get_flag_xtpc_consistent();
             jb["xtpc_scenario1"]       = b->get_flag_xtpc_scenario1();
             jb["xtpc_pin"]             = b->get_flag_xtpc_pin();
+            // Written only with the seed-only knob on => dump unchanged when off.
+            if (m_beam_pref && m_beam_pref_seed_only) jb["beam_seed"] = b->get_flag_beam_seed();
             // Key emitted only when the rescue knob is on => knob-off dumps stay
             // byte-identical. True = this bundle failed raw containment by a cathode
             // overshoot within tolerance and survived only via the scenario-1

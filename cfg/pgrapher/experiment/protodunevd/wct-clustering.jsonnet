@@ -140,6 +140,17 @@ function(
     ql_beam_pref_over_xtpc = false,
     ql_beam_pref_over_xtpc_ks_margin = null,
     ql_beam_pref_postcull_exempt = false,
+    // doc pdvd/135 sec 8: seed-only preference (needs ql_beam_pref).  Only a
+    // gated beam-window bundle whose cluster has a point within
+    // ql_beam_pref_seed_max_dist_cm (C++ 30 cm) of the nominal beam entry
+    // ql_beam_pref_seed_entry_cm, at the flash's drift time, keeps the
+    // preference; every other bundle of the beam flash is treated as without
+    // ql_beam_pref.  The entry is the CheckBeamParticle one (wct-pr-perevt.jsonnet,
+    // doc pdvd/120 sec 1).  C++ default false; default false here => no key =>
+    // compiled config byte-identical.
+    ql_beam_pref_seed_only = false,
+    ql_beam_pref_seed_entry_cm = [110.0, 159.0, 0.6],
+    ql_beam_pref_seed_max_dist_cm = null,
     // doc pdvd/119 sec 8: write each matched cluster's anode into the Bee op
     // dump (op_cluster_anodes), read by the Bee side panel to place a cluster in
     // its drift volume (from the uncorrected x a cluster within v*t of the
@@ -674,7 +685,12 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                       beam_pref_min_pred_frac=ql_beam_pref_min_pred_frac,
                       beam_pref_over_xtpc=ql_beam_pref_over_xtpc,
                       beam_pref_over_xtpc_ks_margin=ql_beam_pref_over_xtpc_ks_margin,
-                      beam_pref_postcull_exempt=ql_beam_pref_postcull_exempt);
+                      beam_pref_postcull_exempt=ql_beam_pref_postcull_exempt,
+                      beam_pref_seed_only=ql_beam_pref_seed_only,
+                      beam_pref_seed_entry=if ql_beam_pref_seed_only
+                          then [v * wc.cm for v in ql_beam_pref_seed_entry_cm] else null,
+                      beam_pref_seed_max_dist=if ql_beam_pref_seed_max_dist_cm != null
+                          then ql_beam_pref_seed_max_dist_cm * wc.cm else null);
 local calib_dump_joint =
     if calib then '%s/calib-evt%s.json' % [output_dir, std.toString(event)]
     else '';

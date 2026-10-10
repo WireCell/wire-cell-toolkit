@@ -225,3 +225,23 @@ TEST_CASE("qlmatching beam_pref against cathode evidence (doc pdvd/135)")
     CHECK(cfg["beam_pref_postcull_exempt"].asBool() == false);
     CHECK(cfg["beam_pref"].asBool() == false);
 }
+
+TEST_CASE("qlmatching beam_pref seed-only preference (doc pdvd/135 sec 8)")
+{
+    // Default OFF and round-trip: with it off in_beam_pref_window(bundle) is the
+    // window + quality gate alone, as before (SBND production runs beam_pref on).
+    Match::QLMatching qlm;
+    auto cfg = qlm.default_configuration();
+    REQUIRE(cfg.isMember("beam_pref_seed_only"));
+    CHECK(cfg["beam_pref_seed_only"].asBool() == false);
+    REQUIRE(cfg.isMember("beam_pref_seed_max_dist"));
+    CHECK(cfg["beam_pref_seed_max_dist"].asDouble() == doctest::Approx(30.0 * units::cm));
+    REQUIRE(cfg.isMember("beam_pref_seed_entry"));
+    REQUIRE(cfg["beam_pref_seed_entry"].size() == 3);
+    for (int i = 0; i < 3; ++i) CHECK(cfg["beam_pref_seed_entry"][i].asDouble() == 0.0);
+    // The seed flag of a bundle defaults false and is settable.
+    Match::TimingTPCBundle bundle(nullptr, nullptr, 0, 0);
+    CHECK(bundle.get_flag_beam_seed() == false);
+    bundle.set_flag_beam_seed(true);
+    CHECK(bundle.get_flag_beam_seed() == true);
+}

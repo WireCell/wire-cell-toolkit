@@ -215,6 +215,12 @@ namespace WireCell::Match {
         // cluster's high-consistent bundle on a different flash). Default false.
         void set_flag_xtpc_scenario1(bool v) { flag_xtpc_scenario1 = v; }
         bool get_flag_xtpc_scenario1() const { return flag_xtpc_scenario1; }
+        // Beam seed (QLMatching beam_pref_seed_only, PDVD doc 135 sec 8): this
+        // bundle of a beam-window flash passes the beam_pref quality gate and its
+        // cluster reaches the nominal beam entry point at the flash's drift time.
+        // Set only by QLMatching::flag_beam_seed when the knob is on. Default false.
+        void set_flag_beam_seed(bool v) { flag_beam_seed = v; }
+        bool get_flag_beam_seed() const { return flag_beam_seed; }
         // Joint-pin winner: this bundle is the chosen (cluster,flash) of a confirmed
         // direction-collinear cross-TPC pair (scenario 1 AND track axes collinear by the
         // combined local-vhough / global-PCA test). Set only when xtpc_joint_pin is on;
@@ -274,6 +280,7 @@ namespace WireCell::Match {
         bool flag_xtpc_consistent{false};
         bool flag_xtpc_scenario1{false};
         bool flag_xtpc_pin{false};
+        bool flag_beam_seed{false};
         bool flag_xtpc_cathode_cand{false};
         bool flag_xtpc_cathode_provisional{false};
         bool flag_cluster_rescue_relaxed{false};

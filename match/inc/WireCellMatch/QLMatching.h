@@ -473,6 +473,22 @@ namespace WireCell::Match {
         bool   m_beam_pref_over_xtpc{false};
         double m_beam_pref_over_xtpc_ks_margin{0.0};
         bool   m_beam_pref_postcull_exempt{false};
+        // Seed-only preference (PDVD doc 135 sec 8; default OFF => every
+        // beam_pref branch acts on all gated bundles of the beam-window flash,
+        // as before). When on (needs m_beam_pref), flag_beam_seed() marks, before
+        // cull_inconsistent, the gated beam-window bundles whose cluster (main +
+        // associated) has a point within m_beam_pref_seed_max_dist of the nominal
+        // beam entry m_beam_pref_seed_entry {x, y, z}, the drift coordinate taken
+        // at the flash's time (raw x + flash_x_offset); in_beam_pref_window(bundle)
+        // is then true for those seed bundles only, so the L1 weight, the
+        // rival-cull exemption, the rescue guard and the two branches above apply
+        // to the seed and every other bundle of the beam flash is un-preferred.
+        // Several clusters may pass; each is a seed. (With the unrestricted
+        // preference at weight 0.05 the beam flash gained 14 other clusters in
+        // 101 events of run 39279, 10 of them rejected by scan.)
+        bool   m_beam_pref_seed_only{false};
+        std::vector<double> m_beam_pref_seed_entry{0.0, 0.0, 0.0};
+        double m_beam_pref_seed_max_dist{30.0 * units::cm};
 
         // §G flash PE-error model (forwarded to Opflash for the LASSO; the same
         // floor/frac/knee feed the bundle chi2 via BundleQualityParams).
@@ -1488,6 +1504,10 @@ namespace WireCell::Match {
         // cull_cross_tpc and cull_inconsistent.
         void purge_unconfirmed_cathode_rescue(ApaRun& run);
         void cull_inconsistent(ApaRun& run);         // drop non-consistent rivals               [Stage 1]
+        // beam_pref_seed_only: mark the seed bundles of the beam-window flash
+        // (TimingTPCBundle flag_beam_seed) before cull_inconsistent. Called only
+        // when m_beam_pref && m_beam_pref_seed_only.
+        void flag_beam_seed(ApaRun& run);
         // Pin exemption from the strength-cutoff prune, with the optional
         // m_xtpc_pin_min_strength floor (doc 19); 0 => legacy always-exempt.
         bool pin_exempt(const TimingTPCBundle* b, double strength) const;
@@ -1524,6 +1544,16 @@ namespace WireCell::Match {
         // beam match is preferred; junk bundles of a beam-window flash keep the
         // un-preferred behavior (see the §C knob block).
         bool in_beam_pref_window(const TimingTPCBundle::pointer& bundle) const
+        {
+            if (!beam_pref_quality(bundle)) return false;
+            // Seed-only (m_beam_pref_seed_only, default off => unchanged): only a
+            // bundle flag_beam_seed() marked is preferred.
+            if (m_beam_pref_seed_only && !bundle->get_flag_beam_seed()) return false;
+            return true;
+        }
+        // The window + quality gate alone (what in_beam_pref_window(bundle) was
+        // before the seed-only knob); flag_beam_seed() tests it to choose seeds.
+        bool beam_pref_quality(const TimingTPCBundle::pointer& bundle) const
         {
             const auto* f = bundle->get_flash();
             if (!in_beam_pref_window(f)) return false;
