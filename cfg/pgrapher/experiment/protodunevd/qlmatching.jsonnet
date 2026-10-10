@@ -148,7 +148,15 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
          // Saturation-aware rescue ratio-high extension (doc 23 phase 1b).
          // C++ defaults false/0.5/2.0; keys omitted when off => byte-identical.
          cluster_rescue_sat_ratio_relax=false, cluster_rescue_sat_frac_min=null,
-         cluster_rescue_sat_ratio_mult=null) {
+         cluster_rescue_sat_ratio_mult=null,
+         // Beam-window preference (doc pdvd/135; the QLMatching beam_pref family,
+         // first used on SBND).  beam_pref_window = [tlow, thigh] on the RAW flash
+         // time axis (flash->get_time(), native units).  C++ defaults: off,
+         // lasso weight 1.0, rescue scale 1.0, max_ks 1e9, min_pred_frac 0.
+         // Keys omitted when off => compiled config byte-identical.
+         beam_pref=false, beam_pref_window=null, beam_pref_lasso_weight=null,
+         beam_pref_rescue_scale=null, beam_pref_max_ks=null,
+         beam_pref_min_pred_frac=null) {
     // Per-input [bottom, top] offsets; null => scalar trigger_offset for both
     // (the C++ per-input array, when set, REPLACES the scalar).
     local trigoffs = if trigger_offsets == null
@@ -612,6 +620,19 @@ function(params, trigger_offset=0 * wc.us, readout_window_ticks=10000,
             [if delta_shape != null then 'delta_shape']: delta_shape,
             [if bkg_weight != null then 'bkg_weight']: bkg_weight,
             [if strength_cutoff != null then 'strength_cutoff']: strength_cutoff,
+            // Beam-window preference (doc pdvd/135).  C++ default false; every key
+            // omitted when off => byte-identical pre-knob config.
+            [if beam_pref && beam_pref_window != null then 'beam_pref']: true,
+            [if beam_pref && beam_pref_window != null then 'beam_pref_tlow']: beam_pref_window[0],
+            [if beam_pref && beam_pref_window != null then 'beam_pref_thigh']: beam_pref_window[1],
+            [if beam_pref && beam_pref_window != null && beam_pref_lasso_weight != null then 'beam_pref_lasso_weight']:
+                beam_pref_lasso_weight,
+            [if beam_pref && beam_pref_window != null && beam_pref_rescue_scale != null then 'beam_pref_rescue_scale']:
+                beam_pref_rescue_scale,
+            [if beam_pref && beam_pref_window != null && beam_pref_max_ks != null then 'beam_pref_max_ks']:
+                beam_pref_max_ks,
+            [if beam_pref && beam_pref_window != null && beam_pref_min_pred_frac != null then 'beam_pref_min_pred_frac']:
+                beam_pref_min_pred_frac,
             // lasso_boundary_weight is set via the production literal above
             // (doc 28: a conditional key here would duplicate that field and
             // crash the compile whenever the sweep arg is non-null).

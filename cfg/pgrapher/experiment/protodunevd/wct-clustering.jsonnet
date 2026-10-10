@@ -117,6 +117,19 @@ function(
     // -0.90 +- 0.05 us on the flash axis (runs 39252/39305/39349, doc pdvd/119
     // sec 3), so -0.9 +- 0.6 us; accidental ~1.2 us x 72 flashes/ms ~ 0.09/evt.
     beam_window_rel_us = [-1.5, -0.3],
+    // doc pdvd/135: beam-window preference in the Q/L matching (QLMatching
+    // beam_pref family).  When true AND the event has a beam label (beam_trigger_us
+    // + a CTB beam tc_type), bundles of flashes inside the same relative window on
+    // the raw flash axis are preferred: exempt from the rival-consistent cull, L1
+    // weight multiplied by ql_beam_pref_lasso_weight (C++ 1.0), empty-flash rescue
+    // steal bar scaled by ql_beam_pref_rescue_scale (C++ 1.0); quality gate
+    // ql_beam_pref_max_ks (C++ 1e9) / ql_beam_pref_min_pred_frac (C++ 0).
+    // Default false => no key => compiled config byte-identical.
+    ql_beam_pref = false,
+    ql_beam_pref_lasso_weight = null,
+    ql_beam_pref_rescue_scale = null,
+    ql_beam_pref_max_ks = null,
+    ql_beam_pref_min_pred_frac = null,
     // doc pdvd/119 sec 8: write each matched cluster's anode into the Bee op
     // dump (op_cluster_anodes), read by the Bee side panel to place a cluster in
     // its drift volume (from the uncorrected x a cluster within v*t of the
@@ -635,7 +648,20 @@ local qlm_maker = qlm(params_w, trigger_offset_bot, readout_window_ticks, light_
                       // Saturation-aware rescue ratio-high extension (doc 23 phase 1b).
                       cluster_rescue_sat_ratio_relax=ql_cluster_rescue_sat_relax,
                       cluster_rescue_sat_frac_min=ql_cluster_rescue_sat_frac_min,
-                      cluster_rescue_sat_ratio_mult=ql_cluster_rescue_sat_ratio_mult);
+                      cluster_rescue_sat_ratio_mult=ql_cluster_rescue_sat_ratio_mult,
+                      // doc pdvd/135: beam-window preference; the window is the
+                      // Bee label's relative window on the RAW flash axis (no
+                      // op_t offset: QLMatching compares flash->get_time()).
+                      // Off or no beam label => null window => no key.
+                      beam_pref=ql_beam_pref && beam_label,
+                      beam_pref_window=if ql_beam_pref && beam_label
+                          then [(beam_trigger_us + beam_window_rel_us[0]) * wc.us,
+                                (beam_trigger_us + beam_window_rel_us[1]) * wc.us]
+                          else null,
+                      beam_pref_lasso_weight=ql_beam_pref_lasso_weight,
+                      beam_pref_rescue_scale=ql_beam_pref_rescue_scale,
+                      beam_pref_max_ks=ql_beam_pref_max_ks,
+                      beam_pref_min_pred_frac=ql_beam_pref_min_pred_frac);
 local calib_dump_joint =
     if calib then '%s/calib-evt%s.json' % [output_dir, std.toString(event)]
     else '';
