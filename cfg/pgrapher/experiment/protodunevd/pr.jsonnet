@@ -158,20 +158,21 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // Study only: the PR output does not change.  null => key omitted =>
               // byte-identical compiled config.
               retile_dump_dir=null,
-              // doc pdvd/130 phase 3: deghosting inside the Steiner-stage retile
-              // (ImproveCluster_2 "retile_deghost", C++ absent = off).  false =>
-              // key omitted, no model service built => byte-identical compiled
-              // config.  true => the retiler runs filter 1 (retile_deghost_filter:
-              // run | vote | painted_run | none) then the cascade model
-              // (retile_deghost_ml_levels = the imaging job's ml_levels rows
-              // [name, width, superwire, threshold], models from
-              // retile_deghost_model_dir) on the beam bundle's clusters
-              // (retile_deghost_scope bundle, window = beam_window) or on every
-              // retiled cluster (scope all), and CreateSteinerGraph writes the
-              // kept cells back into the cluster.  Runner: run_pr_evt.sh
-              // -beam-retile-deghost.
+              // doc pdvd/130 phase 3 + doc pdvd/131: deghosting inside the Steiner-stage
+              // retile, GAPFILL mode (ImproveCluster_2 "retile_deghost", C++ absent = off).
+              // false => key omitted, no model service built => byte-identical compiled
+              // config.  true => the cluster's blobs are the fixed base, the gaps along its
+              // path are bridged by one-wire corridors at cell resolution, other clusters'
+              // wires never admitted, the cascade model (retile_deghost_ml_levels = the
+              // imaging job's ml_levels rows [name, width, superwire, threshold], models
+              // from retile_deghost_model_dir) decides the corridor cells on the residual
+              // charge, on the beam bundle's clusters (retile_deghost_scope bundle, window =
+              // beam_window) or on every retiled cluster (scope all), and CreateSteinerGraph
+              // writes the cells back into the cluster.  Runner: run_pr_evt.sh -beam (the
+              // beam default since 2026-10-11).  RETIRED 2026-10-11 (doc pdvd/139, last at
+              // toolkit 87f1a20f): the doc 130 mode 'retile' and its filter, the doc 133
+              // base_verdict_min_cells, bridge_len_cost / bridge_max_cm.
               retile_deghost=false,
-              retile_deghost_filter='run',
               retile_deghost_scope='bundle',
               retile_deghost_ml_levels=null,
               retile_deghost_model_dir='fm/protodunevd/deghost',
@@ -179,19 +180,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_deghost_device='cpu',
               retile_deghost_repair_q_floor=1.6e4,
               retile_deghost_nthreads=4,
-              retile_deghost_bridge_len_cost=0,
-              retile_deghost_bridge_max_cm=0,
               retile_deghost_dump_dir=null,
-              // doc pdvd/131: retile_deghost mode 'retile' (doc 130) or 'gapfill' (the cluster's blobs are the
-              // fixed base, no extension / painting / filter 1, gaps bridged by one-wire corridors at cell
-              // resolution, other clusters' wires never admitted, residual charge).  The four gapfill keys are
-              // emitted only when mode is 'gapfill', so the 'retile' config is byte-identical to doc 130's.
-              retile_deghost_mode='retile',
+              // doc pdvd/131 gapfill settings (rulings in the doc).
               retile_deghost_residual=true,
               retile_deghost_corridor_wires=1,
               retile_deghost_bridge_planes=1,
               retile_deghost_gap_min_slices=2,
-              retile_deghost_base_verdict_min_cells=0,   // doc pdvd/133; C++ default 0 = off, key omitted when 0
               retile_deghost_gap_max_cm=20,
               retile_deghost_reach_cm=20,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
@@ -1589,7 +1583,6 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         local retile_deghost_data = if retile_deghost then {
             levels: [{ width: lv[1], superwire: lv[2], forward: "TorchTensorSetService:rd-e2c-%s" % lv[0], threshold: lv[3] }
                      for lv in retile_deghost_ml_levels],
-            filter: retile_deghost_filter,
             scope: retile_deghost_scope,
             beam_window_low: beam_window[0],
             beam_window_high: beam_window[1],
@@ -1600,18 +1593,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             policy: "uboone",
             charge_scale: 0.25,
             nthreads: retile_deghost_nthreads,
-            bridge_len_cost: retile_deghost_bridge_len_cost,
-            bridge_max: retile_deghost_bridge_max_cm * wc.cm,
             [if retile_deghost_dump_dir != null then 'dump_dir']: retile_deghost_dump_dir,
-            // doc pdvd/131 (C++ default mode "retile"; keys omitted unless gapfill)
-            [if retile_deghost_mode != 'retile' then 'mode']: retile_deghost_mode,
-            [if retile_deghost_mode != 'retile' then 'residual']: retile_deghost_residual,
-            [if retile_deghost_mode != 'retile' then 'corridor_wires']: retile_deghost_corridor_wires,
-            [if retile_deghost_mode != 'retile' then 'bridge_planes']: retile_deghost_bridge_planes,
-            [if retile_deghost_mode != 'retile' then 'gap_min_slices']: retile_deghost_gap_min_slices,
-            [if retile_deghost_mode != 'retile' && retile_deghost_base_verdict_min_cells > 0 then 'base_verdict_min_cells']: retile_deghost_base_verdict_min_cells,
-            [if retile_deghost_mode != 'retile' then 'gap_max']: retile_deghost_gap_max_cm * wc.cm,
-            [if retile_deghost_mode != 'retile' then 'reach']: retile_deghost_reach_cm * wc.cm,
+            // doc pdvd/131 gapfill settings
+            residual: retile_deghost_residual,
+            corridor_wires: retile_deghost_corridor_wires,
+            bridge_planes: retile_deghost_bridge_planes,
+            gap_min_slices: retile_deghost_gap_min_slices,
+            gap_max: retile_deghost_gap_max_cm * wc.cm,
+            reach: retile_deghost_reach_cm * wc.cm,
         } else null,
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is

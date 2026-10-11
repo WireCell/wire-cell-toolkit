@@ -82,51 +82,44 @@ namespace WireCell::Clus {
         // The non-"full" modes.  orig_cluster is the reinitialized source.
         std::unique_ptr<node_t> mutate_reduced(Cluster& orig_cluster) const;
 
-        // doc pdvd/130 phase 3: deghosting inside the retile.  Config object
-        // "retile_deghost" (absent = off, nothing below runs, output byte-
-        // identical).  Full mode, final pass, per face: tile, sample, filter 1
-        // (the own-blob comparison, setting `filter`), then the cascade model
-        // (Aux::Cascade::run_cascade with the slice sums of the retile's
-        // slices) on the surviving blobs, the Steiner repair with the length
-        // pricing, and the kept cells sampled in place of the survivors.  The
-        // source cluster is tagged (scalar retile_deghost_writeback = 1) so
-        // CreateSteinerGraph replaces its blobs by the copy's.
-        //   filter  "run" (the members: today's rule), "vote" (group vote
-        //           only), "painted_run" (run bound only on blobs with a plane
-        //           without measured charge), "none" (no filter 1)
+        // doc pdvd/130 phase 3 + doc pdvd/131: deghosting inside the retile, GAPFILL mode.
+        // Config object "retile_deghost" (absent = off, nothing below runs, output byte-
+        // identical).  Full mode, final pass, per face: the cluster's own blobs are the fixed
+        // base (with the beam_deghost stage in front: the imaging-level cascade cells); no
+        // extension, no painting, no filter 1; the gaps of the base along the cluster's path
+        // are bridged by one-wire corridors tiled at cell resolution; wires owned by other
+        // clusters' original blobs (owner map of the retile's region) are never admitted; the
+        // cascade model (Aux::Cascade::run_cascade with the slice sums of the retile's slices)
+        // sees the residual charge (measured minus what others' blobs explain) and decides the
+        // corridor cells, the Steiner repair picks the chain; every base cell and the kept
+        // corridor cells are sampled.  The source cluster is tagged (scalar
+        // retile_deghost_writeback = 1) so CreateSteinerGraph replaces its blobs by the copy's.
+        // RETIRED 2026-10-11 (doc pdvd/139): the doc 130 mode "retile" (20 cm extension,
+        // painting, filter 1 run / vote / painted_run, the model on the survivors), the doc 133
+        // base-cell verdict knob, and the repair's length pricing; a config that still carries
+        // one of those keys is refused.  They live at toolkit 87f1a20f.
         //   scope   "bundle" (the beam flash bundle, beam_particle_pick_bundle
         //           over the grouping's mains in [beam_window_low, high)),
         //           "all" (every cluster retiled: the simulation gate)
         //   levels, cut_*, guard, max_level_nodes, repair, repair_*, policy,
         //   charge_scale, uncer_cut, nthreads, final_guard, iso_fallback,
         //   ident_base: as CascadeDeghosting
-        //   bridge_len_cost, bridge_max: the length pricing of the repair
+        //   residual, corridor_wires, bridge_planes, gap_min_slices, gap_max, reach: the
+        //           gapfill settings (doc 131 rulings)
         //   dump_dir: the model's input / output cells (RetileDump, "rdin" /
         //           "rdout"), for the replay-equality gate
         struct RetileDeghost {
             bool on{false};
-            std::string filter{"run"};
             std::string scope{"bundle"};
             double beam_window_low{0.0}, beam_window_high{0.0};
             std::vector<Aux::Cascade::LevelSpec> levels;
             Aux::Cascade::RunParams rp;
             double charge_scale{0.25};
             double uncer_cut{1e11};
-            double bridge_len_cost{0.0};
-            double bridge_max{0.0};
             std::string dump_dir;
-            // doc pdvd/131: mode "retile" (doc 130: tile the 20 cm extension and the painting, filter 1,
-            // the model) or "gapfill": the cluster's own blobs are the fixed base (with -beam-deghost the
-            // imaging-level cascade cells); no extension, no painting, no filter 1; the gaps of the base
-            // along the cluster's path are bridged by one-wire corridors tiled at cell resolution; wires
-            // owned by other clusters' original blobs (owner map of the retile's region) are never
-            // admitted; the model sees the residual charge (measured minus what others' blobs explain) and
-            // decides the corridor cells, the Steiner repair picks the chain.
-            std::string mode{"retile"};
             bool residual{true};             // residual charge (owner ruling: doc 131 step D)
             int corridor_wires{1};           // corridor half-width in wires per plane (ruling 3)
             int bridge_planes{1};            // a gap sample may have bridge wires in at most this many planes (ruling 3: 1)
-            int base_verdict_min_cells{0};   // doc pdvd/133: > 0 = apply the model's verdict to base cells in slices with >= this many base cells
             int gap_min_slices{2};           // a gap spans at least this many slices
             double gap_max{20 * units::cm};  // longer gaps are left to the Steiner graph
             double reach{20 * units::cm};    // the owner map's region = the base's bounds widened by this
@@ -202,9 +195,11 @@ namespace WireCell::Clus {
     {
         auto& rd = m_rd;
         rd.on = true;
-        rd.filter = get<std::string>(j, "filter", rd.filter);
-        if (rd.filter != "run" && rd.filter != "vote" && rd.filter != "painted_run" && rd.filter != "none") {
-            raise<ValueError>("ImproveCluster_2 retile_deghost: unknown filter '%s' (run, vote, painted_run, none)", rd.filter.c_str());
+        for (const char* retired : {"filter", "mode", "base_verdict_min_cells", "bridge_len_cost", "bridge_max"}) {
+            if (j.isMember(retired)) {
+                raise<ValueError>("ImproveCluster_2 retile_deghost: key '%s' was retired 2026-10-11 (doc pdvd/139): only the gapfill "
+                                  "mode remains; the retired paths live at toolkit 87f1a20f", retired);
+            }
         }
         rd.scope = get<std::string>(j, "scope", rd.scope);
         if (rd.scope != "bundle" && rd.scope != "all") {
@@ -242,20 +237,11 @@ namespace WireCell::Clus {
         }
         rd.charge_scale = get(j, "charge_scale", rd.charge_scale);
         rd.uncer_cut = get(j, "uncer_cut", rd.uncer_cut);
-        rd.bridge_len_cost = get(j, "bridge_len_cost", rd.bridge_len_cost);
-        rd.bridge_max = get(j, "bridge_max", rd.bridge_max);
-        rp.steiner.len_cost = rd.bridge_len_cost;
-        rp.steiner.max_bridge_len = rd.bridge_max;
         rd.dump_dir = get<std::string>(j, "dump_dir", "");
-        // doc pdvd/131
-        rd.mode = get<std::string>(j, "mode", rd.mode);
-        if (rd.mode != "retile" && rd.mode != "gapfill") {
-            raise<ValueError>("ImproveCluster_2 retile_deghost: unknown mode '%s' (retile, gapfill)", rd.mode.c_str());
-        }
+        // doc pdvd/131 gapfill settings
         rd.residual = get(j, "residual", rd.residual);
         rd.corridor_wires = std::max(0, get(j, "corridor_wires", rd.corridor_wires));
         rd.bridge_planes = std::min(3, std::max(0, get(j, "bridge_planes", rd.bridge_planes)));
-        rd.base_verdict_min_cells = std::max(0, get(j, "base_verdict_min_cells", rd.base_verdict_min_cells));
         rd.gap_min_slices = std::max(1, get(j, "gap_min_slices", rd.gap_min_slices));
         rd.gap_max = get(j, "gap_max", rd.gap_max);
         rd.reach = get(j, "reach", rd.reach);
@@ -279,16 +265,12 @@ namespace WireCell::Clus {
         for (const auto& lc : rd.levels) {
             desc += fmt::format(" [width={} k={} thr={:.4f} {}]", lc.width, lc.superwire, lc.threshold, lc.name);
         }
-        SPDLOG_LOGGER_INFO(log, "retile_deghost on: filter={} scope={} window=[{:.3f}, {:.3f}) us levels:{} repair={} budget={:.4f} "
-                           "bridge_len_cost={} bridge_max={:.1f} cm charge_scale={} nthreads={} dump_dir='{}'",
-                           rd.filter, rd.scope, rd.beam_window_low / units::us, rd.beam_window_high / units::us, desc,
-                           rp.repair, rp.steiner.budget, rd.bridge_len_cost, rd.bridge_max / units::cm, rd.charge_scale,
-                           rp.nthreads, rd.dump_dir);
-        if (rd.mode == "gapfill") {
-            SPDLOG_LOGGER_INFO(log, "retile_deghost mode=gapfill (doc pdvd/131): residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
-                               "gap_max={:.1f} cm reach={:.1f} cm base_verdict_min_cells={}", rd.residual, rd.corridor_wires, rd.bridge_planes,
-                               rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm, rd.base_verdict_min_cells);
-        }
+        SPDLOG_LOGGER_INFO(log, "retile_deghost on (gapfill, doc pdvd/131): scope={} window=[{:.3f}, {:.3f}) us levels:{} repair={} budget={:.4f} "
+                           "charge_scale={} nthreads={} dump_dir='{}' residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
+                           "gap_max={:.1f} cm reach={:.1f} cm",
+                           rd.scope, rd.beam_window_low / units::us, rd.beam_window_high / units::us, desc,
+                           rp.repair, rp.steiner.budget, rd.charge_scale, rp.nthreads, rd.dump_dir, rd.residual, rd.corridor_wires,
+                           rd.bridge_planes, rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm);
     }
 
     bool ImproveCluster_2::rd_in_scope(const Cluster& cluster) const
@@ -450,19 +432,16 @@ namespace WireCell::Clus {
         // doc pdvd/130 phase 3: the deghosting step, for this cluster or not
         const bool rd_cluster = m_rd.on && rd_in_scope(*orig_cluster);
         const bool rd_dump = rd_cluster && !m_rd.dump_dir.empty();
-        const bool rd_gap = rd_cluster && m_rd.mode == "gapfill";   // doc pdvd/131
         struct RdFace {
             int face{0};
             double tick{0};
             std::vector<double> angles;
-            size_t ntiled{0}, nsampled{0};
             size_t nbase{0}, ngaps{0}, ncand{0}, nskipped{0}, nuncovered{0}, npath{0}, nowner{0};   // gapfill
             RetileDump::Face dump;   // iblobs = this face's model input
         };
         struct RdApa {
-            std::vector<const Blob*> blobs;        // the survivors (to be replaced by the kept cells)
             std::vector<IBlob::pointer> in;        // their tiled blobs, face by face, in tiling order
-            std::vector<IBlob::pointer> base;      // gapfill: the fixed base cells (a prefix-free subset of `in`)
+            std::vector<IBlob::pointer> base;      // the fixed base cells (a prefix-free subset of `in`)
             std::vector<RdFace> faces;
         };
         std::map<int, RdApa> rd_apa;
@@ -473,7 +452,7 @@ namespace WireCell::Clus {
             int face = it->face();
             const auto& angles = m_wpid_angles.at(*it);
 
-            if (rd_gap) {
+            if (rd_cluster) {
                 // doc pdvd/131 gapfill: this face gets no extension, no painting and no filter 1; the base
                 // cells and the corridor candidates go to the per-anode model below.
                 t0 = Clock::now();
@@ -488,7 +467,6 @@ namespace WireCell::Clus {
                 rf.dump.tick_span = m_grouping->get_nticks_per_slice().at(apa).at(face);
                 rf.nbase = gf.base.size(); rf.ngaps = gf.ngaps; rf.ncand = gf.cand.size(); rf.nskipped = gf.nskipped;
                 rf.nuncovered = gf.nuncovered; rf.npath = gf.npath; rf.nowner = gf.nowner;
-                rf.ntiled = rf.nsampled = gf.base.size() + gf.cand.size();
                 for (const auto& b : gf.base) { ra.in.push_back(b); ra.base.push_back(b); rf.dump.iblobs.push_back(b); }
                 for (const auto& b : gf.cand) { ra.in.push_back(b); rf.dump.iblobs.push_back(b); }
                 if (rd_dump) {
@@ -509,7 +487,7 @@ namespace WireCell::Clus {
             t0 = Clock::now();
             get_activity_improved(*orig_cluster, map_slices_measures, apa, face);
             std::set<RetileDump::cell_t> dump_before;
-            if (dumping || rd_dump) dump_before = RetileDump::sentinel_cells(map_slices_measures);
+            if (dumping) dump_before = RetileDump::sentinel_cells(map_slices_measures);
             SPDLOG_LOGGER_TRACE(log, "timing: get_activity_improved (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
 
             // doc pdhd/08 stage 1.  One cell-provenance set shared by the two
@@ -560,7 +538,6 @@ namespace WireCell::Clus {
             // start to sampling points 
             int npoints = 0;
             t0 = Clock::now();
-            std::map<const Blob*, int> rd_bind;   // doc pdvd/130: sampled blob -> iblob index (lookup only)
             for (size_t bind=0; bind<niblobs; ++bind) {
           
                 const IBlob::pointer iblob = iblobs[bind];
@@ -593,8 +570,7 @@ namespace WireCell::Clus {
                     SPDLOG_LOGGER_TRACE(log, "skipping blob {} with no points", iblob->ident());
                     continue;
                 }
-                auto* bnode = new_cluster.node()->insert(Tree::Points(std::move(pcs)));
-                if (rd_cluster) rd_bind[bnode->value.facade<Blob>()] = (int) bind;
+                new_cluster.node()->insert(Tree::Points(std::move(pcs)));
             }
             SPDLOG_LOGGER_TRACE(log, "timing: sample_live loop (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
             SPDLOG_LOGGER_TRACE(log, "{} points sampled for apa {} face {} Blobs {}", npoints, apa, face, niblobs);
@@ -603,44 +579,7 @@ namespace WireCell::Clus {
             t0 = Clock::now();
             if (map_slices_measures.empty()) continue; // no tiled blobs for this face
             int tick_span = map_slices_measures.begin()->first.second -  map_slices_measures.begin()->first.first;
-            std::vector<const Blob*> blobs_to_remove;
-            // doc pdvd/130: a blob with a plane whose every wire in its range carries the sentinel (dead or painted)
-            const double rd_tick = m_grouping->get_tick().at(apa).at(face);
-            auto rd_eligible = [&](const IBlob::pointer& ib) {
-                const auto& sl = ib->slice();
-                const int ta = (int) std::lround(sl->start() / rd_tick);
-                const int tb = (int) std::lround((sl->start() + sl->span()) / rd_tick);
-                auto it = map_slices_measures.find({ta, tb});
-                if (it == map_slices_measures.end()) return false;
-                for (const auto& strip : ib->shape().strips()) {
-                    if (strip.layer < 2 || strip.layer >= (int) it->second.size()) continue;
-                    const auto& m = it->second[strip.layer];
-                    bool any = false, all = true;
-                    for (int w = strip.bounds.first; w < strip.bounds.second && w < (int) m.size(); ++w) {
-                        any = true;
-                        if (!RetileDump::is_sentinel(m[w])) { all = false; break; }
-                    }
-                    if (any && all) return true;
-                }
-                return false;
-            };
-            if (!rd_cluster) {
-                blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
-            }
-            else if (m_rd.filter != "none") {
-                BadBlobOpts opts;
-                opts.max_run = (m_rd.filter == "vote") ? 0.0 : m_bad_blob_max_run;
-                opts.run_merge = (m_rd.filter == "run") ? m_bad_blob_run_merge : 0.0;
-                std::map<const Blob*, bool> elig;
-                if (m_rd.filter == "painted_run") {
-                    for (const Blob* b : new_cluster.children()) {
-                        auto it = rd_bind.find(b);
-                        if (it != rd_bind.end()) elig[b] = rd_eligible(iblobs[it->second]);
-                    }
-                    opts.run_eligible = &elig;
-                }
-                blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face, &opts);
-            }
+            std::vector<const Blob*> blobs_to_remove = remove_bad_blobs(*orig_cluster, new_cluster, tick_span, apa, face);
             // doc pdvd/40 round 3 census: point count before/after the removal
             // (bad_blob_report only) -- the proof that a removed blob's points
             // leave the retiled cluster the Steiner build sees.
@@ -666,42 +605,6 @@ namespace WireCell::Clus {
             SPDLOG_LOGGER_TRACE(log, "timing: remove_bad_blobs (apa={},face={}) took {} ms", apa, face, MS(Clock::now()-t0).count());
             SPDLOG_LOGGER_TRACE(log, "{} blobs removed for apa {} face {} remaining {}", blobs_to_remove.size(), apa, face, new_cluster.children().size());
 
-            // doc pdvd/130 phase 3: collect this face's survivors for the model, which runs once per anode with both
-            // faces in one graph (as the imaging node and the training do)
-            if (rd_cluster) {
-                auto& ra = rd_apa[apa];
-                std::vector<int> binds;
-                for (const Blob* b : new_cluster.children()) {
-                    if (b->wpid().apa() != apa || b->wpid().face() != face) continue;
-                    auto it = rd_bind.find(b);
-                    if (it == rd_bind.end()) continue;
-                    ra.blobs.push_back(b);
-                    binds.push_back(it->second);
-                }
-                std::sort(binds.begin(), binds.end());   // tiling order: slice time, then blob
-                ra.faces.emplace_back();
-                auto& rf = ra.faces.back();
-                rf.face = face;
-                rf.tick = rd_tick;
-                rf.angles = angles;
-                rf.dump.face = face;
-                rf.dump.tick_span = tick_span;
-                for (int k : binds) {
-                    ra.in.push_back(iblobs[k]);
-                    rf.dump.iblobs.push_back(iblobs[k]);
-                }
-                rf.nsampled = rd_bind.size();
-                rf.ntiled = niblobs;
-                if (rd_dump) {
-                    rf.dump.cells = RetileDump::classify(dump_before, map_slices_measures);
-                    for (const Blob* b : orig_cluster->children()) {
-                        if (b->wpid().apa() != apa || b->wpid().face() != face) continue;
-                        rf.dump.orig.push_back({b->slice_index_min(), b->u_wire_index_min(), b->u_wire_index_max(),
-                                                b->v_wire_index_min(), b->v_wire_index_max(),
-                                                b->w_wire_index_min(), b->w_wire_index_max()});
-                    }
-                }
-            }
         }
 
         if (dumping) {
@@ -710,10 +613,9 @@ namespace WireCell::Clus {
                 RetileDump::write(m_dump_dir, orig_cluster->ident(), serial, dapa, dfs);
             }
         }
-        // doc pdvd/130 phase 3: filter 2 per anode, the cascade model on the survivors of both faces, then the kept
-        // cells sampled in their place
+        // doc pdvd/131: per anode, the cascade model on the base + corridor candidates of both faces, then every base
+        // cell and the kept corridor cells sampled
         if (rd_cluster) {
-            const auto drift_speeds = m_grouping->get_drift_speed();
             for (auto& [apa, ra] : rd_apa) {   // int-keyed: ascending
                 if (ra.in.empty()) continue;
                 auto t_rd = Clock::now();
@@ -722,28 +624,7 @@ namespace WireCell::Clus {
                 for (const auto& b : ra.in) if (seen.insert(b->slice().get()).second) slices.push_back(b->slice());
                 const auto sc = Aux::Cascade::make_slice_charge(slices, m_rd.charge_scale, m_rd.uncer_cut);
                 auto rp = m_rd.rp;
-                const auto& ds = drift_speeds.at(apa);
-                auto rd_center = [&](const IBlob::pointer& b) {
-                    const double v = ds.at(b->face()->which());
-                    Vector c(b->slice()->start() * v, 0, 0);
-                    const auto& corners = b->shape().corners();
-                    if (corners.empty()) return c;
-                    const auto& coords = b->face()->raygrid();
-                    Vector yz(0, 0, 0);
-                    for (const auto& cr : corners) yz += coords.ray_crossing(cr.first, cr.second);
-                    yz = yz * (1.0 / corners.size());
-                    return Vector(c.x(), yz.y(), yz.z());
-                };
-                if (m_rd.bridge_len_cost != 0.0 || m_rd.bridge_max > 0.0) {
-                    rp.edge_length = [&](const IBlob::pointer& a, const IBlob::pointer& b) {
-                        return (rd_center(a) - rd_center(b)).magnitude();
-                    };
-                }
                 const auto res = Aux::Cascade::run_cascade(ra.in, sc, m_rd.levels, rp, orig_cluster->ident(), log, rd_call);
-                for (const Blob* blob : ra.blobs) {
-                    Blob& b = const_cast<Blob&>(*blob);
-                    new_cluster.remove_child(b);
-                }
                 // doc pdvd/131 gapfill: the base is fixed.  Every base cell is sampled whatever the model said of it;
                 // of the model's kept cells only those that are not base cells (the corridor cells) are added.
                 using rd_key_t = std::array<int, 8>;
@@ -760,13 +641,10 @@ namespace WireCell::Clus {
                     return k;
                 };
                 std::set<rd_key_t> base_keys;
-                if (rd_gap) for (const auto& b : ra.base) base_keys.insert(rd_key(b));
-                // doc pdvd/133 issue 2 (knob base_verdict_min_cells, default 0 = off): in a (face, slice) that
-                // holds at least that many base cells -- a near-isochronous band, where the fit zigzags -- a base
-                // cell the model did not keep (no model-kept cell within its wire ranges in its slice) is dropped.
-                // Elsewhere ruling 2 of doc 131 stands: every base cell is kept.
+                for (const auto& b : ra.base) base_keys.insert(rd_key(b));
+                // ruling 2 of doc 131: every base cell is kept.  rd_model_kept only feeds the dump's flag 3 below.
                 std::vector<rd_key_t> kept_keys;
-                if (rd_gap) for (const auto& cell : res.kept) kept_keys.push_back(rd_key(cell));
+                for (const auto& cell : res.kept) kept_keys.push_back(rd_key(cell));
                 auto rd_model_kept = [&](const IBlob::pointer& base) {
                     const rd_key_t b = rd_key(base);
                     for (const auto& k : kept_keys) {
@@ -775,33 +653,18 @@ namespace WireCell::Clus {
                     }
                     return false;
                 };
-                std::map<std::pair<int, int>, int> base_per_slice;
-                if (rd_gap && m_rd.base_verdict_min_cells > 0) {
-                    for (const auto& b : ra.base) { const rd_key_t k = rd_key(b); ++base_per_slice[{k[0], k[1]}]; }
-                }
                 std::vector<IBlob::pointer> final_cells;   // what is sampled, in order
-                size_t nbase_verdict = 0;
-                if (rd_gap) {
-                    for (const auto& b : ra.base) {
-                        if (m_rd.base_verdict_min_cells > 0) {
-                            const rd_key_t k = rd_key(b);
-                            if (base_per_slice[{k[0], k[1]}] >= m_rd.base_verdict_min_cells && !rd_model_kept(b)) { ++nbase_verdict; continue; }
-                        }
-                        final_cells.push_back(b);
-                    }
-                }
+                for (const auto& b : ra.base) final_cells.push_back(b);
                 size_t ncand_kept = 0;
                 for (const auto& cell : res.kept) {
-                    if (rd_gap && base_keys.count(rd_key(cell))) continue;
+                    if (base_keys.count(rd_key(cell))) continue;
                     final_cells.push_back(cell);
                     ++ncand_kept;
                 }
                 size_t nsampled = 0;
-                std::map<int, size_t> kept_by_face;
                 for (size_t k = 0; k < final_cells.size(); ++k) {
                     const auto& cell = final_cells[k];
                     const int face = cell->face()->which();
-                    ++kept_by_face[face];
                     const RdFace* rf = nullptr;
                     for (const auto& f : ra.faces) if (f.face == face) rf = &f;
                     if (!rf) continue;
@@ -811,29 +674,17 @@ namespace WireCell::Clus {
                     ++nsampled;
                     new_cluster.node()->insert(Tree::Points(std::move(pcs)));
                 }
-                std::string per_face;
-                for (const auto& f : ra.faces) {
-                    per_face += fmt::format(" [face {}: tiled {} sampled {} after filter 1 {} kept {}]", f.face, f.ntiled, f.nsampled,
-                                            f.dump.iblobs.size(), kept_by_face[f.face]);
-                }
-                if (rd_gap) {
+                {
                     std::string gf_face;
                     for (const auto& f : ra.faces) {
                         gf_face += fmt::format(" [face {}: base {} path {} uncovered {} gaps {} candidates {} skipped {} owner {}]",
                                                f.face, f.nbase, f.npath, f.nuncovered, f.ngaps, f.ncand, f.nskipped, f.nowner);
                     }
                     SPDLOG_LOGGER_INFO(log, "retile_gapfill ident={} apa={}: base {} + candidates {} -> candidates kept {} (model kept {}, "
-                                       "threshold {}, weak dropped {}, bridges {}, added {}) base dropped by verdict {} (min cells {}) sampled {}{} ({:.1f} ms)",
+                                       "threshold {}, weak dropped {}, bridges {}, added {}) sampled {}{} ({:.1f} ms)",
                                        orig_cluster->ident(), apa, ra.base.size(), ra.in.size() - ra.base.size(), ncand_kept,
                                        res.kept.size(), res.nkeep_thr, res.srep.nweak_cells, res.srep.nbridges, res.srep.nadded,
-                                       nbase_verdict, m_rd.base_verdict_min_cells, nsampled, gf_face, MS(Clock::now() - t_rd).count());
-                }
-                else {
-                SPDLOG_LOGGER_INFO(log, "retile_deghost ident={} apa={} filter={}: model in {} -> kept {} (threshold {}, weak dropped {}, "
-                                   "bridges {}, added {}) sampled {}{} ({:.1f} ms)",
-                                   orig_cluster->ident(), apa, m_rd.filter, ra.in.size(), res.kept.size(), res.nkeep_thr,
-                                   res.srep.nweak_cells, res.srep.nbridges, res.srep.nadded, nsampled, per_face,
-                                   MS(Clock::now() - t_rd).count());
+                                       nsampled, gf_face, MS(Clock::now() - t_rd).count());
                 }
                 if (rd_dump) {
                     // doc pdvd/132: a base cell the model did NOT keep (no kept cell lies within its wire ranges in
@@ -843,14 +694,12 @@ namespace WireCell::Clus {
                     for (const auto& f : ra.faces) {
                         fin.push_back(f.dump);
                         fin.back().sampled.assign(f.dump.iblobs.size(), 1);
-                        // gapfill: the base cells come first (flag 1, or 3 when the model would drop the cell), then
-                        // the corridor candidates (flag 2)
-                        if (rd_gap) {
-                            for (size_t i = 0; i < f.nbase && i < fin.back().iblobs.size(); ++i) {
-                                if (!rd_model_kept(fin.back().iblobs[i])) fin.back().sampled[i] = 3;
-                            }
-                            for (size_t i = f.nbase; i < fin.back().sampled.size(); ++i) fin.back().sampled[i] = 2;
+                        // the base cells come first (flag 1, or 3 when the model would drop the cell), then the
+                        // corridor candidates (flag 2)
+                        for (size_t i = 0; i < f.nbase && i < fin.back().iblobs.size(); ++i) {
+                            if (!rd_model_kept(fin.back().iblobs[i])) fin.back().sampled[i] = 3;
                         }
+                        for (size_t i = f.nbase; i < fin.back().sampled.size(); ++i) fin.back().sampled[i] = 2;
                         fout.push_back(f.dump);
                         fout.back().iblobs.clear();
                         for (const auto& cell : final_cells) if (cell->face()->which() == f.face) fout.back().iblobs.push_back(cell);

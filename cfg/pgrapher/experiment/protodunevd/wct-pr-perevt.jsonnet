@@ -189,13 +189,15 @@ function(
     // doc pdvd/129 phase 1: ImproveCluster_2 dump_dir.  null => key omitted => byte-identical config.
     // Set as a string: PDVD_PR_TLA="-A retile_dump_dir=<dir>".  Study only, no output change.
     retile_dump_dir = null,
-    // doc pdvd/130 phase 3: deghosting inside the Steiner-stage retile (ImproveCluster_2 retile_deghost,
-    // C++ absent = off).  false => key omitted, no model service, no WireCellPytorch => byte-identical
-    // compiled config.  Runner: run_pr_evt.sh -beam-retile-deghost sets retile_deghost=true and
-    // retile_deghost_ml_levels=<the imaging job's ml_levels rows>; PDVD_RETILE_DEGHOST_FILTER /
-    // _SCOPE / _DUMP_DIR set the rest (see pr.jsonnet).
+    // doc pdvd/130 phase 3 + doc pdvd/131: deghosting inside the Steiner-stage retile, gapfill mode
+    // (ImproveCluster_2 retile_deghost, C++ absent = off).  false => key omitted, no model service, no
+    // WireCellPytorch => byte-identical compiled config.  Runner: run_pr_evt.sh -beam (the beam default
+    // since 2026-10-11) sets retile_deghost=true and retile_deghost_ml_levels=<the imaging job's
+    // ml_levels rows>; PDVD_RETILE_DEGHOST_SCOPE / _DUMP set the rest (see pr.jsonnet).  RETIRED
+    // 2026-10-11 (doc pdvd/139, last at toolkit 87f1a20f): retile_deghost_mode ('retile'),
+    // retile_deghost_filter, retile_deghost_base_verdict_min_cells, retile_deghost_bridge_len_cost /
+    // _bridge_max_cm; the C++ refuses a config that still carries them.
     retile_deghost = false,
-    retile_deghost_filter = 'run',
     retile_deghost_scope = 'bundle',
     retile_deghost_ml_levels = null,
     retile_deghost_model_dir = 'fm/protodunevd/deghost',
@@ -203,19 +205,12 @@ function(
     retile_deghost_device = 'cpu',
     retile_deghost_repair_q_floor = 1.6e4,
     retile_deghost_nthreads = 4,
-    retile_deghost_bridge_len_cost = 0,
-    retile_deghost_bridge_max_cm = 0,
     retile_deghost_dump_dir = null,
-    // doc pdvd/131: 'retile' (doc 130) | 'gapfill'; the rest only matter for gapfill (see pr.jsonnet).
-    // Runner: run_pr_evt.sh -beam-gapfill (= -beam-deghost + retile_deghost with mode gapfill).
-    retile_deghost_mode = 'retile',
+    // doc pdvd/131 gapfill settings (see pr.jsonnet).
     retile_deghost_residual = true,
     retile_deghost_corridor_wires = 1,
     retile_deghost_bridge_planes = 1,
     retile_deghost_gap_min_slices = 2,
-    // doc pdvd/133 issue 2: > 0 = in the gapfill mode, apply the model's verdict to the base cells
-    // of slices with at least this many base cells (the isochronous band).  0 omits the key.
-    retile_deghost_base_verdict_min_cells = 0,
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
@@ -1830,7 +1825,7 @@ function(
     // cascade image joins the pctree as a third grouping 'deghost'; the stage
     // 'beam_deghost' (in pipeline_names, after unmerge_assoc and before
     // steiner) then moves its cells into the clusters of the beam bundle.
-    // Runner: run_pr_evt.sh -beam-deghost.
+    // Runner: run_pr_evt.sh -beam (the gapfill job; the stage was -beam-deghost's until doc pdvd/139).
     beam_deghost_dir = '',
     // Anode idents that have a cascade archive in beam_deghost_dir; null => all
     // of anode_indices.  (Run 39305 has the top drift only: [4,5,6,7].)
@@ -3485,8 +3480,8 @@ function(
     // veto).  PDVD PRODUCTION DEFAULT 0 since 2026-10-11 (owner flip, doc pdvd/137 sec 1: gapfill
     // arm 8 improved / 2 worsened on the paired off-bundle fraction in doc 136, production -beam
     // arm 5 / 4 with the median 0.045 vs 0.046 on the 129 published beam15 events, run 39279).
-    // NOT bit-identical to the pre-flip job for the -beam family (-beam, -beam-deghost,
-    // -beam-retile-deghost, -beam-gapfill: CheckBeamParticle forwards the key, the fit's foreign
+    // NOT bit-identical to the pre-flip job for the -beam family (-beam, -beam-plain and the
+    // jobs retired in doc pdvd/139: CheckBeamParticle forwards the key, the fit's foreign
     // 2-D cells go from weight 0.1 to 0); -nu-legacy / -nounmerge-nu gain the key in
     // TaggerCheckNeutrino's data, which never reads it; -nu, -stm and the clustering job are
     // byte-identical.  Pre-flip job: PDVD_PR_TLA="-S fit_blob_coverage_weight=null" (null omits
@@ -3906,9 +3901,9 @@ function(
     // flip, doc pdvd/138 sec 7; sample of 196 beam15 events, run 39279: on the gapfill arm 5
     // improved / 1 worsened on the paired off-bundle fraction, summed off-bundle fit points
     // -4.5 %; on the production image neutral 5 / 4).  null (the default) resolves to 20 / 20
-    // when retile_deghost is on in mode 'gapfill' (run_pr_evt.sh -beam = -beam-gapfill since
-    // the same day) and to 0 / 0 otherwise, so -beam-plain, -beam-deghost,
-    // -beam-retile-deghost, -nu, -stm and the clustering job are byte-identical to before.
+    // when retile_deghost is on (the gapfill job, run_pr_evt.sh -beam since the same day) and to
+    // 0 / 0 otherwise, so -beam-plain, -nu, -stm and the clustering job are byte-identical to
+    // before (the -beam-deghost / -beam-retile-deghost jobs were retired in doc pdvd/139).
     // Pre-flip gapfill job: PDVD_PR_TLA="-S ref_bridge_cap_cm=0 -S ref_bridge_cap_pts=0".
     // The keys need a Clus library built from toolkit 788494f0 or later (an older one ignores
     // them silently; run_pr_evt.sh checks).
@@ -4647,7 +4642,7 @@ function(
                                else beam_window_us;
 
     // doc pdvd/138 sec 7: the reference-bridge cap defaults to 20 cm / 20 pts in the gapfill mode only.
-    local ref_bridge_cap_gapfill = retile_deghost && retile_deghost_mode == 'gapfill';
+    local ref_bridge_cap_gapfill = retile_deghost;   // retile_deghost IS the gapfill mode since doc 139
     local ref_bridge_cap_cm_eff = if ref_bridge_cap_cm == null then (if ref_bridge_cap_gapfill then 20 else 0) else ref_bridge_cap_cm;
     local ref_bridge_cap_pts_eff = if ref_bridge_cap_pts == null then (if ref_bridge_cap_gapfill then 20 else 0) else ref_bridge_cap_pts;
 
@@ -4663,7 +4658,6 @@ function(
                              retile_mode=retile_mode,   // doc pdvd/113
                              retile_dump_dir=retile_dump_dir,   // doc pdvd/129
                              retile_deghost=retile_deghost,   // doc pdvd/130 phase 3
-                             retile_deghost_filter=retile_deghost_filter,
                              retile_deghost_scope=retile_deghost_scope,
                              retile_deghost_ml_levels=retile_deghost_ml_levels,
                              retile_deghost_model_dir=retile_deghost_model_dir,
@@ -4671,15 +4665,11 @@ function(
                              retile_deghost_device=retile_deghost_device,
                              retile_deghost_repair_q_floor=retile_deghost_repair_q_floor,
                              retile_deghost_nthreads=retile_deghost_nthreads,
-                             retile_deghost_bridge_len_cost=retile_deghost_bridge_len_cost,
-                             retile_deghost_bridge_max_cm=retile_deghost_bridge_max_cm,
                              retile_deghost_dump_dir=retile_deghost_dump_dir,
-                             retile_deghost_mode=retile_deghost_mode,   // doc pdvd/131
                              retile_deghost_residual=retile_deghost_residual,
                              retile_deghost_corridor_wires=retile_deghost_corridor_wires,
                              retile_deghost_bridge_planes=retile_deghost_bridge_planes,
                              retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
-                             retile_deghost_base_verdict_min_cells=retile_deghost_base_verdict_min_cells,
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              mip_dqdx_median=mip_dqdx_median,
