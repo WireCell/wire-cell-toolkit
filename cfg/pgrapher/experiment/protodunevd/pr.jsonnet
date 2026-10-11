@@ -1380,6 +1380,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // good_point_pitch_frac to 0 in pdvd_track_fitting.json; the
               // metric subsumes that floor and they must not stack.
               ctpc_aniso_metric=false,
+              // ref_bridge_cap_cm / ref_bridge_cap_pts: doc pdvd/138.  Cap on the
+              // unconditional reference-layer bridge of the Steiner base graph
+              // (connect_graph_with_reference): with both > 0 an MST bridge longer
+              // than ref_bridge_cap_cm cm to a component of fewer than
+              // ref_bridge_cap_pts points is not added.  Set on the PR job's
+              // MultiAlgBlobClustering (every grouping it loads).  C++ default 0/0
+              // = no cap.  Keys omitted when off => byte-identical pre-knob config.
+              ref_bridge_cap_cm=0,
+              ref_bridge_cap_pts=0,
        // doc 77 round 2: the pattern-recognition knob bag, built once by the
        // job (wct-pr-perevt.jsonnet) from its TLAs and handed to
        // TaggerCheckNeutrino as-is.  An absent key is that knob's C++ default,
@@ -2405,6 +2414,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 // doc pdvd/36: C++ default false.  Key omitted when off =>
                 // byte-identical compiled config (see the pr() arg comment).
                 [if ctpc_aniso_metric then 'ctpc_aniso_metric']: true,
+                // doc pdvd/138: C++ default 0/0.  Keys omitted when off => byte-identical.
+                [if ref_bridge_cap_cm > 0 && ref_bridge_cap_pts > 0 then 'ref_bridge_cap_cm']: ref_bridge_cap_cm,
+                [if ref_bridge_cap_cm > 0 && ref_bridge_cap_pts > 0 then 'ref_bridge_cap_pts']: ref_bridge_cap_pts,
                 anodes: [wc.tn(a) for a in anodes],
                 detector_volumes: wc.tn(dv),
                 cluster_id_order: 'tree',

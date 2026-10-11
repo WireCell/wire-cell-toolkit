@@ -3896,6 +3896,15 @@ function(
     // Pre-flip arm: -S ctpc_aniso_metric=false
     //               -A trackfitting_config=<the 0.35 file, git show 730bc794:...>
     ctpc_aniso_metric = true,
+    // doc pdvd/138: cap on the Steiner base graph's unconditional reference-layer
+    // bridge (connect_graph_with_reference, Grouping::set_ref_bridge_cap via the PR
+    // job's MultiAlgBlobClustering): with both > 0 an MST bridge longer than
+    // ref_bridge_cap_cm to a component of fewer than ref_bridge_cap_pts points is
+    // not added, so find_other_segments has no route to the speck.  C++ default 0/0
+    // = no cap; keys omitted when off => byte-identical compiled config.  Study
+    // arms: PDVD_PR_TLA="-S ref_bridge_cap_cm=20 -S ref_bridge_cap_pts=20".
+    ref_bridge_cap_cm = 0,
+    ref_bridge_cap_pts = 0,
     // doc pr/51 round 6 -- weak-charge deficit term on the same gap flavor
     // (residuals 18259-131357 3-track V, 18255-506746 branch turn: chords
     // that are image-supported but charge-poor, invisible to the
@@ -4668,6 +4677,8 @@ function(
                              trackfitting_config_file=trackfitting_config,
                              stm_trackfitting_config_file=stm_trackfitting_config,   // doc pdvd/76 (P5); null => the shared file
                              ctpc_aniso_metric=ctpc_aniso_metric,  // doc pdvd/36
+                             ref_bridge_cap_cm=ref_bridge_cap_cm,  // doc pdvd/138
+                             ref_bridge_cap_pts=ref_bridge_cap_pts,  // doc pdvd/138
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,
                              dl_weights=dl_weights,

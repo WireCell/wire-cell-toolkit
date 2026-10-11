@@ -283,6 +283,29 @@ void Graphs::connect_graph_with_reference(
     // Note: When ref_cluster is empty, excluded_points will only contain points that fail the quality check
     const_cast<Cluster&>(cluster).set_excluded_points(excluded_points);
 
+    // doc pdvd/138: the reference-bridge cap (Grouping::set_ref_bridge_cap, default
+    // 0/0 = OFF).  With the cap on and a reference cluster in use, an MST bridge
+    // longer than cap_cm whose smaller component (all its points, before the
+    // exclusion above) holds fewer than cap_pts points is not added below.  This is
+    // the only place the knob is read; with it off every line below is the legacy
+    // path unchanged.
+    const auto* grouping = cluster.grouping();
+    const double cap_cm = (grouping && use_reference_filtering) ? grouping->ref_bridge_cap_cm() : 0.0;
+    const int cap_pts = (grouping && use_reference_filtering) ? grouping->ref_bridge_cap_pts() : 0;
+    const bool cap_on = cap_cm > 0 && cap_pts > 0;
+    std::vector<int> comp_size(num, 0);
+    if (cap_on) {
+        for (size_t i = 0; i < component.size(); ++i) ++comp_size[component[i]];
+    }
+    int cap_skipped = 0;
+    auto capped = [&](size_t j, size_t k, double dis) -> bool {
+        if (!cap_on) return false;
+        if (dis <= cap_cm) return false;
+        if (std::min(comp_size[j], comp_size[k]) >= cap_pts) return false;
+        ++cap_skipped;
+        return true;
+    };
+
 
     // Initiate dist. metrics (same as baseline)
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
@@ -421,7 +444,8 @@ void Graphs::connect_graph_with_reference(
     // now complete graph according to the direction (same as baseline)
     for (size_t j = 0; j != num; j++) {
         for (size_t k = j + 1; k != num; k++) {
-            if (std::get<0>(index_index_dis_mst[j][k]) >= 0) {
+            if (std::get<0>(index_index_dis_mst[j][k]) >= 0 &&
+                !capped(j, k, std::get<2>(index_index_dis_mst[j][k]))) {   // doc pdvd/138 cap (off => never true)
                 const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
                 const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_mst[j][k]));
 
@@ -437,7 +461,8 @@ void Graphs::connect_graph_with_reference(
                 }
             }
 
-            if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0) {
+            if (std::get<0>(index_index_dis_dir_mst[j][k]) >= 0 &&
+                !capped(j, k, std::min(std::get<2>(index_index_dis_dir1[j][k]), std::get<2>(index_index_dis_dir2[j][k])))) {   // doc pdvd/138
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0) {
                     const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_dir1[j][k]));
                     const int gind2 = pt_clouds_global_indices.at(k).at(std::get<1>(index_index_dis_dir1[j][k]));
@@ -470,6 +495,10 @@ void Graphs::connect_graph_with_reference(
                 }
             }
         }
+    }
+    if (cap_on && cap_skipped) {
+        SPDLOG_LOGGER_DEBUG(s_log, "connect_graph_with_reference: ref_bridge_cap skipped {} MST bridge(s) > {:.1f} cm to components < {} pts (cluster {}, {} components)",
+                            cap_skipped, cap_cm / units::cm, cap_pts, cluster.ident(), num);
     }
 }
 

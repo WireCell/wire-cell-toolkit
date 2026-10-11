@@ -125,6 +125,9 @@ void Facade::Grouping::from(const Grouping& other)
     // the same metric as its source, or the connectors built on it disagree
     // with the good-point tests on the original.
     m_ctpc_aniso_metric = other.m_ctpc_aniso_metric;
+    // doc pdvd/138: the reference-bridge cap travels the same way.
+    m_ref_bridge_cap_cm = other.m_ref_bridge_cap_cm;
+    m_ref_bridge_cap_pts = other.m_ref_bridge_cap_pts;
 }
 
 

@@ -91,6 +91,9 @@ namespace WireCell::Clus::Facade {
         bool m_ctpc_aniso_metric{false};
         // doc icarus/04 sec 8; see set_dead_region().  Default null = no region.
         IFiducial::pointer m_dead_region{nullptr};
+        // doc pdvd/138; see set_ref_bridge_cap().  Default 0/0 = OFF = legacy (no cap).
+        double m_ref_bridge_cap_cm{0};
+        int m_ref_bridge_cap_pts{0};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -307,6 +310,20 @@ namespace WireCell::Clus::Facade {
         /// charge averages disagree about what "within 0.6 cm" means.
         void set_ctpc_aniso_metric(bool on) { m_ctpc_aniso_metric = on; }
         bool ctpc_aniso_metric() const { return m_ctpc_aniso_metric; }
+
+        /// doc pdvd/138: cap on the unconditional reference-layer bridge of
+        /// connect_graph_with_reference (the closest-point MST edge between two
+        /// connected components that the CTPC layer left disconnected).  When
+        /// both are > 0 and a reference cluster is in use, an MST bridge longer
+        /// than cap_cm whose smaller component holds fewer than cap_pts points
+        /// is NOT added (the piece stays its own component; find_other_segments
+        /// then has no route to it).  Set once per job by
+        /// MultiAlgBlobClustering::load_grouping from its "ref_bridge_cap_cm" /
+        /// "ref_bridge_cap_pts" keys and carried to derived groupings by from().
+        /// Default 0/0 = OFF = legacy, byte-identical.
+        void set_ref_bridge_cap(double cap_cm, int cap_pts) { m_ref_bridge_cap_cm = cap_cm; m_ref_bridge_cap_pts = cap_pts; }
+        double ref_bridge_cap_cm() const { return m_ref_bridge_cap_cm; }
+        int ref_bridge_cap_pts() const { return m_ref_bridge_cap_pts; }
 
         /// doc icarus/04 sec 8: a 3-D region with no data (ICARUS: the slab
         /// |z| of a few cm where an anode's two faces meet and the Collection

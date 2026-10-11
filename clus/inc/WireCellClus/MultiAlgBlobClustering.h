@@ -860,6 +860,9 @@ namespace WireCell::Clus {
          * (~0.67) and uBooNE (0.73), so it must stay OFF outside PDVD.
          */
         bool m_ctpc_aniso_metric{false};
+        // doc pdvd/138: reference-bridge cap (Grouping::set_ref_bridge_cap).  0/0 = OFF = legacy.
+        double m_ref_bridge_cap_cm{0};
+        int m_ref_bridge_cap_pts{0};
 
         /** Config: "dead_region" (doc icarus/04 sec 8).  type:name of an
          * IFiducial (e.g. a BoxFiducial) whose volume has no data: set on

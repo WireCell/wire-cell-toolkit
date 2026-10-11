@@ -324,6 +324,16 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
                   "metric (doc pdvd/36) on every grouping loaded by this node");
     }
 
+    // doc pdvd/138: cap on connect_graph_with_reference's unconditional MST
+    // bridge, applied to every grouping this node loads (load_grouping).
+    // Absent keys => 0/0 => no cap, legacy path.
+    m_ref_bridge_cap_cm = get(cfg, "ref_bridge_cap_cm", m_ref_bridge_cap_cm);
+    m_ref_bridge_cap_pts = get(cfg, "ref_bridge_cap_pts", m_ref_bridge_cap_pts);
+    if (m_ref_bridge_cap_cm > 0 && m_ref_bridge_cap_pts > 0) {
+        log->info("ref_bridge_cap ON: no reference-layer bridge longer than {} cm to a component of fewer than {} "
+                  "points, on every grouping loaded by this node (doc pdvd/138)", m_ref_bridge_cap_cm, m_ref_bridge_cap_pts);
+    }
+
     // doc icarus/04 sec 8: a 3-D dead region set on every grouping this node
     // loads (load_grouping).  Absent/empty key => no region, legacy path.
     m_dead_region_tn = get(cfg, "dead_region", m_dead_region_tn);
@@ -3918,6 +3928,7 @@ Grouping& MultiAlgBlobClustering::load_grouping(
     grouping->set_anodes(m_anodes);
     grouping->set_detector_volumes(m_dv);
     grouping->set_ctpc_aniso_metric(m_ctpc_aniso_metric);  // doc pdvd/36
+    grouping->set_ref_bridge_cap(m_ref_bridge_cap_cm * units::cm, m_ref_bridge_cap_pts);  // doc pdvd/138 (0/0 = none)
     grouping->set_dead_region(m_dead_region);              // doc icarus/04 sec 8 (null = none)
     check_perblob_provenance(*grouping->node(), "load:" + path);
     return *grouping;
