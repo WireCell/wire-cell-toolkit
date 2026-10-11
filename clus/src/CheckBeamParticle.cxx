@@ -356,6 +356,7 @@ private:
     bool                 m_first_seg_local_pca{true};  // P2
     bool                 m_other_seg_relaxed_accept{true};  // P4
     bool                 m_other_seg_empty_2d_guard{false};  // doc pr/45 -- -1 empty-2D-tree sentinel guard
+    double               m_other_seg_relocate_max_cm{0};  // doc pdvd/140 sec 5: cm; 0 = off (always relocate)
     bool                 m_other_seg_keep_isolated{false};
     int                  m_other_seg_keep_isolated_min_points{25};
     double               m_other_seg_keep_isolated_min_length{3.0};  // cm; scaled at copy
@@ -704,6 +705,7 @@ private:
         m_first_seg_local_pca = get(config, "first_seg_local_pca", m_first_seg_local_pca);
         m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
         m_other_seg_empty_2d_guard = get(config, "other_seg_empty_2d_guard", m_other_seg_empty_2d_guard);
+        m_other_seg_relocate_max_cm = get(config, "other_seg_relocate_max_cm", m_other_seg_relocate_max_cm);  // doc pdvd/140 sec 5
         m_other_seg_keep_isolated = get(config, "other_seg_keep_isolated", m_other_seg_keep_isolated);
         m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
         m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length);  // cm
@@ -1073,6 +1075,7 @@ private:
         cfg["first_seg_local_pca"] = m_first_seg_local_pca;
         cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;
         cfg["other_seg_empty_2d_guard"] = m_other_seg_empty_2d_guard;
+        cfg["other_seg_relocate_max_cm"] = m_other_seg_relocate_max_cm;
         cfg["other_seg_keep_isolated"] = m_other_seg_keep_isolated;
         cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points;
         cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length;
@@ -1437,6 +1440,7 @@ private:
         pa.m_first_seg_local_pca = m_first_seg_local_pca;
         pa.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
         pa.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
+        pa.m_other_seg_relocate_max = m_other_seg_relocate_max_cm * units::cm;  // doc pdvd/140 sec 5
         pa.m_other_seg_keep_isolated = m_other_seg_keep_isolated;
         pa.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
         pa.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm;  // cm -> internal

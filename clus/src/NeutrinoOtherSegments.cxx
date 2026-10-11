@@ -499,11 +499,24 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
                     save_dis = temp_dis;
                 }
             }
-            special_A = save_index;
-            length = std::sqrt(
-                std::pow(x_coords[special_A] - x_coords[special_B], 2) +
-                std::pow(y_coords[special_A] - y_coords[special_B], 2) +
-                std::pow(z_coords[special_A] - z_coords[special_B], 2));
+            const double reloc_length = std::sqrt(
+                std::pow(x_coords[save_index] - x_coords[special_B], 2) +
+                std::pow(y_coords[save_index] - y_coords[special_B], 2) +
+                std::pow(z_coords[save_index] - z_coords[special_B], 2));
+            // doc pdvd/140 sec 5: the relocation moves the attachment point of a piece shorter than 3 cm onto the
+            // tracked body, which turns the piece into a chord of the relocated length and lets it escape the
+            // "shorter than 3.5 cm" drop below.  With m_other_seg_relocate_max > 0 a relocation that would make a
+            // chord longer than the cap is not done: the piece keeps its own two ends and its own (short) length.
+            // 0 (default) = always relocate = the prototype (NeutrinoID_proto_vertex.h:1103), byte-identical.
+            if (!other_seg_relocate_ok(m_other_seg_relocate_max, reloc_length)) {
+                SPDLOG_LOGGER_DEBUG(s_log, "pdvd140 fos relocate skipped: cluster={} piece_len_cm={:.1f} chord_cm={:.1f} cap_cm={:.1f}",
+                                    cluster.get_cluster_id(), length / units::cm, reloc_length / units::cm,
+                                    m_other_seg_relocate_max / units::cm);
+            }
+            else {
+                special_A = save_index;
+                length = reloc_length;
+            }
         }
         
         temp_segments[i].special_A = special_A;

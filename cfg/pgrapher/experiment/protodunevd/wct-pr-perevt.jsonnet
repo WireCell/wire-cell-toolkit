@@ -3352,6 +3352,10 @@ function(
     // (137238, 400474), nusel 0-diff.  Gate arms work-pr45-{off48,onA48,
     // onB48,off19n,m200on,m200onA,m200off}.  Doc pr/45.
     other_seg_empty_2d_guard = true,
+    // doc pdvd/140 sec 5 -- cap (cm) on the chord find_other_segments makes when it relocates the attachment point
+    // of a piece shorter than 3 cm onto the tracked body (CheckBeamParticle other_seg_relocate_max_cm, C++ default
+    // 0 = always relocate; the neutrino / STM stages do not read it).  null => key omitted => byte-identical.
+    other_seg_relocate_max_cm = null,
     pseudo_shower_track_paint = true,
     // doc pr/46 (18255-55595).  long_muon_stub_bridge: the long-muon chain
     // walk's 15 deg junction-angle test fails on a short (< 6 cm) vertex
@@ -4515,6 +4519,7 @@ function(
         [if single_muon_long_muon_claim then 'single_muon_long_muon_claim']: true,
         [if pid_flag_reconcile then 'pid_flag_reconcile']: true,
         [if other_seg_empty_2d_guard then 'other_seg_empty_2d_guard']: true,
+        [if other_seg_relocate_max_cm != null then 'other_seg_relocate_max_cm']: other_seg_relocate_max_cm,
         [if long_muon_stub_bridge then 'long_muon_stub_bridge']: true,
         [if long_muon_stub_bridge_len != null then 'long_muon_stub_bridge_len']: long_muon_stub_bridge_len,  // doc 84 r1 P3; C++ default 6.0 cm
         [if long_muon_angle_relax_long then 'long_muon_angle_relax_long']: true,  // doc 84 r1 P2; C++ default false

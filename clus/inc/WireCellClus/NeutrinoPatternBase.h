@@ -1319,6 +1319,10 @@ namespace WireCell::Clus::PR {
         // (1e9) instead of "distance zero".
         // C++ default false => byte-identical legacy behaviour.
         bool   m_other_seg_empty_2d_guard{false};
+        /// doc pdvd/140 sec 5: cap on the chord find_other_segments makes when it relocates the attachment point
+        /// of a piece shorter than 3 cm onto the tracked body.  > 0: a relocation that would give a chord longer
+        /// than this is skipped.  0 = off = the prototype rule (always relocate).
+        double m_other_seg_relocate_max{0};
 
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2): the stage-3 shower
         // direction call site that has no prototype counterpart.

@@ -171,6 +171,12 @@ namespace WireCell::Clus::PR {
                                     double min_length,
                                     double len_admit = 0.0);
 
+    /// doc pdvd/140 sec 5: may find_other_segments relocate the attachment point of a piece shorter than
+    /// 3 cm onto the tracked body, given the chord that relocation would make?  cap <= 0 = always (the
+    /// prototype rule, byte-identical); cap > 0 = only when the chord is not longer than the cap.
+    inline bool other_seg_relocate_ok(double cap, double chord_length) { return !(cap > 0 && chord_length > cap); }
+
+
     /// doc pdvd/87 (doc pdvd/78 action item 7): the stop-local keep of doc
     /// pdvd/62 (T3a) with an optional size floor.  True when an anchor was
     /// measured (d_anchor >= 0), the residual's nearer fitted endpoint lies
