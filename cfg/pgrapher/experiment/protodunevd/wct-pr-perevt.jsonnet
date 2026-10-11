@@ -3901,10 +3901,19 @@ function(
     // job's MultiAlgBlobClustering): with both > 0 an MST bridge longer than
     // ref_bridge_cap_cm to a component of fewer than ref_bridge_cap_pts points is
     // not added, so find_other_segments has no route to the speck.  C++ default 0/0
-    // = no cap; keys omitted when off => byte-identical compiled config.  Study
-    // arms: PDVD_PR_TLA="-S ref_bridge_cap_cm=20 -S ref_bridge_cap_pts=20".
-    ref_bridge_cap_cm = 0,
-    ref_bridge_cap_pts = 0,
+    // = no cap; keys omitted when 0 => byte-identical compiled config.
+    // PDVD PRODUCTION DEFAULT 20 cm / 20 pts FOR THE GAPFILL MODE since 2026-10-11 (owner
+    // flip, doc pdvd/138 sec 7; sample of 196 beam15 events, run 39279: on the gapfill arm 5
+    // improved / 1 worsened on the paired off-bundle fraction, summed off-bundle fit points
+    // -4.5 %; on the production image neutral 5 / 4).  null (the default) resolves to 20 / 20
+    // when retile_deghost is on in mode 'gapfill' (run_pr_evt.sh -beam = -beam-gapfill since
+    // the same day) and to 0 / 0 otherwise, so -beam-plain, -beam-deghost,
+    // -beam-retile-deghost, -nu, -stm and the clustering job are byte-identical to before.
+    // Pre-flip gapfill job: PDVD_PR_TLA="-S ref_bridge_cap_cm=0 -S ref_bridge_cap_pts=0".
+    // The keys need a Clus library built from toolkit 788494f0 or later (an older one ignores
+    // them silently; run_pr_evt.sh checks).
+    ref_bridge_cap_cm = null,
+    ref_bridge_cap_pts = null,
     // doc pr/51 round 6 -- weak-charge deficit term on the same gap flavor
     // (residuals 18259-131357 3-track V, 18255-506746 branch turn: chords
     // that are image-supported but charge-poor, invisible to the
@@ -4637,6 +4646,11 @@ function(
                                then [beam_trigger_us + beam_window_rel_us[0], beam_trigger_us + beam_window_rel_us[1]]
                                else beam_window_us;
 
+    // doc pdvd/138 sec 7: the reference-bridge cap defaults to 20 cm / 20 pts in the gapfill mode only.
+    local ref_bridge_cap_gapfill = retile_deghost && retile_deghost_mode == 'gapfill';
+    local ref_bridge_cap_cm_eff = if ref_bridge_cap_cm == null then (if ref_bridge_cap_gapfill then 20 else 0) else ref_bridge_cap_cm;
+    local ref_bridge_cap_pts_eff = if ref_bridge_cap_pts == null then (if ref_bridge_cap_gapfill then 20 else 0) else ref_bridge_cap_pts;
+
     local pr = clus_maker.pr(anodes, dump=true,
                              nticks=readout_window_ticks,
                              flag_mains_min_length=flag_mains_min_cm * wc.cm,
@@ -4677,8 +4691,8 @@ function(
                              trackfitting_config_file=trackfitting_config,
                              stm_trackfitting_config_file=stm_trackfitting_config,   // doc pdvd/76 (P5); null => the shared file
                              ctpc_aniso_metric=ctpc_aniso_metric,  // doc pdvd/36
-                             ref_bridge_cap_cm=ref_bridge_cap_cm,  // doc pdvd/138
-                             ref_bridge_cap_pts=ref_bridge_cap_pts,  // doc pdvd/138
+                             ref_bridge_cap_cm=ref_bridge_cap_cm_eff,  // doc pdvd/138 (sec 7: 20/20 in the gapfill mode)
+                             ref_bridge_cap_pts=ref_bridge_cap_pts_eff,  // doc pdvd/138
                              particle_dataset=pds.particle_dataset,
                              extra_uses=pds.all,
                              dl_weights=dl_weights,
