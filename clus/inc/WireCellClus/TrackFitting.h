@@ -229,6 +229,18 @@ namespace WireCell::Clus {
             // that (doc 38 sweep) before choosing an operating point.
             double end_trim_gap_len = 0;
 
+            // doc pdvd/140 sec 2 -- vertex fit move guard.  multi_trajectory_fit solves
+            // each free vertex from its 2D associations in the wire geometry of the
+            // anode face that CONTAINS the vertex's start position.  When the
+            // associations belong to another face (a small cluster whose T0-corrected
+            // position lies in a different drift volume than the anode that measured
+            // it), the solve lands in that other volume, 50-140 cm from every point of
+            // the cluster, and the segment becomes a long two-point zero-charge stub
+            // (PDVD run 39279: 4 of 129 beam events).  > 0 (WCT units): a fitted vertex
+            // farther than this from its start position keeps the start position.
+            // 0 (default) = off => byte-identical.
+            double vertex_fit_max_move = 0;
+
             // doc sbnd_xin/docs/pr/107 -- dQ/dx-fit point retention (prototype
             // parity).  do_multi_tracking runs a THIRD form_map_graph pass
             // right before dQ_dx_multi_fit that the prototype does not have

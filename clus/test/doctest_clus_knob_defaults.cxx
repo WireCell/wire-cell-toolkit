@@ -1481,6 +1481,12 @@ TEST_CASE("clus knob defaults: TrackFitting fit_blob_coverage is off")
     tf.set_parameter("fit_blob_coverage_weight", 0.2);
     CHECK(tf.get_parameter("fit_blob_coverage_weight") == doctest::Approx(0.2));
 
+    // doc pdvd/140 sec 2: the vertex fit move guard is off by default and round-trips.
+    CHECK(tf.get_parameter("vertex_fit_max_move") == doctest::Approx(0.0));
+    tf.set_parameter("vertex_fit_max_move", 100.0);
+    CHECK(tf.get_parameter("vertex_fit_max_move") == doctest::Approx(100.0));
+    CHECK(Clus::TrackFittingPresets::create_with_current_values().get_parameters().vertex_fit_max_move == doctest::Approx(0.0));
+
     auto preset = Clus::TrackFittingPresets::create_with_current_values();
     CHECK(preset.get_parameters().fit_blob_coverage == doctest::Approx(-1.0));
     CHECK(preset.get_parameters().fit_blob_coverage_ghost_dis == doctest::Approx(0.0));

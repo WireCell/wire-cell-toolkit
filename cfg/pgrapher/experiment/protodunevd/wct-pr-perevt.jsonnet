@@ -3488,6 +3488,10 @@ function(
     // the key => compiled config byte-identical to before the flip).  C++ defaults stay
     // (CheckBeamParticle -1 = not forwarded, TrackFitting 0.1).
     fit_blob_coverage_weight = 0,
+    // doc pdvd/140 sec 2 -- vertex fit move guard of the beam PR (CheckBeamParticle vertex_fit_max_move_cm ->
+    // TrackFitting vertex_fit_max_move): a fitted vertex farther than this many cm from its start position keeps
+    // the start position.  C++ default 0 = off.  null (default) omits the key => byte-identical compiled config.
+    vertex_fit_max_move_cm = null,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
     // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
     // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
@@ -4518,6 +4522,7 @@ function(
         [if kink_break_protect then 'kink_break_protect']: true,
         [if fit_blob_coverage != null then 'fit_blob_coverage']: fit_blob_coverage,
         [if fit_blob_coverage_weight != null then 'fit_blob_coverage_weight']: fit_blob_coverage_weight,
+        [if vertex_fit_max_move_cm != null then 'vertex_fit_max_move_cm']: vertex_fit_max_move_cm,
         [if fit_blob_coverage_defer then 'fit_blob_coverage_defer']: true,
         [if vertex_kink_snap then 'vertex_kink_snap']: true,
         [if vks_radius != null then 'vks_radius']: vks_radius,

@@ -254,6 +254,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.good_point_pitch_frac = value;
     } else if (name == "end_trim_gap_len") {        // doc pdvd/38, WCT units (mm)
         m_params.end_trim_gap_len = value;
+    } else if (name == "vertex_fit_max_move") {     // doc pdvd/140, WCT units (mm)
+        m_params.vertex_fit_max_move = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
@@ -482,6 +484,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.good_point_pitch_frac;
     } else if (name == "end_trim_gap_len") {           // doc pdvd/38
         return m_params.end_trim_gap_len;
+    } else if (name == "vertex_fit_max_move") {        // doc pdvd/140
+        return m_params.vertex_fit_max_move;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -5429,6 +5433,38 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                                                 offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
             
             // std::cout << "Vertex Fit " << i << " " << init_p << " --> " << fitted_p << std::endl;
+
+            // doc pdvd/140 sec 2: a vertex fit that jumps far is logged (log-only, any setting) and, with
+            // vertex_fit_max_move > 0, undone.  The census line carries the face the solve used and the
+            // anodes of the 2D associations it was fed, which is what tells a frame mismatch from a bad fit.
+            {
+                const double move = (fitted_p - init_p).magnitude();
+                const bool guard = m_params.vertex_fit_max_move > 0 && move > m_params.vertex_fit_max_move;
+                if (move > 10 * units::cm || guard) {
+                    int n2d[3] = {0, 0, 0};
+                    std::set<std::pair<int, int>> assoc_apas;
+                    auto pit = m_3d_to_2d.find(i);
+                    if (pit != m_3d_to_2d.end()) {
+                        const WirePlaneLayer_t layers[3] = {WirePlaneLayer_t::kUlayer, WirePlaneLayer_t::kVlayer, WirePlaneLayer_t::kWlayer};
+                        for (int ip = 0; ip < 3; ++ip) {
+                            const auto& pd = pit->second.get_plane_data(layers[ip]);
+                            n2d[ip] = pd.associated_2d_points.size();
+                            for (const auto& c2 : pd.associated_2d_points) assoc_apas.insert({c2.apa, c2.face});
+                        }
+                    }
+                    std::string apas;
+                    for (const auto& a : assoc_apas) apas += (apas.empty() ? "" : ",") + std::to_string(a.first) + "/" + std::to_string(a.second);
+                    SPDLOG_LOGGER_DEBUG(s_log,
+                        "pdvd140 vertex_fit_move: cluster={} move_cm={:.1f} init=({:.1f},{:.1f},{:.1f}) fit=({:.1f},{:.1f},{:.1f}) "
+                        "solve_apa={} solve_face={} assoc_apas=[{}] n2d=({},{},{}) -> {}",
+                        cluster->get_cluster_id(), move / units::cm,
+                        init_p.x() / units::cm, init_p.y() / units::cm, init_p.z() / units::cm,
+                        fitted_p.x() / units::cm, fitted_p.y() / units::cm, fitted_p.z() / units::cm,
+                        test_wpid.apa(), test_wpid.face(), apas, n2d[0], n2d[1], n2d[2],
+                        guard ? "REVERTED" : "kept");
+                }
+                if (guard) fitted_p = init_p;
+            }
 
             // Update vertex with fitted position and projections
             auto& vertex_fit = vertex->fit();
