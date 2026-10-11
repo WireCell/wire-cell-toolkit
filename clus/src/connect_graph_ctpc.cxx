@@ -493,6 +493,10 @@ void Graphs::connect_graph_ctpc_with_reference(
     // Enable CTPC functionality (combining ctpc logic with reference filtering)
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
+    // doc pdvd/140 sec 3: 3D support radius (0 = off = legacy); a step with 2D support but no point of this
+    // cluster within the radius counts as bad too.  Set by CreateSteinerGraph around its own graph build only.
+    const double sup3d = grouping->ctpc_3d_support();
+    size_t n_bad3d = 0;
     
     // Drift direction for directional analysis (equivalent to prototype's drift_dir)
     geo_vector_t drift_dir_abs(1, 0, 0);
@@ -698,6 +702,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
+                            else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
                 }
@@ -734,6 +739,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
+                            else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
                 }
@@ -769,6 +775,7 @@ void Graphs::connect_graph_ctpc_with_reference(
                             }
                             const bool good_point = grouping->is_good_point(test_p_raw, test_wpid.apa(), test_wpid.face());
                             if (!good_point) num_bad++;
+                            else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
                 }
@@ -872,5 +879,10 @@ void Graphs::connect_graph_ctpc_with_reference(
                 }
             }
         }
+    }
+    if (sup3d > 0) {
+        SPDLOG_LOGGER_DEBUG(WireCell::Log::logger("clus"),
+                            "pdvd140 ctpc_3d_support: cluster {} radius {:.1f} cm, {} components, {} walk steps with 2D support but no 3D point",
+                            cluster.ident(), sup3d / units::cm, num, n_bad3d);
     }
 }

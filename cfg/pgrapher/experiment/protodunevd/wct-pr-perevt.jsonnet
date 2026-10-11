@@ -3960,6 +3960,10 @@ function(
     // dangling PF roots on 18255-285567.
     // Escape for A/B: -A sgp_max_sep=-1 (or SBND_SGP_MAX_SEP=-1).
     sgp_max_sep = 3.0,
+    // doc pdvd/140 sec 3 -- 3D-aware bridge validation: the Steiner stage's CTPC layer also counts a step of a
+    // candidate bridge as bad when the cluster has no point within this many cm (CreateSteinerGraph
+    // ctpc_3d_support_cm, C++ default 0 = off).  null => key omitted => byte-identical compiled config.
+    steiner_ctpc_3d_support_cm = null,
     // doc sbnd_xin/docs/pr/83 -- orient break_segment() splits to the wcpt
     // path (find_vertices) instead of boost source/target.  On a reversed
     // graph edge (routinely produced by the examine_vertices re-routes) the
@@ -4758,6 +4762,7 @@ function(
                              stm_readout_edge_ticks=stm_readout_edge_ticks,
                              stm_readout_edge_defer=stm_readout_edge_defer,   // doc pdvd/100 round 2
                              steiner_terminal_charge=steiner_terminal_charge,
+                             steiner_ctpc_3d_support_cm=steiner_ctpc_3d_support_cm,
                              retile_wrapped_channel_activity=retile_wrapped_channel_activity,
                              retile_steiner_terminal_charge=retile_steiner_terminal_charge,
                              retile_bad_blob_max_run=retile_bad_blob_max_run,

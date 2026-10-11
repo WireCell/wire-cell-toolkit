@@ -126,6 +126,10 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
                               m_grapher_config.base_weight_scope.c_str());
         }
     }
+    m_ctpc_3d_support_cm = get(cfg, "ctpc_3d_support_cm", m_ctpc_3d_support_cm);   // doc pdvd/140 sec 3
+    if (m_ctpc_3d_support_cm < 0) {
+        raise<ValueError>("CreateSteinerGraph: ctpc_3d_support_cm %g is negative (0 = off)", m_ctpc_3d_support_cm);
+    }
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -183,6 +187,7 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // the priced length also enters the reduced graph ("tree" | "tree+path").
     cfg["base_weight_blank_alpha"] = m_grapher_config.base_weight_blank_alpha;
     cfg["base_weight_scope"] = m_grapher_config.base_weight_scope;
+    cfg["ctpc_3d_support_cm"] = m_ctpc_3d_support_cm;   // doc pdvd/140 sec 3: 0 = off
 
     return cfg;
 }
@@ -299,6 +304,13 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     // `is_main` triggers the extra kd_steiner_knn probe done only for the main
     // cluster.  Returns true if a steiner_graph was successfully produced.
     auto process_cluster_steiner = [&](Cluster* src, bool is_main) -> bool {
+        // doc pdvd/140 sec 3: the 3D support radius lives on the grouping only while this cluster's graphs are built
+        // (the base graph below and the env-gated dump rebuild inside the grapher); reset on every exit path.
+        struct Sup3dScope {
+            Grouping& g; const bool on;
+            Sup3dScope(Grouping& gg, double r) : g(gg), on(r > 0) { if (on) g.set_ctpc_3d_support(r); }
+            ~Sup3dScope() { if (on) g.set_ctpc_3d_support(0); }
+        } sup3d_scope(grouping, m_ctpc_3d_support_cm * units::cm);
         const std::string tag = is_main
             ? std::string("main ") + std::to_string(src->ident())
             : std::string("assoc ") + std::to_string(src->get_cluster_id());

@@ -94,6 +94,8 @@ namespace WireCell::Clus::Facade {
         // doc pdvd/138; see set_ref_bridge_cap().  Default 0/0 = OFF = legacy (no cap).
         double m_ref_bridge_cap_cm{0};
         int m_ref_bridge_cap_pts{0};
+        // doc pdvd/140 sec 3; see set_ctpc_3d_support().  Default 0 = OFF = legacy (2D-only validation).
+        double m_ctpc_3d_support{0};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -324,6 +326,20 @@ namespace WireCell::Clus::Facade {
         void set_ref_bridge_cap(double cap_cm, int cap_pts) { m_ref_bridge_cap_cm = cap_cm; m_ref_bridge_cap_pts = cap_pts; }
         double ref_bridge_cap_cm() const { return m_ref_bridge_cap_cm; }
         int ref_bridge_cap_pts() const { return m_ref_bridge_cap_pts; }
+
+        /// doc pdvd/140 sec 3: 3D support radius of the CTPC-layer bridge validation of
+        /// connect_graph_ctpc_with_reference.  The legacy walk counts a 1 cm step of a
+        /// candidate bridge as bad when the 2D wire charge does not support it
+        /// (is_good_point); after deghosting the 2D charge still holds the removed
+        /// ghost charge, so a bridge across space the 3D image no longer occupies
+        /// keeps its support.  When > 0 a step is ALSO bad when the cluster being
+        /// graphed has no point within this distance of it (same kill rule).  NOT a
+        /// job-wide setting and NOT carried by from(): CreateSteinerGraph sets it
+        /// around its own graph build only (key "ctpc_3d_support_cm") and resets it,
+        /// so every other builder of the flavor (ImproveCluster_2) keeps 0.
+        /// Default 0 = OFF = legacy, byte-identical.
+        void set_ctpc_3d_support(double r) { m_ctpc_3d_support = r; }
+        double ctpc_3d_support() const { return m_ctpc_3d_support; }
 
         /// doc icarus/04 sec 8: a 3-D region with no data (ICARUS: the slab
         /// |z| of a few cm where an anode's two faces meet and the Collection
