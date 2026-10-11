@@ -3482,8 +3482,17 @@ function(
     fit_blob_coverage_defer = false,
     // doc pdvd/133 issue 1 -- the least-squares weight of 2D cells claimed by an out-of-scope
     // cluster (TrackFitting fit_blob_coverage_weight, C++ default 0.1; 0 = doc 126 step 5 hard
-    // veto).  null omits the key => CheckBeamParticle does not forward it => byte-identical.
-    fit_blob_coverage_weight = null,
+    // veto).  PDVD PRODUCTION DEFAULT 0 since 2026-10-11 (owner flip, doc pdvd/137 sec 1: gapfill
+    // arm 8 improved / 2 worsened on the paired off-bundle fraction in doc 136, production -beam
+    // arm 5 / 4 with the median 0.045 vs 0.046 on the 129 published beam15 events, run 39279).
+    // NOT bit-identical to the pre-flip job for the -beam family (-beam, -beam-deghost,
+    // -beam-retile-deghost, -beam-gapfill: CheckBeamParticle forwards the key, the fit's foreign
+    // 2-D cells go from weight 0.1 to 0); -nu-legacy / -nounmerge-nu gain the key in
+    // TaggerCheckNeutrino's data, which never reads it; -nu, -stm and the clustering job are
+    // byte-identical.  Pre-flip job: PDVD_PR_TLA="-S fit_blob_coverage_weight=null" (null omits
+    // the key => compiled config byte-identical to before the flip).  C++ defaults stay
+    // (CheckBeamParticle -1 = not forwarded, TrackFitting 0.1).
+    fit_blob_coverage_weight = 0,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
     // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
     // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
