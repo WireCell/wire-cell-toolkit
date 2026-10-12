@@ -334,9 +334,9 @@ namespace WireCell::Clus::Facade {
         /// ghost charge, so a bridge across space the 3D image no longer occupies
         /// keeps its support.  When > 0 a step is ALSO bad when the cluster being
         /// graphed has no point within this distance of it (same kill rule).  NOT a
-        /// job-wide setting and NOT carried by from(): CreateSteinerGraph sets it
-        /// around its own graph build only (key "ctpc_3d_support_cm") and resets it,
-        /// so every other builder of the flavor (ImproveCluster_2) keeps 0.
+        /// job-wide setting and NOT carried by from(): CreateSteinerGraph sets it while it processes a
+        /// cluster (key "ctpc_3d_support_cm") and resets it.  That span INCLUDES the stage's retile, so the
+        /// "ctpc_ref_pid" graph ImproveCluster_2 builds inside the retile sees the value too (doc 140 sec 3.1).
         /// Default 0 = OFF = legacy, byte-identical.
         void set_ctpc_3d_support(double r) { m_ctpc_3d_support = r; }
         double ctpc_3d_support() const { return m_ctpc_3d_support; }

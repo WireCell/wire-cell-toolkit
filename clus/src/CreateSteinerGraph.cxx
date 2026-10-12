@@ -304,8 +304,8 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     // `is_main` triggers the extra kd_steiner_knn probe done only for the main
     // cluster.  Returns true if a steiner_graph was successfully produced.
     auto process_cluster_steiner = [&](Cluster* src, bool is_main) -> bool {
-        // doc pdvd/140 sec 3: the 3D support radius lives on the grouping only while this cluster's graphs are built
-        // (the base graph below and the env-gated dump rebuild inside the grapher); reset on every exit path.
+        // doc pdvd/140 sec 3: the 3D support radius lives on the grouping only while this cluster is processed: the
+        // retile's internal ctpc_ref_pid graph, the base graph below and the env-gated dump rebuild; reset on every exit.
         struct Sup3dScope {
             Grouping& g; const bool on;
             Sup3dScope(Grouping& gg, double r) : g(gg), on(r > 0) { if (on) g.set_ctpc_3d_support(r); }

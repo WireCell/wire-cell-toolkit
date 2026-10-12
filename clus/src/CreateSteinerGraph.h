@@ -33,8 +33,8 @@ namespace WireCell::Clus::Steiner {
         std::string m_graph_name{"steiner"};
         bool m_replace{true};
         bool m_perf{false};
-        // doc pdvd/140 sec 3: 3D support radius (cm) of the CTPC bridge validation, applied to THIS stage's graph
-        // build only (Grouping::set_ctpc_3d_support, set and reset per cluster).  0 = off = legacy.
+        // doc pdvd/140 sec 3: 3D support radius (cm) of the CTPC bridge validation, applied while THIS stage processes a
+        // cluster, its retile included (Grouping::set_ctpc_3d_support, set and reset per cluster).  0 = off = legacy.
         double m_ctpc_3d_support_cm{0};
         // When true (default, uBooNE) only clusters flagged beam_flash are
         // processed.  Post-QL-matching detectors (e.g. SBND) have no

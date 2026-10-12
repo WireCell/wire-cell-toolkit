@@ -494,7 +494,7 @@ void Graphs::connect_graph_ctpc_with_reference(
     const bool use_ctpc = true;
     const auto* grouping = cluster.grouping();
     // doc pdvd/140 sec 3: 3D support radius (0 = off = legacy); a step with 2D support but no point of this
-    // cluster within the radius counts as bad too.  Set by CreateSteinerGraph around its own graph build only.
+    // cluster within the radius counts as bad too.  Set by CreateSteinerGraph while it processes a cluster (retile included).
     const double sup3d = grouping->ctpc_3d_support();
     size_t n_bad3d = 0;
     
