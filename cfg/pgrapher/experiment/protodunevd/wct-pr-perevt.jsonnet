@@ -3364,8 +3364,9 @@ function(
     other_seg_min_terminals = null,
     other_seg_far_chord_cm = null,
     // doc pdvd/141 sec 6 -- first-segment seed in one connected component of the Steiner graph (CheckBeamParticle
-    // first_seg_same_component, C++ default false).  false => key omitted => byte-identical.
-    first_seg_same_component = false,
+    // first_seg_same_component, C++ default false).  Since the owner's flip of 2026-10-11 (doc 141 sec 10): null =
+    // true in the gapfill mode (-beam), no key otherwise; false = off (the pre-flip config byte for byte).
+    first_seg_same_component = null,
     // doc pdvd/141 sec 7 -- a companion of the beam bundle with a smaller fraction of its T0-corrected points
     // inside the drift volume of its own anode is left out of the beam PR (CheckBeamParticle
     // companion_min_contained_frac, C++ default 0 = off).  null => key omitted => byte-identical.
@@ -3513,8 +3514,9 @@ function(
     vertex_fit_max_move_cm = null,
     // doc pdvd/141 sec 3 -- solve a vertex / trajectory point of the beam PR's multi-track fit in the face of its
     // 2D cells (CheckBeamParticle fit_face_from_cells -> TrackFitting fit_face_from_cells, C++ default off).
-    // false => key omitted => byte-identical compiled config.
-    fit_face_from_cells = false,
+    // Since the owner's flip of 2026-10-11 (doc 141 sec 10): null = true in the gapfill mode (-beam), no key
+    // otherwise; false = off (the pre-flip config byte for byte).
+    fit_face_from_cells = null,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
     // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
     // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
@@ -4260,6 +4262,12 @@ function(
     local vertex_fit_max_move_cm_eff = d140_eff(vertex_fit_max_move_cm, 20);
     local steiner_ctpc_3d_support_cm_eff = d140_eff(steiner_ctpc_3d_support_cm, 2);
     local other_seg_relocate_max_cm_eff = d140_eff(other_seg_relocate_max_cm, 10);
+    // doc pdvd/141 sec 10 (owner flip 2026-10-11): the two boolean defaults of the gapfill mode.  null = on with
+    // retile_deghost, off otherwise; an explicit false suppresses the key, so
+    // "-S fit_face_from_cells=false -S first_seg_same_component=false" is the pre-flip job.
+    local d141_eff(v) = if v == null then retile_deghost else v;
+    local fit_face_from_cells_eff = d141_eff(fit_face_from_cells);
+    local first_seg_same_component_eff = d141_eff(first_seg_same_component);
     local tcn_knobs = {
         // (entries without an `if` are always emitted -- the job always supplies
         //  a value, exactly as the pr() call did.)
@@ -4558,7 +4566,7 @@ function(
         [if other_seg_relocate_max_cm_eff != null then 'other_seg_relocate_max_cm']: other_seg_relocate_max_cm_eff,
         [if other_seg_min_terminals != null then 'other_seg_min_terminals']: other_seg_min_terminals,   // doc pdvd/141
         [if other_seg_far_chord_cm != null then 'other_seg_far_chord_cm']: other_seg_far_chord_cm,
-        [if first_seg_same_component then 'first_seg_same_component']: true,
+        [if first_seg_same_component_eff then 'first_seg_same_component']: true,
         [if companion_min_contained_frac != null then 'companion_min_contained_frac']: companion_min_contained_frac,
         [if long_muon_stub_bridge then 'long_muon_stub_bridge']: true,
         [if long_muon_stub_bridge_len != null then 'long_muon_stub_bridge_len']: long_muon_stub_bridge_len,  // doc 84 r1 P3; C++ default 6.0 cm
@@ -4572,7 +4580,7 @@ function(
         [if fit_blob_coverage != null then 'fit_blob_coverage']: fit_blob_coverage,
         [if fit_blob_coverage_weight != null then 'fit_blob_coverage_weight']: fit_blob_coverage_weight,
         [if vertex_fit_max_move_cm_eff != null then 'vertex_fit_max_move_cm']: vertex_fit_max_move_cm_eff,
-        [if fit_face_from_cells then 'fit_face_from_cells']: true,   // doc pdvd/141 sec 3
+        [if fit_face_from_cells_eff then 'fit_face_from_cells']: true,   // doc pdvd/141 sec 3; on in the gapfill mode (sec 10)
         [if fit_blob_coverage_defer then 'fit_blob_coverage_defer']: true,
         [if vertex_kink_snap then 'vertex_kink_snap']: true,
         [if vks_radius != null then 'vks_radius']: vks_radius,
