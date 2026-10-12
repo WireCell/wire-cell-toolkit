@@ -211,6 +211,14 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // doc pdvd/140 sec 3: 3D support radius (cm) of the Steiner stage's CTPC bridge validation
               // (CreateSteinerGraph ctpc_3d_support_cm, C++ default 0 = off).  null => key omitted => byte-identical.
               steiner_ctpc_3d_support_cm=null,
+              // doc pdvd/141 sec 2: which graph builds of the Steiner stage see that radius (CreateSteinerGraph
+              // ctpc_3d_support_scope, C++ default "both"; "retile" | "steiner").  null => key omitted => byte-identical.
+              steiner_ctpc_3d_support_scope=null,
+              // doc pdvd/141 sec 4: 3D support test of the reference-layer bridges of the Steiner base graph
+              // (CreateSteinerGraph ref_bridge_3d_support_cm, C++ default 0 = off; ref_bridge_3d_exempt_pts, C++
+              // default 20, 0 = no exemption).  null => keys omitted => byte-identical.
+              steiner_ref_bridge_3d_support_cm=null,
+              steiner_ref_bridge_3d_exempt_pts=null,
               // doc pdvd/31 round 5: ImproveCluster_2 (the Steiner stage's
               // retiler) resolves a wire's channel by ident instead of indexing
               // IWirePlane::channels() -- which omits wrapped continuations --
@@ -1732,7 +1740,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 base_weight_scope=if steiner_base_weight_scope == null then 'tree+path' else steiner_base_weight_scope,   // doc pdvd/116
                                 skip_flags=steiner_skip_flags)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge,
-                           [if steiner_ctpc_3d_support_cm != null then 'ctpc_3d_support_cm']: steiner_ctpc_3d_support_cm } },
+                           [if steiner_ctpc_3d_support_cm != null then 'ctpc_3d_support_cm']: steiner_ctpc_3d_support_cm,
+                           [if steiner_ctpc_3d_support_scope != null then 'ctpc_3d_support_scope']: steiner_ctpc_3d_support_scope,
+                           [if steiner_ref_bridge_3d_support_cm != null then 'ref_bridge_3d_support_cm']: steiner_ref_bridge_3d_support_cm,
+                           [if steiner_ref_bridge_3d_exempt_pts != null then 'ref_bridge_3d_exempt_pts']: steiner_ref_bridge_3d_exempt_pts } },
             // The doc pr/23 second steiner pass, named right after protect_bundle:
             // replace=false rebuilds ONLY the clusters protect_bundle purged
             // (split retained + fragments).  A replace=true second pass would
@@ -1770,7 +1781,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 skip_flags=steiner_skip_flags,
                                 replace=false)
               + { data+: { [if steiner_terminal_charge != null then 'terminal_charge_threshold']: steiner_terminal_charge,
-                           [if steiner_ctpc_3d_support_cm != null then 'ctpc_3d_support_cm']: steiner_ctpc_3d_support_cm } },
+                           [if steiner_ctpc_3d_support_cm != null then 'ctpc_3d_support_cm']: steiner_ctpc_3d_support_cm,
+                           [if steiner_ctpc_3d_support_scope != null then 'ctpc_3d_support_scope']: steiner_ctpc_3d_support_scope,
+                           [if steiner_ref_bridge_3d_support_cm != null then 'ref_bridge_3d_support_cm']: steiner_ref_bridge_3d_support_cm,
+                           [if steiner_ref_bridge_3d_exempt_pts != null then 'ref_bridge_3d_exempt_pts']: steiner_ref_bridge_3d_exempt_pts } },
             fiducialutils: cm.fiducialutils(),
             // doc pdvd/76 (P5): the STM side's fit file; null => the shared one.
             local stm_trackfitting_config = if stm_trackfitting_config_file == null then trackfitting_config_file else stm_trackfitting_config_file,

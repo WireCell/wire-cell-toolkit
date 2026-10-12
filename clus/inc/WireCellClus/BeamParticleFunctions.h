@@ -68,6 +68,11 @@ namespace WireCell::Clus::PR {
     /// the smaller cluster_id.  -1 when empty or every candidate is filtered.
     int beam_particle_pick_main(const std::vector<BeamMainCand>& cands, double min_length);
 
+    /// doc pdvd/141 sec 7: is a companion of the beam bundle left out of the pattern recognition?  contained_frac =
+    /// the fraction of its T0-corrected points inside the drift volume of the anode that measured them.
+    /// min_frac <= 0 = off = never (legacy, byte-identical); > 0 = left out when the fraction is below it.
+    inline bool beam_companion_drop(double min_frac, double contained_frac) { return min_frac > 0 && contained_frac < min_frac; }
+
     struct BeamEntryChoice {
         WireCell::Point entry;
         WireCell::Point exit;

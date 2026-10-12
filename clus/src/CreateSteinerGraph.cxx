@@ -130,6 +130,17 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     if (m_ctpc_3d_support_cm < 0) {
         raise<ValueError>("CreateSteinerGraph: ctpc_3d_support_cm %g is negative (0 = off)", m_ctpc_3d_support_cm);
     }
+    m_ctpc_3d_support_scope = get<std::string>(cfg, "ctpc_3d_support_scope", m_ctpc_3d_support_scope);   // doc pdvd/141 sec 2
+    if (m_ctpc_3d_support_scope != "both" && m_ctpc_3d_support_scope != "retile" && m_ctpc_3d_support_scope != "steiner") {
+        raise<ValueError>("CreateSteinerGraph: unknown ctpc_3d_support_scope '%s' (both | retile | steiner)",
+                          m_ctpc_3d_support_scope.c_str());
+    }
+    m_ref_bridge_3d_support_cm = get(cfg, "ref_bridge_3d_support_cm", m_ref_bridge_3d_support_cm);   // doc pdvd/141 sec 4
+    m_ref_bridge_3d_exempt_pts = get(cfg, "ref_bridge_3d_exempt_pts", m_ref_bridge_3d_exempt_pts);
+    if (m_ref_bridge_3d_support_cm < 0 || m_ref_bridge_3d_exempt_pts < 0) {
+        raise<ValueError>("CreateSteinerGraph: ref_bridge_3d_support_cm %g / ref_bridge_3d_exempt_pts %d negative (0 = off / no exemption)",
+                          m_ref_bridge_3d_support_cm, m_ref_bridge_3d_exempt_pts);
+    }
     const std::string retiler_tn = get<std::string>(cfg, "retiler", "RetileCluster");
     m_grapher_config.retile = Factory::find_tn<IPCTreeMutate>(retiler_tn);
 }
@@ -188,6 +199,9 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["base_weight_blank_alpha"] = m_grapher_config.base_weight_blank_alpha;
     cfg["base_weight_scope"] = m_grapher_config.base_weight_scope;
     cfg["ctpc_3d_support_cm"] = m_ctpc_3d_support_cm;   // doc pdvd/140 sec 3: 0 = off
+    cfg["ctpc_3d_support_scope"] = m_ctpc_3d_support_scope;   // doc pdvd/141 sec 2: both | retile | steiner
+    cfg["ref_bridge_3d_support_cm"] = m_ref_bridge_3d_support_cm;   // doc pdvd/141 sec 4: 0 = off
+    cfg["ref_bridge_3d_exempt_pts"] = m_ref_bridge_3d_exempt_pts;
 
     return cfg;
 }
@@ -306,11 +320,18 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
     auto process_cluster_steiner = [&](Cluster* src, bool is_main) -> bool {
         // doc pdvd/140 sec 3: the 3D support radius lives on the grouping only while this cluster is processed: the
         // retile's internal ctpc_ref_pid graph, the base graph below and the env-gated dump rebuild; reset on every exit.
+        // doc pdvd/141 sec 2: ctpc_3d_support_scope splits that span: r_retile is on the grouping from here to the end
+        // of the retile, r_steiner from there on ("both": the two are equal and nothing changes mid-way).
+        // doc pdvd/141 sec 4: the reference-bridge 3D test is set for the Steiner part only and reset with it.
+        const double r_sup3d = m_ctpc_3d_support_cm * units::cm;
+        const double r_retile = (m_ctpc_3d_support_scope != "steiner") ? r_sup3d : 0.0;
+        const double r_steiner = (m_ctpc_3d_support_scope != "retile") ? r_sup3d : 0.0;
+        const double r_refb = m_ref_bridge_3d_support_cm * units::cm;
         struct Sup3dScope {
-            Grouping& g; const bool on;
-            Sup3dScope(Grouping& gg, double r) : g(gg), on(r > 0) { if (on) g.set_ctpc_3d_support(r); }
-            ~Sup3dScope() { if (on) g.set_ctpc_3d_support(0); }
-        } sup3d_scope(grouping, m_ctpc_3d_support_cm * units::cm);
+            Grouping& g; const bool on; const bool refb;
+            Sup3dScope(Grouping& gg, double r, bool any, bool rb) : g(gg), on(any), refb(rb) { if (on) g.set_ctpc_3d_support(r); }
+            ~Sup3dScope() { if (on) g.set_ctpc_3d_support(0); if (refb) g.set_ref_bridge_3d_support(0, 0); }
+        } sup3d_scope(grouping, r_retile, r_sup3d > 0, r_refb > 0);
         const std::string tag = is_main
             ? std::string("main ") + std::to_string(src->ident())
             : std::string("assoc ") + std::to_string(src->get_cluster_id());
@@ -345,6 +366,8 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] retile->mutate took {} ms", tag, MS(Clock::now() - t0).count());
 
+        if (r_steiner != r_retile) grouping.set_ctpc_3d_support(r_steiner);   // doc pdvd/141 sec 2 (never true for "both")
+        if (r_refb > 0) grouping.set_ref_bridge_3d_support(r_refb, m_ref_bridge_3d_exempt_pts);   // doc pdvd/141 sec 4
         t0 = Clock::now();
         new_cluster.find_graph("ctpc_ref_pid", *src, m_dv, m_pcts);
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] find_graph(ctpc_ref_pid) took {} ms", tag, MS(Clock::now() - t0).count());

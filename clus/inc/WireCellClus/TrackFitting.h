@@ -241,6 +241,16 @@ namespace WireCell::Clus {
             // 0 (default) = off => byte-identical.
             double vertex_fit_max_move = 0;
 
+            // doc pdvd/141 sec 3 -- solve a vertex / trajectory point of multi_trajectory_fit in the face of its
+            // 2D cells.  Legacy: the face is contained_by(start position), and every cell is read with that one
+            // face's wire geometry whatever face measured it; at a face boundary the two differ and the solve
+            // lands a face width away (the cause of the jumps vertex_fit_max_move holds back).  > 0: the solve
+            // face is the (apa, face) holding most of the point's cells (tie: lowest), each cell is read with its
+            // own face's wire geometry, a cell whose face has another time mapping (other drift volume) is left
+            // out, and the projections written after the fit use the solve face.  0 (default) = off =>
+            // byte-identical.
+            double fit_face_from_cells = 0;
+
             // doc sbnd_xin/docs/pr/107 -- dQ/dx-fit point retention (prototype
             // parity).  do_multi_tracking runs a THIRD form_map_graph pass
             // right before dQ_dx_multi_fit that the prototype does not have
@@ -947,7 +957,18 @@ namespace WireCell::Clus {
 
         // track trajectory fitting // should fit all APA ...
         void trajectory_fit(std::vector<std::pair<WireCell::Point, std::shared_ptr<PR::Segment>>>& pss_vec, int charge_div_method = 1, double div_sigma = 0.6*units::cm);
-        WireCell::Point fit_point(WireCell::Point& init_p, int i, std::shared_ptr<PR::Segment> segment,std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw);
+        /// doc pdvd/141 sec 3: the wire geometry of one (apa, face) as fit_point needs it per cell.
+        struct FitFaceGeom {
+            double offset_t, offset_u, offset_v, offset_w;
+            double slope_x;
+            double slope_yu, slope_zu;
+            double slope_yv, slope_zv;
+            double slope_yw, slope_zw;
+        };
+        /// doc pdvd/141 sec 3: solve_face / geoms are given only with fit_face_from_cells on.  solve_face = the
+        /// (apa, face) whose frame the solve runs in (the passed offsets / slopes are that face's); geoms = the
+        /// geometry of every mapped face, used for a cell measured by another face.  Both null = legacy.
+        WireCell::Point fit_point(WireCell::Point& init_p, int i, std::shared_ptr<PR::Segment> segment,std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw, const std::pair<int,int>* solve_face = nullptr, const std::map<std::pair<int,int>, FitFaceGeom>* geoms = nullptr);
         void multi_trajectory_fit(int charge_div_method = 1, double div_sigma = 0.6*units::cm);
 
         // examine trajectory ...

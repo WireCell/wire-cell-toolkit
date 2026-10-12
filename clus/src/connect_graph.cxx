@@ -293,10 +293,36 @@ void Graphs::connect_graph_with_reference(
     const double cap_cm = (grouping && use_reference_filtering) ? grouping->ref_bridge_cap_cm() : 0.0;
     const int cap_pts = (grouping && use_reference_filtering) ? grouping->ref_bridge_cap_pts() : 0;
     const bool cap_on = cap_cm > 0 && cap_pts > 0;
+    // doc pdvd/141 sec 4: the 3D support test of a reference bridge (Grouping::set_ref_bridge_3d_support, default
+    // 0 = OFF).  Read here only; with it off no line below changes.
+    const double refb_r = (grouping && use_reference_filtering) ? grouping->ref_bridge_3d_support() : 0.0;
+    const int refb_exempt = (grouping && use_reference_filtering) ? grouping->ref_bridge_3d_exempt_pts() : 0;
+    const bool refb_on = refb_r > 0;
     std::vector<int> comp_size(num, 0);
-    if (cap_on) {
+    if (cap_on || refb_on) {
         for (size_t i = 0; i < component.size(); ++i) ++comp_size[component[i]];
     }
+    int refb_skipped = 0;
+    // true = refuse the bridge between global points g1 (component j) and g2 (component k)
+    auto unsupported3d = [&](size_t j, size_t k, int g1, int g2) -> bool {
+        if (!refb_on) return false;
+        if (refb_exempt > 0 && std::min(comp_size[j], comp_size[k]) >= refb_exempt) return false;
+        const geo_point_t p1 = cluster.point3d(g1);
+        const geo_point_t p2 = cluster.point3d(g2);
+        const double dis = std::sqrt(std::pow(p1.x() - p2.x(), 2) + std::pow(p1.y() - p2.y(), 2) + std::pow(p1.z() - p2.z(), 2));
+        if (dis <= 3 * units::cm) return false;
+        const double step_dis = 1.0 * units::cm;
+        const int num_steps = dis / step_dis + 1;
+        int num_bad = 0;
+        for (int ii = 0; ii != num_steps; ii++) {
+            const geo_point_t test_p(p1.x() + (p2.x() - p1.x()) / num_steps * (ii + 1),
+                                     p1.y() + (p2.y() - p1.y()) / num_steps * (ii + 1),
+                                     p1.z() + (p2.z() - p1.z()) / num_steps * (ii + 1));
+            if (cluster.get_closest_dis(test_p) > refb_r) num_bad++;
+        }
+        if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) { ++refb_skipped; return true; }
+        return false;
+    };
     int cap_skipped = 0;
     auto capped = [&](size_t j, size_t k, double dis) -> bool {
         if (!cap_on) return false;
@@ -456,7 +482,7 @@ void Graphs::connect_graph_with_reference(
                 else {
                     dis = std::get<2>(index_index_dis_mst[j][k]);
                 }
-                if (!boost::edge(gind1, gind2, graph).second) {
+                if (!boost::edge(gind1, gind2, graph).second && !unsupported3d(j, k, gind1, gind2)) {   // doc pdvd/141 (off => never true)
                     /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                 }
             }
@@ -474,7 +500,7 @@ void Graphs::connect_graph_with_reference(
                     else {
                         dis = std::get<2>(index_index_dis_dir1[j][k]);
                     }
-                    if (!boost::edge(gind1, gind2, graph).second) {
+                    if (!boost::edge(gind1, gind2, graph).second && !unsupported3d(j, k, gind1, gind2)) {   // doc pdvd/141
                         /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                     }
                 }
@@ -489,7 +515,7 @@ void Graphs::connect_graph_with_reference(
                     else {
                         dis = std::get<2>(index_index_dis_dir2[j][k]);
                     }
-                    if (!boost::edge(gind1, gind2, graph).second) {
+                    if (!boost::edge(gind1, gind2, graph).second && !unsupported3d(j, k, gind1, gind2)) {   // doc pdvd/141
                         /*auto edge =*/ add_edge(gind1, gind2, dis, graph);
                     }
                 }
@@ -499,6 +525,10 @@ void Graphs::connect_graph_with_reference(
     if (cap_on && cap_skipped) {
         SPDLOG_LOGGER_DEBUG(s_log, "connect_graph_with_reference: ref_bridge_cap skipped {} MST bridge(s) > {:.1f} cm to components < {} pts (cluster {}, {} components)",
                             cap_skipped, cap_cm / units::cm, cap_pts, cluster.ident(), num);
+    }
+    if (refb_on) {
+        SPDLOG_LOGGER_DEBUG(s_log, "pdvd141 ref_bridge_3d: cluster {} radius {:.1f} cm exempt {} pts, {} components, {} bridge(s) refused",
+                            cluster.ident(), refb_r / units::cm, refb_exempt, num, refb_skipped);
     }
 }
 

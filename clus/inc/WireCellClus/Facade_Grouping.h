@@ -96,6 +96,9 @@ namespace WireCell::Clus::Facade {
         int m_ref_bridge_cap_pts{0};
         // doc pdvd/140 sec 3; see set_ctpc_3d_support().  Default 0 = OFF = legacy (2D-only validation).
         double m_ctpc_3d_support{0};
+        // doc pdvd/141 sec 4; see set_ref_bridge_3d_support().  Default 0/0 = OFF = legacy.
+        double m_ref_bridge_3d_support{0};
+        int m_ref_bridge_3d_exempt_pts{0};
 
         // Memoized per-(apa,face,pind) state for kd2d().  The scope string ("ctpc_a*f*p*")
         // depends only on the indices, not on event content, so it is built once per key
@@ -340,6 +343,21 @@ namespace WireCell::Clus::Facade {
         /// Default 0 = OFF = legacy, byte-identical.
         void set_ctpc_3d_support(double r) { m_ctpc_3d_support = r; }
         double ctpc_3d_support() const { return m_ctpc_3d_support; }
+
+        /// doc pdvd/141 sec 4: 3D support test of the reference-layer bridges of
+        /// connect_graph_with_reference (the closest-point MST / direction edges between
+        /// components the CTPC layer left apart; no image test in the legacy code).  When
+        /// r > 0 a bridge longer than 3 cm is walked in 1 cm steps and a step is bad when
+        /// the cluster being graphed has no point within r of it; the bridge is refused on
+        /// the CTPC layer's kill rule (more than 7 bad steps, or more than 2 and at least
+        /// 75 % of the steps).  A bridge whose smaller component holds at least exempt_pts
+        /// points (all its points) is never refused; exempt_pts 0 = no exemption.  Scoped
+        /// like set_ctpc_3d_support(): CreateSteinerGraph sets it for the Steiner base
+        /// graph of one cluster and resets it; NOT carried by from().  Default 0 = OFF =
+        /// legacy, byte-identical.
+        void set_ref_bridge_3d_support(double r, int exempt_pts) { m_ref_bridge_3d_support = r; m_ref_bridge_3d_exempt_pts = exempt_pts; }
+        double ref_bridge_3d_support() const { return m_ref_bridge_3d_support; }
+        int ref_bridge_3d_exempt_pts() const { return m_ref_bridge_3d_exempt_pts; }
 
         /// doc icarus/04 sec 8: a 3-D region with no data (ICARUS: the slab
         /// |z| of a few cm where an anode's two faces meet and the Collection

@@ -1323,6 +1323,15 @@ namespace WireCell::Clus::PR {
         /// of a piece shorter than 3 cm onto the tracked body.  > 0: a relocation that would give a chord longer
         /// than this is skipped.  0 = off = the prototype rule (always relocate).
         double m_other_seg_relocate_max{0};
+        /// doc pdvd/141 sec 5: size rule for a far speck in find_other_segments (other_seg_speck_drop): a component
+        /// of fewer than m_other_seg_min_terminals terminals attached by an edge longer than
+        /// m_other_seg_far_chord is dropped.  0 / 0 = off = legacy.
+        int    m_other_seg_min_terminals{0};
+        double m_other_seg_far_chord{0};
+        /// doc pdvd/141 sec 6: when the two endpoints init_first_segment chose lie in different connected
+        /// components of the Steiner graph, keep the one in the larger component and replace the other by the
+        /// point of that component farthest from it.  false = off = legacy (the endpoints are used as found).
+        bool   m_first_seg_same_component{false};
 
         // doc sbnd_xin/docs/pr/31 §11 -- F2 (was P2): the stage-3 shower
         // direction call site that has no prototype counterpart.

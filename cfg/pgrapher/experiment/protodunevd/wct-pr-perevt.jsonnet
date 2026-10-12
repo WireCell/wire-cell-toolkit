@@ -3357,6 +3357,19 @@ function(
     // 0 = always relocate; the neutrino / STM stages do not read it).  null = 10 in the gapfill mode (doc 140 sec 8
     // flip, see d140_eff below), no key otherwise; 0 = off.
     other_seg_relocate_max_cm = null,
+    // doc pdvd/141 sec 5 -- size rule for a far speck in find_other_segments (CheckBeamParticle
+    // other_seg_min_terminals / other_seg_far_chord_cm, C++ default 0 / 0 = off): a component of fewer than that
+    // many Steiner terminals attached to the tracked body by an edge longer than that many cm is dropped.
+    // null => keys omitted => byte-identical compiled config.
+    other_seg_min_terminals = null,
+    other_seg_far_chord_cm = null,
+    // doc pdvd/141 sec 6 -- first-segment seed in one connected component of the Steiner graph (CheckBeamParticle
+    // first_seg_same_component, C++ default false).  false => key omitted => byte-identical.
+    first_seg_same_component = false,
+    // doc pdvd/141 sec 7 -- a companion of the beam bundle with a smaller fraction of its T0-corrected points
+    // inside the drift volume of its own anode is left out of the beam PR (CheckBeamParticle
+    // companion_min_contained_frac, C++ default 0 = off).  null => key omitted => byte-identical.
+    companion_min_contained_frac = null,
     pseudo_shower_track_paint = true,
     // doc pr/46 (18255-55595).  long_muon_stub_bridge: the long-muon chain
     // walk's 15 deg junction-angle test fails on a short (< 6 cm) vertex
@@ -3498,6 +3511,10 @@ function(
     // the start position.  C++ default 0 = off.  null (default) omits the key => byte-identical compiled config.
     // Since the doc 140 sec 8 flip: null = 20 in the gapfill mode (-beam), no key otherwise; 0 = off (see d140_eff).
     vertex_fit_max_move_cm = null,
+    // doc pdvd/141 sec 3 -- solve a vertex / trajectory point of the beam PR's multi-track fit in the face of its
+    // 2D cells (CheckBeamParticle fit_face_from_cells -> TrackFitting fit_face_from_cells, C++ default off).
+    // false => key omitted => byte-identical compiled config.
+    fit_face_from_cells = false,
     // doc pr/50 -- main-vertex kink-consistency snap (172230-class
     // near-vertex robustness).  SBND PRODUCTION ON (owner flip after the
     // pr/50 Bee hand-scan: 172230 vertex recovered to 2.6 mm, 4/98
@@ -3971,6 +3988,13 @@ function(
     // ctpc_3d_support_cm, C++ default 0 = off).  null => key omitted => byte-identical compiled config.
     // Since the doc 140 sec 8 flip: null = 2 in the gapfill mode (-beam), no key otherwise; 0 = off (see d140_eff).
     steiner_ctpc_3d_support_cm = null,
+    // doc pdvd/141 sec 2 -- scope of that radius: "both" (C++ default) | "retile" | "steiner".  null => key omitted.
+    steiner_ctpc_3d_support_scope = null,
+    // doc pdvd/141 sec 4 -- 3D support test of the reference-layer bridges of the Steiner base graph
+    // (CreateSteinerGraph ref_bridge_3d_support_cm, C++ default 0 = off; ref_bridge_3d_exempt_pts, C++ default 20).
+    // null => keys omitted => byte-identical compiled config.
+    steiner_ref_bridge_3d_support_cm = null,
+    steiner_ref_bridge_3d_exempt_pts = null,
     // doc sbnd_xin/docs/pr/83 -- orient break_segment() splits to the wcpt
     // path (find_vertices) instead of boost source/target.  On a reversed
     // graph edge (routinely produced by the examine_vertices re-routes) the
@@ -4532,6 +4556,10 @@ function(
         [if pid_flag_reconcile then 'pid_flag_reconcile']: true,
         [if other_seg_empty_2d_guard then 'other_seg_empty_2d_guard']: true,
         [if other_seg_relocate_max_cm_eff != null then 'other_seg_relocate_max_cm']: other_seg_relocate_max_cm_eff,
+        [if other_seg_min_terminals != null then 'other_seg_min_terminals']: other_seg_min_terminals,   // doc pdvd/141
+        [if other_seg_far_chord_cm != null then 'other_seg_far_chord_cm']: other_seg_far_chord_cm,
+        [if first_seg_same_component then 'first_seg_same_component']: true,
+        [if companion_min_contained_frac != null then 'companion_min_contained_frac']: companion_min_contained_frac,
         [if long_muon_stub_bridge then 'long_muon_stub_bridge']: true,
         [if long_muon_stub_bridge_len != null then 'long_muon_stub_bridge_len']: long_muon_stub_bridge_len,  // doc 84 r1 P3; C++ default 6.0 cm
         [if long_muon_angle_relax_long then 'long_muon_angle_relax_long']: true,  // doc 84 r1 P2; C++ default false
@@ -4544,6 +4572,7 @@ function(
         [if fit_blob_coverage != null then 'fit_blob_coverage']: fit_blob_coverage,
         [if fit_blob_coverage_weight != null then 'fit_blob_coverage_weight']: fit_blob_coverage_weight,
         [if vertex_fit_max_move_cm_eff != null then 'vertex_fit_max_move_cm']: vertex_fit_max_move_cm_eff,
+        [if fit_face_from_cells then 'fit_face_from_cells']: true,   // doc pdvd/141 sec 3
         [if fit_blob_coverage_defer then 'fit_blob_coverage_defer']: true,
         [if vertex_kink_snap then 'vertex_kink_snap']: true,
         [if vks_radius != null then 'vks_radius']: vks_radius,
@@ -4780,6 +4809,9 @@ function(
                              stm_readout_edge_defer=stm_readout_edge_defer,   // doc pdvd/100 round 2
                              steiner_terminal_charge=steiner_terminal_charge,
                              steiner_ctpc_3d_support_cm=steiner_ctpc_3d_support_cm_eff,   // doc pdvd/140 sec 8: 2 in the gapfill mode
+                             steiner_ctpc_3d_support_scope=steiner_ctpc_3d_support_scope,   // doc pdvd/141 sec 2
+                             steiner_ref_bridge_3d_support_cm=steiner_ref_bridge_3d_support_cm,   // doc pdvd/141 sec 4
+                             steiner_ref_bridge_3d_exempt_pts=steiner_ref_bridge_3d_exempt_pts,
                              retile_wrapped_channel_activity=retile_wrapped_channel_activity,
                              retile_steiner_terminal_charge=retile_steiner_terminal_charge,
                              retile_bad_blob_max_run=retile_bad_blob_max_run,

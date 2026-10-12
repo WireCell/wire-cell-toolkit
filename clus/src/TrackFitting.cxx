@@ -256,6 +256,8 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.end_trim_gap_len = value;
     } else if (name == "vertex_fit_max_move") {     // doc pdvd/140, WCT units (mm)
         m_params.vertex_fit_max_move = value;
+    } else if (name == "fit_face_from_cells") {     // doc pdvd/141 sec 3: > 0 = on
+        m_params.fit_face_from_cells = value;
     } else if (name == "dqdx_fit_keep_all_points") {   // doc pr/107
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
@@ -486,6 +488,8 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.end_trim_gap_len;
     } else if (name == "vertex_fit_max_move") {        // doc pdvd/140
         return m_params.vertex_fit_max_move;
+    } else if (name == "fit_face_from_cells") {        // doc pdvd/141 sec 3
+        return m_params.fit_face_from_cells;
     } else if (name == "fit_blob_coverage") {
         return m_params.fit_blob_coverage;
     } else if (name == "fit_blob_coverage_ghost_dis") {
@@ -4955,7 +4959,7 @@ void TrackFitting::form_map(std::vector<std::pair<WireCell::Point, std::shared_p
 }
 
 
-WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::shared_ptr<PR::Segment> segment, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw){
+WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::shared_ptr<PR::Segment> segment, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Udiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Vdiv_fac, std::map<std::pair<int, int>, std::map<std::tuple<int, int, int>, double>>& map_Wdiv_fac, double offset_t, double slope_x, double offset_u, double slope_yu, double slope_zu, double offset_v, double slope_yv, double slope_zv, double offset_w, double slope_yw, double slope_zw, const std::pair<int,int>* solve_face, const std::map<std::pair<int,int>, FitFaceGeom>* geoms){
     // Check if the point index exists in the 3D to 2D mapping
     auto point_it = m_3d_to_2d.find(i);
     if (point_it == m_3d_to_2d.end()) {
@@ -4981,6 +4985,23 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
     Eigen::SparseMatrix<double> RW(n_2D_w, 3);
     
     auto test_wpid = m_dv->contained_by(init_p);
+    // doc pdvd/141 sec 3: with a solve face given (fit_face_from_cells) the frame is that face, not the containing one.
+    if (solve_face) test_wpid = WirePlaneId(kAllLayers, solve_face->second, solve_face->first);
+    // A cell measured by another face is read with its own face's wire geometry; a face that is not mapped or has
+    // another time mapping (another drift volume) cannot share this frame and its cell is left out.  plane 0/1/2.
+    // Without geoms (legacy) this never changes anything.
+    auto row_geom = [&](int capa, int cface, int plane, double& off, double& sy, double& sz) -> bool {
+        if (!geoms || !solve_face) return true;
+        if (capa == solve_face->first && cface == solve_face->second) return true;
+        auto git = geoms->find({capa, cface});
+        if (git == geoms->end()) return false;
+        const auto& g = git->second;
+        if (g.slope_x != slope_x || g.offset_t != offset_t) return false;
+        if (plane == 0) { off = g.offset_u; sy = g.slope_yu; sz = g.slope_zu; }
+        else if (plane == 1) { off = g.offset_v; sy = g.slope_yv; sz = g.slope_zv; }
+        else { off = g.offset_w; sy = g.slope_yw; sz = g.slope_zw; }
+        return true;
+    };
     // Defense in depth: both current callers pre-check containment upstream,
     // but that contract is unstated and backward()/forward() with apa==-1 is
     // .at(-1) -> std::out_of_range (class-C, doc pr/11 sec 6.3).  Mirror the
@@ -5054,12 +5075,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         // scale s becomes |s|^(pow/2), so the weight is |s|^pow; the default 2 skips this.
         if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
 
+        double r_off = offset_u, r_sy = slope_yu, r_sz = slope_zu;   // doc pdvd/141 sec 3 (legacy: unchanged)
+        if (!row_geom(it->apa, it->face, 0, r_off, r_sy, r_sz)) scaling = 0;
         if (scaling != 0) {
-            data_u_2D(2 * index) = scaling * (it->wire - offset_u);
+            data_u_2D(2 * index) = scaling * (it->wire - r_off);
             data_u_2D(2 * index + 1) = scaling * (it->time - offset_t);
             
-            RU.insert(2 * index, 1) = scaling * slope_yu;     // Y --> U
-            RU.insert(2 * index, 2) = scaling * slope_zu;     // Z --> U
+            RU.insert(2 * index, 1) = scaling * r_sy;     // Y --> U
+            RU.insert(2 * index, 2) = scaling * r_sz;     // Z --> U
             RU.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
         }
         index++;
@@ -5114,12 +5137,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
         if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
 
+        double r_off = offset_v, r_sy = slope_yv, r_sz = slope_zv;   // doc pdvd/141 sec 3 (legacy: unchanged)
+        if (!row_geom(it->apa, it->face, 1, r_off, r_sy, r_sz)) scaling = 0;
         if (scaling != 0) {
-            data_v_2D(2 * index) = scaling * (it->wire - offset_v);
+            data_v_2D(2 * index) = scaling * (it->wire - r_off);
             data_v_2D(2 * index + 1) = scaling * (it->time - offset_t);
             
-            RV.insert(2 * index, 1) = scaling * slope_yv;     // Y --> V
-            RV.insert(2 * index, 2) = scaling * slope_zv;     // Z --> V
+            RV.insert(2 * index, 1) = scaling * r_sy;     // Y --> V
+            RV.insert(2 * index, 2) = scaling * r_sz;     // Z --> V
             RV.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
         }
         index++;
@@ -5173,12 +5198,14 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
         // doc pdvd/101: fit_weight_pow (see fit_point, U plane).
         if (m_params.fit_weight_pow != 2.0) scaling = std::pow(std::abs(scaling), 0.5 * m_params.fit_weight_pow);
 
+        double r_off = offset_w, r_sy = slope_yw, r_sz = slope_zw;   // doc pdvd/141 sec 3 (legacy: unchanged)
+        if (!row_geom(it->apa, it->face, 2, r_off, r_sy, r_sz)) scaling = 0;
         if (scaling != 0) {
-            data_w_2D(2 * index) = scaling * (it->wire - offset_w);
+            data_w_2D(2 * index) = scaling * (it->wire - r_off);
             data_w_2D(2 * index + 1) = scaling * (it->time - offset_t);
 
-            RW.insert(2 * index, 1) = scaling * slope_yw;     // Y --> W
-            RW.insert(2 * index, 2) = scaling * slope_zw;     // Z --> W
+            RW.insert(2 * index, 1) = scaling * r_sy;     // Y --> W
+            RW.insert(2 * index, 2) = scaling * r_sz;     // Z --> W
             RW.insert(2 * index + 1, 0) = scaling * slope_x;  // X --> T
         }
         index++;
@@ -5385,6 +5412,39 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         };
     }
 
+    // doc pdvd/141 sec 3 (fit_face_from_cells, default off): the solve face of a 3D point = the mapped (apa, face)
+    // holding most of its 2D cells (PR::fit_face_majority; tie: lowest).  face_of(): true when the knob is on and
+    // the point has cells in a mapped face; `out` is then the solve face.  A census line is written when that face
+    // differs from the containing one.
+    const bool face_from_cells = m_params.fit_face_from_cells > 0;
+    std::map<std::pair<int,int>, FitFaceGeom> fit_geoms;
+    if (face_from_cells) {
+        for (const auto& [k, fgc] : face_geom_cache) {
+            fit_geoms[k] = FitFaceGeom{fgc.offset_t, fgc.offset_u, fgc.offset_v, fgc.offset_w, fgc.slope_x,
+                                       fgc.slope_yu, fgc.slope_zu, fgc.slope_yv, fgc.slope_zv, fgc.slope_yw, fgc.slope_zw};
+        }
+    }
+    auto face_of = [&](int idx, const WirePlaneId& contained, const char* what, const WireCell::Point& p,
+                       std::pair<int,int>& out) -> bool {
+        if (!face_from_cells) return false;
+        auto pit = m_3d_to_2d.find(idx);
+        if (pit == m_3d_to_2d.end()) return false;
+        std::map<std::pair<int,int>, int> counts;
+        const WirePlaneLayer_t layers[3] = {WirePlaneLayer_t::kUlayer, WirePlaneLayer_t::kVlayer, WirePlaneLayer_t::kWlayer};
+        for (int ip = 0; ip < 3; ++ip) {
+            for (const auto& c2 : pit->second.get_plane_data(layers[ip]).associated_2d_points) {
+                if (face_geom_cache.count({c2.apa, c2.face})) ++counts[{c2.apa, c2.face}];
+            }
+        }
+        if (!PR::fit_face_majority(counts, out)) return false;
+        if (out.first != contained.apa() || out.second != contained.face()) {
+            SPDLOG_LOGGER_DEBUG(s_log, "pdvd141 fit_face: {} at ({:.1f},{:.1f},{:.1f}) contained {}/{} cells {}/{} ({} faces)",
+                                what, p.x() / units::cm, p.y() / units::cm, p.z() / units::cm,
+                                contained.apa(), contained.face(), out.first, out.second, counts.size());
+        }
+        return true;
+    };
+
     // Process vertices first
     for (auto vd : m_ordered_nodes_vec) {
         auto& v_bundle = (*m_graph)[vd];
@@ -5417,6 +5477,9 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             // Get geometry parameters for this point (via cache)
             auto test_wpid = m_dv->contained_by(init_p);
             if (test_wpid.apa() == -1 || test_wpid.face() == -1) continue;
+            std::pair<int,int> v_face;   // doc pdvd/141 sec 3
+            const bool v_from_cells = face_of(i, test_wpid, "vertex", init_p, v_face);
+            if (v_from_cells) test_wpid = WirePlaneId(kAllLayers, v_face.second, v_face.first);
             auto fg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});
             if (fg_it == face_geom_cache.end()) continue;
             const auto& fg = fg_it->second;
@@ -5430,7 +5493,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             // Fit the vertex point
             WireCell::Point fitted_p = fit_point(init_p, i, segment, map_Udiv_fac, map_Vdiv_fac, map_Wdiv_fac,
                                                 offset_t, slope_x, offset_u, slope_yu, slope_zu,
-                                                offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw);
+                                                offset_v, slope_yv, slope_zv, offset_w, slope_yw, slope_zw,
+                                                v_from_cells ? &v_face : nullptr, v_from_cells ? &fit_geoms : nullptr);
             
             // std::cout << "Vertex Fit " << i << " " << init_p << " --> " << fitted_p << std::endl;
 
@@ -5478,6 +5542,7 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                 // fitted_p landed outside known geometry; fall back to init_p frame
                 fitted_wpid = test_wpid;
             }
+            if (v_from_cells) fitted_wpid = test_wpid;   // doc pdvd/141 sec 3: the projections follow the solve face
             // Re-look up geometry for the fitted position's face via cache (may differ from init_p's)
             const FaceGeom* proj_fg = &fg;  // default: same face as init_p
             if (fitted_wpid.apa() != test_wpid.apa() || fitted_wpid.face() != test_wpid.face()) {
@@ -5551,6 +5616,12 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
         if (end_v) init_ps.back() = end_v->fit().point;
         
         std::vector<WireCell::Point> final_ps;
+        // doc pdvd/141 sec 3: the solve face of each point (first = -2: none, the legacy containing face is used)
+        std::vector<std::pair<int,int>> solve_faces(init_ps.size(), std::make_pair(-2, -2));
+        if (face_from_cells) {
+            if (start_v && start_v->fit().paf.first >= 0) solve_faces.front() = start_v->fit().paf;
+            if (end_v && end_v->fit().paf.first >= 0) solve_faces.back() = end_v->fit().paf;
+        }
         
         // Fit each point in the segment
         for (size_t i = 0; i < init_ps.size(); i++) {
@@ -5567,6 +5638,9 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                     // Get geometry parameters via cache
                     auto test_wpid = m_dv->contained_by(init_ps[i]);
                     if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
+                        std::pair<int,int> p_face;   // doc pdvd/141 sec 3
+                        const bool p_from_cells = face_of(init_indices[i], test_wpid, "point", init_ps[i], p_face);
+                        if (p_from_cells) { test_wpid = WirePlaneId(kAllLayers, p_face.second, p_face.first); solve_faces[i] = p_face; }
                         auto sfg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});
                         if (sfg_it != face_geom_cache.end()) {
                             const auto& sfg = sfg_it->second;
@@ -5576,7 +5650,8 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
                                                sfg.offset_t, sfg.slope_x,
                                                sfg.offset_u, sfg.slope_yu, sfg.slope_zu,
                                                sfg.offset_v, sfg.slope_yv, sfg.slope_zv,
-                                               sfg.offset_w, sfg.slope_yw, sfg.slope_zw);
+                                               sfg.offset_w, sfg.slope_yw, sfg.slope_zw,
+                                               p_from_cells ? &p_face : nullptr, p_from_cells ? &fit_geoms : nullptr);
                         }
                     }
                 }
@@ -5600,7 +5675,11 @@ void TrackFitting::multi_trajectory_fit(int charge_div_method, double div_sigma)
             
             // Calculate 2D projections
             auto test_wpid = m_dv->contained_by(examined_ps[i]);
-
+            // doc pdvd/141 sec 3: the projection follows the solve face when the point kept its index
+            if (face_from_cells && examined_ps.size() == solve_faces.size() && solve_faces[i].first >= 0 &&
+                face_geom_cache.count(solve_faces[i])) {
+                test_wpid = WirePlaneId(kAllLayers, solve_faces[i].second, solve_faces[i].first);
+            }
 
             if (test_wpid.apa() != -1 && test_wpid.face() != -1) {
                 auto pfg_it = face_geom_cache.find({test_wpid.apa(), test_wpid.face()});

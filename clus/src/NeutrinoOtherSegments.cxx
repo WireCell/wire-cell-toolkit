@@ -519,6 +519,26 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
             }
         }
         
+        // doc pdvd/141 sec 5: size rule for a far speck (other_seg_speck_drop; 0/0 = off, nothing computed).  The
+        // attachment edge is the shortest Steiner-graph edge from the attachment point to the tracked body.
+        bool speck_drop = false;
+        if (m_other_seg_min_terminals > 0 && m_other_seg_far_chord > 0 && special_A != SIZE_MAX) {
+            double attach_dis = 1e9;
+            for (auto it1 = map_connection[special_A].begin(); it1 != map_connection[special_A].end(); it1++) {
+                const double temp_dis = std::sqrt(
+                    std::pow(x_coords[special_A] - x_coords[*it1], 2) +
+                    std::pow(y_coords[special_A] - y_coords[*it1], 2) +
+                    std::pow(z_coords[special_A] - z_coords[*it1], 2));
+                if (temp_dis < attach_dis) attach_dis = temp_dis;
+            }
+            if (attach_dis < 1e9 &&
+                other_seg_speck_drop(m_other_seg_min_terminals, m_other_seg_far_chord, temp_segments[i].number_points, attach_dis)) {
+                speck_drop = true;
+                SPDLOG_LOGGER_DEBUG(s_log, "pdvd141 fos speck drop: cluster={} terminals={} attach_cm={:.1f} len_cm={:.1f}",
+                                    cluster.get_cluster_id(), temp_segments[i].number_points, attach_dis / units::cm, length / units::cm);
+            }
+        }
+
         temp_segments[i].special_A = special_A;
         temp_segments[i].special_B = special_B;
         temp_segments[i].length = length;
@@ -528,7 +548,11 @@ void PatternAlgorithms::find_other_segments(Graph& graph, Facade::Cluster& clust
         temp_segments[i].max_dis_w = max_dis_w;
 
         // Apply quality cuts
-        if ((temp_segments[i].number_points == 1) ||
+        if (speck_drop) {   // doc pdvd/141 sec 5 (never true when the knob is off)
+            probe_component("step8", i, temp_segments[i], sep_clusters, "DROP far_speck");
+            remaining_segments.erase(i);
+        }
+        else if ((temp_segments[i].number_points == 1) ||
             (number_not_faked == 0 &&
              ((length < 3.5 * units::cm) ||
               (((number_not_faked < 0.25 * temp_segments[i].number_points) ||

@@ -4,6 +4,7 @@
 #include "WireCellUtil/Logging.h"
 
 #include <Eigen/Dense>
+#include <boost/graph/connected_components.hpp>
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -1412,6 +1413,53 @@ SegmentPtr PatternAlgorithms::init_first_segment(Graph& graph, Facade::Cluster& 
         }
     }
     } // !iso_endpoints_used: legacy boundary endpoints + local-PCA refinement
+
+    // doc pdvd/141 sec 6: the two endpoints are taken from the whole Steiner point cloud; when a far piece was left
+    // unconnected (the reference-bridge cap), one of them can be that piece, and the first segment then starts as a
+    // chord toward it.  m_first_seg_same_component: keep the endpoint in the larger connected component of the
+    // Steiner graph and replace the other by the point of that component farthest from it (tie: lowest index).
+    // The census line is written whenever the knob or the probe is on; the endpoints change only under the knob.
+    if ((m_first_seg_same_component || m_traj_cover_probe) && cluster.has_graph("steiner_graph")) {
+        const auto& sgraph = cluster.get_graph("steiner_graph");
+        const size_t nv = boost::num_vertices(sgraph);
+        auto k1 = cluster.kd_steiner_knn(1, first_pt, "steiner_pc");
+        auto k2 = cluster.kd_steiner_knn(1, second_pt, "steiner_pc");
+        if (nv > 0 && !k1.empty() && !k2.empty() && k1[0].first < nv && k2[0].first < nv) {
+            std::vector<int> comp(nv);
+            const int ncomp = boost::connected_components(sgraph, &comp[0]);
+            const int c1 = comp[k1[0].first], c2 = comp[k2[0].first];
+            if (c1 != c2) {
+                std::vector<int> csize(ncomp, 0);
+                for (size_t i = 0; i < nv; ++i) ++csize[comp[i]];
+                const bool keep_first = csize[c1] >= csize[c2];
+                const int ckeep = keep_first ? c1 : c2;
+                const Facade::geo_point_t kept = keep_first ? first_pt : second_pt;
+                const auto& spc = cluster.get_pc("steiner_pc");
+                const auto& sco = cluster.get_default_scope().coords;
+                const auto& sx = spc.get(sco.at(0))->elements<double>();
+                const auto& sy = spc.get(sco.at(1))->elements<double>();
+                const auto& sz = spc.get(sco.at(2))->elements<double>();
+                double best = -1; size_t ibest = 0;
+                for (size_t i = 0; i < nv && i < sx.size(); ++i) {
+                    if (comp[i] != ckeep) continue;
+                    const double d2 = std::pow(sx[i] - kept.x(), 2) + std::pow(sy[i] - kept.y(), 2) + std::pow(sz[i] - kept.z(), 2);
+                    if (d2 > best) { best = d2; ibest = i; }
+                }
+                SPDLOG_LOGGER_DEBUG(s_log,
+                    "pdvd141 first_seg_seed: cluster={} endpoints in different components ({} pts / {} pts of {} components), "
+                    "first=({:.1f},{:.1f},{:.1f}) second=({:.1f},{:.1f},{:.1f}) gap_cm={:.1f} -> {}",
+                    cluster.get_cluster_id(), csize[c1], csize[c2], ncomp,
+                    first_pt.x()/units::cm, first_pt.y()/units::cm, first_pt.z()/units::cm,
+                    second_pt.x()/units::cm, second_pt.y()/units::cm, second_pt.z()/units::cm,
+                    ray_length(Ray{first_pt, second_pt})/units::cm,
+                    (m_first_seg_same_component && best >= 0) ? "REPLACED" : "kept");
+                if (m_first_seg_same_component && best >= 0) {
+                    const Facade::geo_point_t repl(sx[ibest], sy[ibest], sz[ibest]);
+                    if (keep_first) second_pt = repl; else first_pt = repl;
+                }
+            }
+        }
+    }
 
     // doc pr/67 P1: the seed the whole PR pass starts from, with its
     // provenance.  Without this, an endpoint that lands short is

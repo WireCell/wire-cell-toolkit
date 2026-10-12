@@ -10,6 +10,8 @@
 #include "WireCellClus/ParticleDataSet.h"
 
 #include <array>
+#include <map>
+#include <utility>
 #include <functional>
 
 namespace WireCell::Clus::PR {
@@ -175,6 +177,23 @@ namespace WireCell::Clus::PR {
     /// 3 cm onto the tracked body, given the chord that relocation would make?  cap <= 0 = always (the
     /// prototype rule, byte-identical); cap > 0 = only when the chord is not longer than the cap.
     inline bool other_seg_relocate_ok(double cap, double chord_length) { return !(cap > 0 && chord_length > cap); }
+
+    /// doc pdvd/141 sec 5: the size rule of find_other_segments for a far speck.  A component of fewer than
+    /// min_terminals Steiner terminals whose attachment edge (the shortest Steiner-graph edge from its attachment
+    /// point to the tracked body) is longer than far_chord is dropped.  Either argument <= 0 = off = never drop
+    /// (legacy, byte-identical).
+    inline bool other_seg_speck_drop(int min_terminals, double far_chord, int n_terminals, double attach_dis) {
+        return min_terminals > 0 && far_chord > 0 && n_terminals < min_terminals && attach_dis > far_chord;
+    }
+
+    /// doc pdvd/141 sec 3: the face a 3D fit point is solved in when fit_face_from_cells is on = the (apa, face)
+    /// holding most of its associated 2D cells; a tie goes to the lowest (apa, face).  counts: (apa, face) ->
+    /// number of cells (an ordered map, so the walk is deterministic).  Returns false when there is no cell.
+    inline bool fit_face_majority(const std::map<std::pair<int,int>, int>& counts, std::pair<int,int>& out) {
+        int best = 0; bool found = false;
+        for (const auto& [af, n] : counts) { if (n > best) { best = n; out = af; found = true; } }
+        return found;
+    }
 
 
     /// doc pdvd/87 (doc pdvd/78 action item 7): the stop-local keep of doc

@@ -145,6 +145,13 @@ public:
         // doc pdvd/140 sec 2: TrackFitting vertex_fit_max_move in cm (a fitted vertex farther than this from its
         // start position keeps the start position).  <= 0 (default) = not forwarded => byte-identical.
         m_vertex_fit_max_move_cm = get<double>(config, "vertex_fit_max_move_cm", m_vertex_fit_max_move_cm);
+        // doc pdvd/141 sec 3: TrackFitting fit_face_from_cells (solve a vertex / point in the face of its 2D cells).
+        // false (default) = not forwarded => byte-identical.
+        m_fit_face_from_cells = get<bool>(config, "fit_face_from_cells", m_fit_face_from_cells);
+        // doc pdvd/141 sec 7: a companion of the beam bundle with a smaller fraction of its T0-corrected points
+        // inside the drift volume of the anode that measured them is left out of the pattern recognition
+        // (it carries the bundle's flash time, not its own).  0 (default) = off => byte-identical.
+        m_companion_min_contained_frac = get<double>(config, "companion_min_contained_frac", m_companion_min_contained_frac);
         m_dqdx_fit_keep_all_points = get<bool>(config, "dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points);
         m_excl_t0_frame = get<bool>(config, "excl_t0_frame", m_excl_t0_frame);
 
@@ -186,6 +193,8 @@ public:
         cfg["fit_blob_coverage"] = m_fit_blob_coverage;
         cfg["fit_blob_coverage_weight"] = m_fit_blob_coverage_weight;
         cfg["vertex_fit_max_move_cm"] = m_vertex_fit_max_move_cm;
+        cfg["fit_face_from_cells"] = m_fit_face_from_cells;
+        cfg["companion_min_contained_frac"] = m_companion_min_contained_frac;
         cfg["dqdx_fit_keep_all_points"] = m_dqdx_fit_keep_all_points;
         cfg["excl_t0_frame"] = m_excl_t0_frame;
         default_neutrino_knobs(cfg);
@@ -230,6 +239,8 @@ private:
     double m_fit_blob_coverage{-1.0};
     double m_fit_blob_coverage_weight{-1.0};   // doc pdvd/133: < 0 = ride the TrackFitting default (0.1)
     double m_vertex_fit_max_move_cm{0.0};      // doc pdvd/140: <= 0 = off (TrackFitting default 0)
+    bool m_fit_face_from_cells{false};         // doc pdvd/141 sec 3: false = off
+    double m_companion_min_contained_frac{0.0};   // doc pdvd/141 sec 7: 0 = off
     bool m_dqdx_fit_keep_all_points{false};
     bool m_excl_t0_frame{false};
     std::shared_ptr<TrackFitting> m_track_fitter;
@@ -357,6 +368,9 @@ private:
     bool                 m_other_seg_relaxed_accept{true};  // P4
     bool                 m_other_seg_empty_2d_guard{false};  // doc pr/45 -- -1 empty-2D-tree sentinel guard
     double               m_other_seg_relocate_max_cm{0};  // doc pdvd/140 sec 5: cm; 0 = off (always relocate)
+    int                  m_other_seg_min_terminals{0};    // doc pdvd/141 sec 5: far-speck size rule, 0 = off
+    double               m_other_seg_far_chord_cm{0};     // doc pdvd/141 sec 5: cm; 0 = off
+    bool                 m_first_seg_same_component{false};  // doc pdvd/141 sec 6: first-segment seed in one component
     bool                 m_other_seg_keep_isolated{false};
     int                  m_other_seg_keep_isolated_min_points{25};
     double               m_other_seg_keep_isolated_min_length{3.0};  // cm; scaled at copy
@@ -706,6 +720,9 @@ private:
         m_other_seg_relaxed_accept = get(config, "other_seg_relaxed_accept", m_other_seg_relaxed_accept);
         m_other_seg_empty_2d_guard = get(config, "other_seg_empty_2d_guard", m_other_seg_empty_2d_guard);
         m_other_seg_relocate_max_cm = get(config, "other_seg_relocate_max_cm", m_other_seg_relocate_max_cm);  // doc pdvd/140 sec 5
+        m_other_seg_min_terminals = get(config, "other_seg_min_terminals", m_other_seg_min_terminals);  // doc pdvd/141 sec 5
+        m_other_seg_far_chord_cm = get(config, "other_seg_far_chord_cm", m_other_seg_far_chord_cm);
+        m_first_seg_same_component = get(config, "first_seg_same_component", m_first_seg_same_component);  // doc pdvd/141 sec 6
         m_other_seg_keep_isolated = get(config, "other_seg_keep_isolated", m_other_seg_keep_isolated);
         m_other_seg_keep_isolated_min_points = get(config, "other_seg_keep_isolated_min_points", m_other_seg_keep_isolated_min_points);
         m_other_seg_keep_isolated_min_length = get(config, "other_seg_keep_isolated_min_length", m_other_seg_keep_isolated_min_length);  // cm
@@ -1076,6 +1093,9 @@ private:
         cfg["other_seg_relaxed_accept"] = m_other_seg_relaxed_accept;
         cfg["other_seg_empty_2d_guard"] = m_other_seg_empty_2d_guard;
         cfg["other_seg_relocate_max_cm"] = m_other_seg_relocate_max_cm;
+        cfg["other_seg_min_terminals"] = m_other_seg_min_terminals;
+        cfg["other_seg_far_chord_cm"] = m_other_seg_far_chord_cm;
+        cfg["first_seg_same_component"] = m_first_seg_same_component;
         cfg["other_seg_keep_isolated"] = m_other_seg_keep_isolated;
         cfg["other_seg_keep_isolated_min_points"] = m_other_seg_keep_isolated_min_points;
         cfg["other_seg_keep_isolated_min_length"] = m_other_seg_keep_isolated_min_length;
@@ -1441,6 +1461,9 @@ private:
         pa.m_other_seg_relaxed_accept = m_other_seg_relaxed_accept;
         pa.m_other_seg_empty_2d_guard = m_other_seg_empty_2d_guard;
         pa.m_other_seg_relocate_max = m_other_seg_relocate_max_cm * units::cm;  // doc pdvd/140 sec 5
+        pa.m_other_seg_min_terminals = m_other_seg_min_terminals;  // doc pdvd/141 sec 5
+        pa.m_other_seg_far_chord = m_other_seg_far_chord_cm * units::cm;
+        pa.m_first_seg_same_component = m_first_seg_same_component;  // doc pdvd/141 sec 6
         pa.m_other_seg_keep_isolated = m_other_seg_keep_isolated;
         pa.m_other_seg_keep_isolated_min_points = m_other_seg_keep_isolated_min_points;
         pa.m_other_seg_keep_isolated_min_length = m_other_seg_keep_isolated_min_length * units::cm;  // cm -> internal
@@ -1870,7 +1893,30 @@ void CheckBeamParticle::visit(Ensemble& ensemble) const
     }
     Cluster* main = bundle[imain];
     std::vector<Cluster*> companions;
-    for (auto* c : bundle) if (c != main) companions.push_back(c);
+    for (auto* c : bundle) {
+        if (c == main) continue;
+        // doc pdvd/141 sec 7: fraction of the companion's (T0-corrected) points that lie in the drift volume of the
+        // anode that measured them.  Census line for every companion below 1 (log-only); with
+        // companion_min_contained_frac > 0 a companion below the cut is left out (it keeps its beam-bundle
+        // scalars in the output, it is only not handed to the pattern recognition).
+        const int np = c->npoints();
+        int n_in = 0;
+        for (int ip = 0; ip < np; ++ip) {
+            const auto own = c->wire_plane_id(ip);
+            const auto at = m_dv->contained_by(c->point3d(ip));
+            if (at.apa() == own.apa()) ++n_in;
+        }
+        const double frac = np > 0 ? double(n_in) / np : 1.0;
+        const bool drop = beam_companion_drop(m_companion_min_contained_frac, frac);
+        if (frac < 1.0) {
+            const auto p0 = c->point3d(0);
+            SPDLOG_LOGGER_DEBUG(s_log, "{}pdvd141 companion_contained: cluster {} npts {} frac {:.3f} own_apa {} first_pt ({:.1f},{:.1f},{:.1f}) -> {}",
+                                m_evt_tag, c->get_cluster_id(), np, frac, c->wire_plane_id(0).apa(),
+                                p0.x() / units::cm, p0.y() / units::cm, p0.z() / units::cm, drop ? "DROPPED" : "kept");
+        }
+        if (drop) continue;
+        companions.push_back(c);
+    }
     for (auto* c : bundle) c->set_scalar<int>("beam_particle_gid", pick.gid);
     main->set_scalar<int>("beam_particle_main", 1);
 
@@ -1899,6 +1945,7 @@ void CheckBeamParticle::visit(Ensemble& ensemble) const
     tf->set_parameter("fit_blob_coverage", m_fit_blob_coverage);
     if (m_fit_blob_coverage_weight >= 0) tf->set_parameter("fit_blob_coverage_weight", m_fit_blob_coverage_weight);   // doc pdvd/133
     if (m_vertex_fit_max_move_cm > 0) tf->set_parameter("vertex_fit_max_move", m_vertex_fit_max_move_cm * units::cm);   // doc pdvd/140
+    if (m_fit_face_from_cells) tf->set_parameter("fit_face_from_cells", 1.0);   // doc pdvd/141 sec 3
     tf->set_parameter("dqdx_fit_keep_all_points", m_dqdx_fit_keep_all_points ? 1.0 : 0.0);
     tf->set_parameter("traj_cover_probe", m_traj_cover_probe ? 1.0 : 0.0);   // TaggerCheckNeutrino.cxx:3560
     if (m_excl_t0_frame) tf->set_parameter("excl_t0_frame", 1.0);

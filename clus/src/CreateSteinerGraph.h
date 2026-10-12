@@ -36,6 +36,15 @@ namespace WireCell::Clus::Steiner {
         // doc pdvd/140 sec 3: 3D support radius (cm) of the CTPC bridge validation, applied while THIS stage processes a
         // cluster, its retile included (Grouping::set_ctpc_3d_support, set and reset per cluster).  0 = off = legacy.
         double m_ctpc_3d_support_cm{0};
+        // doc pdvd/141 sec 2: which graph builds of this stage see the radius above: "both" (default = the doc 140
+        // behaviour), "retile" (only the retile's internal ctpc_ref_pid graph) or "steiner" (only the base graph of
+        // the Steiner tree, with the env-gated dump rebuild).
+        std::string m_ctpc_3d_support_scope{"both"};
+        // doc pdvd/141 sec 4: 3D support test of the reference-layer bridges (connect_graph_with_reference), set on
+        // the grouping for the Steiner base graph only (after the retile).  radius cm, 0 = off = legacy; exempt_pts:
+        // a bridge whose smaller component holds at least this many points is never refused (0 = no exemption).
+        double m_ref_bridge_3d_support_cm{0};
+        int m_ref_bridge_3d_exempt_pts{20};
         // When true (default, uBooNE) only clusters flagged beam_flash are
         // processed.  Post-QL-matching detectors (e.g. SBND) have no
         // beam_flash flag: set false to process every scope-passing cluster,
