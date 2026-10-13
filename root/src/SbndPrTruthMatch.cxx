@@ -357,6 +357,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
             std::vector<TKey> tkeys;
             std::vector<TruthMatch::Size> rsize, tsize;
             std::vector<double> runl_n, runl_q, tq_readout, tq_in_blobs;
+            std::vector<int> t_nu;   // the interaction of a truth object, from its member tracks
             std::vector<TruthMatch::Cell> cells;
             auto get_r = [&](const RKey& k) {
                 auto it = rid.find(k);
@@ -378,6 +379,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
                 tsize.push_back({});
                 tq_readout.push_back(0);
                 tq_in_blobs.push_back(0);
+                t_nu.push_back(-1);
                 return i;
             };
             // every truth object of the event, also those no reco point carries
@@ -385,6 +387,7 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
                 const int ti = get_t(tkey(tr));
                 tq_readout[ti] += tr.q_readout;
                 tq_in_blobs[ti] += tr.q_in_blobs;
+                if (tr.nu_idx >= 0) t_nu[ti] = tr.nu_idx;
             }
             for (const auto& [pk, a] : acc) {
                 const int ri = get_r(rkey(pieces[pk.first]));
@@ -435,21 +438,10 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
                 // most of the rows (cosmic secondaries); its charge is in T_truth_track.
                 // Neutrino objects stay even without points (a missed interaction / prong).
                 // obj keeps its index, so match_obj of the reco rows stays valid.
-                {
-                    int nu_of = kind == 0 ? id : -1;
-                    if (kind == 2) {
-                        auto it = tracks.find(id);
-                        nu_of = it == tracks.end() ? -1 : it->second.nu_idx;
-                    }
-                    if (tsize[i].n <= 0 && nu_of < 0) continue;
-                }
+                if (tsize[i].n <= 0 && t_nu[i] < 0) continue;
                 r_nu = -1; r_cluster = -1; r_kine = -1;
-                t_nu_idx = kind == 0 ? id : -1;
+                t_nu_idx = t_nu[i];   // interaction: its nu_idx; prong: its member tracks' nu_idx; cosmic: -1
                 t_trackid = kind == 0 ? -1 : id;
-                if (kind == 2) {   // a prong: its interaction
-                    auto it = tracks.find(id);
-                    t_nu_idx = it == tracks.end() ? -1 : it->second.nu_idx;
-                }
                 size_n = tsize[i].n; size_q = tsize[i].q;
                 unl_n = 0; unl_q = 0;
                 t_q_readout = tq_readout[i]; t_q_in_blobs = tq_in_blobs[i];
