@@ -999,6 +999,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // truth_match (ai-helper issue 41): the reco<->truth matching trees
+              // (T_truth_track, T_overlap, T_match, T_pf; blob_truth adds
+              // T_blob_truth) in tracking-pr.root.  MC only: the writer needs the
+              // labeler's truth_track table.  Default false => key omitted =>
+              // byte-identical.
+              truth_match=false,
+              blob_truth=false,
               // tcn_overrides (ai-helper issue 35): TaggerCheckNeutrino keys merged LAST,
               // over the tcn_knobs bag AND the named keys pr() sets itself, for
               // experiments from a top-level job (e.g. {dl_vtx_dual_chain: false}).
@@ -2955,6 +2962,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
+                    [if truth_match then 'truth_match']: true,   // ai-helper issue 41
+                    [if truth_match && blob_truth then 'blob_truth']: true,   // ai-helper issue 41
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,

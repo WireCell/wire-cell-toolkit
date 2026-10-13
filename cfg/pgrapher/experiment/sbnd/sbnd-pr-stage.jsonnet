@@ -56,9 +56,12 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // pr_knobs: TaggerCheckNeutrino keys merged over the production bag (experiments only).
     // flat_tree (ai-helper issue 39): also write recTreeWireCell, every tree of
     // tracking-pr.root as one flat CAF-style entry; default off.
+    // truth_match / blob_truth (ai-helper issue 41): the reco<->truth matching
+    // trees in tracking-pr.root (MC with the labeler's truth_detail); default off.
     node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
-         flat_tree=false)::
+         flat_tree=false, truth_match=false, blob_truth=false)::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
+                      truth_match=truth_match, blob_truth=blob_truth,
                       pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee, flat_tree),
                       particle_dataset=pds.particle_dataset, extra_uses=pds.all,
                       beam_window=$.beam_window),

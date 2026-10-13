@@ -41,7 +41,13 @@ function(input='qlpctree.tar.gz',
          // ai-helper issue 39: also write recTreeWireCell into every
          // pr_evt<E>/tracking-pr.root -- all its trees as ONE flat, CAF-style
          // entry, for merging into the flat CAF.  Default off.
-         flat_tree=false)
+         flat_tree=false,
+         // ai-helper issue 41: the reco<->truth matching trees (T_truth_track,
+         // T_overlap, T_match, T_pf) in every tracking-pr.root; MC only (they
+         // need the step-1 labeler's truth_track table).  blob_truth adds
+         // T_blob_truth (one row per blob).  Default off.
+         truth_match=false,
+         blob_truth=false)
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
@@ -74,7 +80,8 @@ local bee = {
 // tagger_bee: the tagger verdict Bee sets (tagger_stm/_tgm/_fc/_lm), which the
 // 1-step's art-side labeler_tagger writes, come from TaggerBeeVisitor here.
 local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true,
-                              dl_vtx_dump=dl_vtx_dump, pr_knobs=pr_knobs, flat_tree=flat_tree);
+                              dl_vtx_dump=dl_vtx_dump, pr_knobs=pr_knobs, flat_tree=flat_tree,
+                              truth_match=truth_match, blob_truth=blob_truth);
 
 local sink = g.pnode({
     type: 'TensorFileSink',

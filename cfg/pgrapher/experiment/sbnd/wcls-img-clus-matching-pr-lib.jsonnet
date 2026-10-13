@@ -472,6 +472,11 @@ local labeler_truth = g.pnode({
         bee_sets: ['truth', 'sed'],
         pf_metadata_key: 'bee_pf_truth',
         hdf5_output: true,
+        // ai-helper issue 41: per-blob truth_q / truth_q_dom / trackid2 / truth_q2
+        // and the truth_track table (trackid -> nu_idx, Michel-merged id,
+        // ancestor, prong, readout-window charge) for step 2's truth match.
+        // MC only (the labeler skips truth on data); reco untouched.
+        truth_detail: true,
     },
 }, nin=1, nout=1, uses=labeler_uses);
 

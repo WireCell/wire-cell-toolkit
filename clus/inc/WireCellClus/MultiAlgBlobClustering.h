@@ -639,7 +639,8 @@ namespace WireCell::Clus {
         // output set.  Default: the truth tables of larwirecell's
         // wclsTruthInformationAttacher.  An input without them => nothing to do,
         // i.e. byte-identical output for every existing job.
-        std::vector<std::string> m_aux_datatypes{"truth_nu", "truth_pf"};
+        // ai-helper issue 41: + truth_track (labeler truth_detail)
+        std::vector<std::string> m_aux_datatypes{"truth_nu", "truth_pf", "truth_track"};
 
         // Own (non-shared) Bee zip.  A printf conversion in the configured
         // "bee_zip" means one zip per event: the open zip is closed and the

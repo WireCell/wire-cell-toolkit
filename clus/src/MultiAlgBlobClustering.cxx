@@ -14,6 +14,7 @@
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensorSet.h"
+#include "WireCellAux/SimpleTensor.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
@@ -4211,8 +4212,27 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             else {
                 Configuration all = Json::arrayValue;
                 std::set<int> used_ids;
+                // ai-helper issue 41: the same reco particle-flow trees, one per
+                // candidate with its nu_index, handed to the output visitors
+                // (T_pf) as an empty tensor whose metadata carries them.  The
+                // Bee output below is unchanged.
+                Configuration pub = Json::arrayValue;
                 for (const auto& tfi : nu_tfs) {
+                    const auto before = all.size();
                     fill_bee_pf_tree(pf_cfg, pf_grouping, false, tfi, &used_ids, &all);
+                    for (Json::ArrayIndex k = before; k < all.size(); ++k) {
+                        Configuration one;
+                        one["nu_index"] = tfi ? tfi->get_tagger_info().nu_index : -1;
+                        one["root"] = all[k];
+                        pub.append(one);
+                    }
+                }
+                {
+                    Configuration md;
+                    md["datatype"] = "pf_tree";
+                    md["name"] = pf_cfg.name;
+                    md["candidates"] = pub;
+                    ensemble.set_aux_tensor("pf_tree:" + pf_cfg.name, std::make_shared<Aux::SimpleTensor>(md));
                 }
                 // via the shared helper, so the truth graft applies here too;
                 // a direct set_particles() would bypass it.
