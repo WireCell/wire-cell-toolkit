@@ -91,6 +91,8 @@ function(input,
 
     local infer = sg.dnnroi_inference_cat(modelfile=model_file, do_transpose=false);
     local pack = sg.tensor_packer(multiplicity=1, extra_name="_signals");
+    // local infer = sg.dnnroi_inference(modelfile=model_file);
+    // local pack = sg.tensor_packer(extra_name="_signals");
     local guts = pg.shuntlines([infer, pack]);
     local body = sg.wrap_bypass(guts);
 

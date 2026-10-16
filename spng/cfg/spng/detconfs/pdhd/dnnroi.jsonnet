@@ -15,13 +15,19 @@ local detectors = import "detectors.jsonnet";
 local detname = "pdhd";
 local det = detectors[detname];  // me
 
-function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10, nchunks=1,device="cpu")
+// Defaults match pgrapher/experiment/pdhd/dnnroi_pp.jsonnet for the 6-ch
+// KD model: rebin 4 (training), pad so the post-rebin length is divisible by
+// 2^4 for the UNet stages, 6 input channels with the per-channel
+// normalization baked into the .ts (so input_scale 1.0).
+function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=4,
+          tick_pad_multiple=null, mask_thresh=0.2, nchan=6, nchunks=1, device="cpu")
     local ts = {
         type: "TorchService",
         name: "dnnroi",
         data: {
             // where is this one?
-            model: "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+            #model: "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
+            model: "/nfs/data/1/calcuttj/toolkit_testing/dunereco/dunereco/DUNEWireCell/pdhd/pipe_distill_transformer_6ch.ts",
             device: device, // "gpucpu",
             concurrency: 1,
         },
@@ -29,41 +35,37 @@ function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10
     local anode = tpc.anode;
     local apaid = anode.data.ident;
     local prename = prefix + std.toString(apaid);
+    // Order must match the training im_tags.  3-ch models use the first three.
+    assert nchan == 3 || nchan == 6 : 'dnnroi nchan must be 3 or 6, got %d' % nchan;
     local intags = ['loose_lf%d'%apaid, 'mp2_roi%d'%apaid,
-                    'mp3_roi%d'%apaid];
+                    'mp3_roi%d'%apaid, 'tight_lf%d'%apaid,
+                    'decon_charge%d'%apaid, 'gauss%d'%apaid][0:nchan];
+    local pad_multiple = if tick_pad_multiple == null
+                         then tick_per_slice * 16 else tick_pad_multiple;
 
-    local dnnroi_u = pg.pnode({
+    local dnn_node(plane, letter) = pg.pnode({
         type: "DNNROIFinding",
-        name: prename+"u",
+        name: prename+letter,
         data: {
             anode: wc.tn(anode),
-            plane: 0,
+            plane: plane,
             intags: intags,
             decon_charge_tag: "decon_charge%d" %apaid,
-            outtag: "dnnsp%du"%apaid,
+            outtag: "dnnsp%d%s" % [apaid, letter],
+            summary_tag: "wiener%d" % apaid,
+            // 6-ch models normalize internally; the 3-ch model needs 1/4000.
+            input_scale: if nchan == 6 then 1.0 else 1.0 / 4000,
             output_scale: output_scale,
+            mask_thresh: mask_thresh,
             forward: wc.tn(ts),
             tick_per_slice: tick_per_slice,
+            tick_pad_multiple: pad_multiple,
             nticks: nticks,
             nchunks: nchunks
         }
     }, nin=1, nout=1, uses=[ts, anode]);
-    local dnnroi_v = pg.pnode({
-        type: "DNNROIFinding",
-        name: prename+"v",
-        data: {
-            anode: wc.tn(anode),
-            plane: 1,
-            intags: intags,
-            decon_charge_tag: "decon_charge%d" %apaid,
-            outtag: "dnnsp%dv"%apaid,
-            output_scale: output_scale,
-            forward: wc.tn(ts),
-            tick_per_slice: tick_per_slice,
-            nticks: nticks,
-            nchunks: nchunks
-        }
-    }, nin=1, nout=1, uses=[ts, anode]);
+    local dnnroi_u = dnn_node(0, "u");
+    local dnnroi_v = dnn_node(1, "v");
 
     local dnnroi_w = pg.pnode({
         type: "PlaneSelector",
@@ -72,6 +74,7 @@ function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=10
             anode: wc.tn(anode),
             plane: 2,
             tags: ["gauss%d"%apaid],
+            summary_tags: ["wiener%d"%apaid],
             tag_rules: [{
                 frame: {".*":"DNNROIFinding"},
                 trace: {["gauss%d"%apaid]:"dnnsp%dw"%apaid},
