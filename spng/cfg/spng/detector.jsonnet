@@ -440,6 +440,7 @@ local known_detectors = import "detectors.jsonnet";
         pirs=null, noise=null,
         view_groups=null,
         view_wpids=null,
+        view_nchans=null,
         filters=null,
         crossview_thresholds=null,
         // FIXME: temporary! function called on tcp to produce a full original
@@ -489,6 +490,12 @@ local known_detectors = import "detectors.jsonnet";
 
             // The view groups describe channel order into CellViews.
             view_wpids: view_wpids,
+
+            // Number of channels per view, in view order, as they appear
+            // in a tensor made by concatenating the views along the channel
+            // dimension (e.g. [800,800,960] for a PDHD APA).  May be null
+            // when no per-view channel-row selection is needed.
+            view_nchans: view_nchans,
 
             // all faces
             faces: std.set(wc.flatten([vg.face_idents for vg in view_groups])),

@@ -1,5 +1,8 @@
 #include "WireCellSpng/Rebaseline.h"
-#include "WireCellSpng/Util.h"  // for modulo
+#include "WireCellSpng/Util.h"  // for modulo, to_string
+#include "WireCellUtil/Exceptions.h"
+
+#include <ATen/Parallel.h>
 
 #include <algorithm>
 
@@ -526,6 +529,246 @@ namespace WireCell::SPNG {
         }
 
         return restore_rebaseline_shape(batch_view, permuted_output, permutation);
+    }
+
+
+    // --- rebaseline_masked -------------------------------------------------
+
+    namespace {
+
+        // Dilate a (B,N) bool mask by pad samples on either side along dim 1.
+        torch::Tensor dilate_mask(const torch::Tensor& mask, int64_t pad)
+        {
+            if (pad <= 0) {
+                return mask;
+            }
+            auto f = mask.to(torch::kFloat32).unsqueeze(1);           // (B,1,N)
+            auto d = torch::max_pool1d(f, /*kernel*/ 2*pad + 1, /*stride*/ 1, /*padding*/ pad);
+            return d.squeeze(1) > 0.5f;
+        }
+
+        // Bring (wave, mask) to a (B,N) float / bool pair with dim last.
+        struct MaskedView {
+            torch::Tensor wave;       // (B,N) floating point, contiguous
+            torch::Tensor mask;       // (B,N) bool, contiguous
+            torch::Tensor permuted;   // wave permuted, for shape restoration
+            std::vector<int64_t> permutation;
+        };
+
+        MaskedView masked_view(const torch::Tensor& wave, const torch::Tensor& mask, int64_t dim)
+        {
+            if (wave.sizes() != mask.sizes()) {
+                raise<ValueError>("rebaseline_masked: waveform %s and mask %s differ in shape",
+                                  to_string(wave), to_string(mask));
+            }
+            MaskedView mv;
+            dim = modulo(dim, wave.dim());
+            mv.permutation = rebaseline_permutation(wave.dim(), dim);
+            auto w = wave.is_floating_point() ? wave : wave.to(torch::kFloat32);
+            mv.permuted = w.permute(mv.permutation).contiguous();
+            const int64_t nticks = wave.size(dim);
+            const int64_t nbatches = nticks ? mv.permuted.numel() / nticks : 0;
+            mv.wave = mv.permuted.view({nbatches, nticks});
+            auto m = mask.scalar_type() == torch::kBool ? mask : mask.ne(0);
+            mv.mask = m.permute(mv.permutation).contiguous().view({nbatches, nticks});
+            return mv;
+        }
+
+        // The algorithm proper on a (B,N) float waveform and bool mask.
+        torch::Tensor rebaseline_masked_core(const torch::Tensor& W,
+                                             const torch::Tensor& M,
+                                             const MaskRebaselineOptions& opt)
+        {
+            const int64_t B = W.size(0);
+            const int64_t N = W.size(1);
+            auto Mout = M;
+            if (!B || !N) {
+                return torch::where(M, W, torch::zeros_like(W));
+            }
+
+            // ROI geometry is computed on the dilated mask so the anchors are
+            // the first/last samples of each dilated ROI, i.e. anchor_pad
+            // samples outside the tight ROI.
+            auto Md = dilate_mask(M, opt.anchor_pad);
+            if (opt.keep_pad) {
+                Mout = Md;
+            }
+
+            auto zcol = torch::zeros({B, 1}, M.options());
+            auto Mprev = torch::cat({zcol, Md.slice(1, 0, N - 1)}, 1);
+            auto Mnext = torch::cat({Md.slice(1, 1, N), zcol}, 1);
+            auto starts = Md & ~Mprev;         // first sample of an ROI
+            auto ends = Md & ~Mnext;           // last sample of an ROI
+            auto gap_begin = ~Md & Mprev;      // first sample after an ROI
+            auto gap_end = ~Md & Mnext;        // last sample before an ROI
+
+            // Per-sample ROI start/end and the bounds of the gap around it, via
+            // forward/backward running max/min scans.  int32 keeps the index
+            // tensors small; gather() below is the only place needing int64.
+            auto iopts = W.options().dtype(torch::kInt32);
+            auto idx = torch::arange(N, iopts).unsqueeze(0).expand({B, N});
+            auto zero = torch::zeros_like(idx);
+            auto last = torch::full_like(idx, static_cast<int>(N - 1));
+            auto start_of = std::get<0>(torch::cummax(torch::where(starts, idx, zero), 1));
+            auto end_of = std::get<0>(torch::cummin(torch::where(ends, idx, last).flip(1), 1)).flip(1);
+            auto lo_floor = std::get<0>(torch::cummax(torch::where(gap_begin, idx, zero), 1));   // prev end + 1
+            auto hi_ceil = std::get<0>(torch::cummin(torch::where(gap_end, idx, last).flip(1), 1)).flip(1); // next start - 1
+
+            // Anchor windows: [lo_a, lo_b] ending at the ROI start and
+            // [hi_a, hi_b] beginning at the ROI end, clipped to the gaps.
+            const int w1 = static_cast<int>(std::max<int64_t>(opt.anchor_width, 1) - 1);
+            auto lo_b = start_of;
+            auto lo_a = torch::maximum(start_of - w1, lo_floor);
+            auto hi_a = end_of;
+            auto hi_b = torch::minimum(end_of + w1, hi_ceil);
+
+            // Window means from a float64 prefix sum (float32 differences of
+            // large nearby prefix values would lose precision).
+            auto dopts = W.options().dtype(torch::kFloat64);
+            auto cs = torch::cat({torch::zeros({B, 1}, dopts), W.cumsum(1, torch::kFloat64)}, 1);
+            auto lo_sum = cs.gather(1, (lo_b + 1).to(torch::kInt64)) - cs.gather(1, lo_a.to(torch::kInt64));
+            auto hi_sum = cs.gather(1, (hi_b + 1).to(torch::kInt64)) - cs.gather(1, hi_a.to(torch::kInt64));
+            auto a = (lo_sum / (lo_b - lo_a + 1).to(torch::kFloat64)).to(W.scalar_type());
+            auto b = (hi_sum / (hi_b - hi_a + 1).to(torch::kFloat64)).to(W.scalar_type());
+
+            // Line through (start, a) and (end, b).
+            auto len = end_of - start_of;
+            auto frac = (idx - start_of).to(W.scalar_type()) / torch::clamp_min(len, 1).to(W.scalar_type());
+            auto baseline = a + (b - a) * frac;
+            if (opt.min_roi_size > 0) {
+                baseline.masked_fill_(len <= static_cast<int>(opt.min_roi_size - 1), 0.0);
+            }
+
+            auto out = torch::where(Mout, W - baseline, torch::zeros_like(W));
+            if (opt.remove_negative) {
+                out.clamp_min_(0.0);
+            }
+            return out;
+        }
+
+        // Direct CPU implementation with the same semantics as
+        // rebaseline_masked_core(): one scan per row over raw storage,
+        // rows in parallel.  Much faster than the torch version on CPU.
+        torch::Tensor rebaseline_masked_core_cpu(const torch::Tensor& W,
+                                                 const torch::Tensor& M,
+                                                 const MaskRebaselineOptions& opt)
+        {
+            const int64_t B = W.size(0);
+            const int64_t N = W.size(1);
+            auto Wc = W.contiguous();
+            auto Mc = M.to(torch::kUInt8).contiguous();
+            auto out = torch::zeros_like(Wc);
+            if (!B || !N) {
+                return out;
+            }
+            const float* wp = Wc.data_ptr<float>();
+            const uint8_t* mp = Mc.data_ptr<uint8_t>();
+            float* op = out.data_ptr<float>();
+            const int64_t pad = std::max<int64_t>(opt.anchor_pad, 0);
+            const int64_t width = std::max<int64_t>(opt.anchor_width, 1);
+
+            at::parallel_for(0, B, 1, [&](int64_t r0, int64_t r1) {
+                std::vector<std::pair<int64_t,int64_t>> runs;   // dilated ROIs [s,e]
+                for (int64_t r = r0; r < r1; ++r) {
+                    const float* w = wp + r * N;
+                    const uint8_t* m = mp + r * N;
+                    float* o = op + r * N;
+
+                    runs.clear();
+                    int64_t t = 0;
+                    while (t < N) {
+                        if (!m[t]) { ++t; continue; }
+                        const int64_t s = t;
+                        while (t < N && m[t]) ++t;
+                        const int64_t e = t - 1;
+                        const int64_t sd = std::max<int64_t>(s - pad, 0);
+                        const int64_t ed = std::min<int64_t>(e + pad, N - 1);
+                        if (!runs.empty() && sd <= runs.back().second + 1) {
+                            runs.back().second = ed;      // dilated ROIs touch: merge
+                        }
+                        else {
+                            runs.emplace_back(sd, ed);
+                        }
+                    }
+
+                    const size_t nr = runs.size();
+                    for (size_t k = 0; k < nr; ++k) {
+                        const int64_t sd = runs[k].first;
+                        const int64_t ed = runs[k].second;
+                        const int64_t lo_floor = k ? runs[k-1].second + 1 : 0;
+                        const int64_t hi_ceil = (k + 1 < nr) ? runs[k+1].first - 1 : N - 1;
+                        const int64_t lo_a = std::max(sd - (width - 1), lo_floor);
+                        const int64_t hi_b = std::min(ed + (width - 1), hi_ceil);
+                        double a = 0.0;
+                        for (int64_t i = lo_a; i <= sd; ++i) a += w[i];
+                        a /= static_cast<double>(sd - lo_a + 1);
+                        double b = 0.0;
+                        for (int64_t i = ed; i <= hi_b; ++i) b += w[i];
+                        b /= static_cast<double>(hi_b - ed + 1);
+
+                        const int64_t len = ed - sd;
+                        const bool flat = opt.min_roi_size > 0 && len <= opt.min_roi_size - 1;
+                        const double a0 = flat ? 0.0 : a;
+                        const double slope = flat ? 0.0 : (b - a) / static_cast<double>(std::max<int64_t>(len, 1));
+                        for (int64_t i = sd; i <= ed; ++i) {
+                            if (opt.keep_pad || m[i]) {
+                                o[i] = static_cast<float>(w[i] - (a0 + slope * static_cast<double>(i - sd)));
+                            }
+                        }
+                    }
+                }
+            });
+            if (opt.remove_negative) {
+                out.clamp_min_(0.0);
+            }
+            return out;
+        }
+
+        torch::Tensor rebaseline_masked_dispatch(const torch::Tensor& W,
+                                                 const torch::Tensor& M,
+                                                 const MaskRebaselineOptions& opt)
+        {
+            if (!opt.force_vectorized && !W.is_cuda() && W.scalar_type() == torch::kFloat) {
+                return rebaseline_masked_core_cpu(W, M, opt);
+            }
+            return rebaseline_masked_core(W, M, opt);
+        }
+    }
+
+
+    torch::Tensor rebaseline_masked(const torch::Tensor& wave,
+                                    const torch::Tensor& mask,
+                                    const MaskRebaselineOptions& opt)
+    {
+        auto mv = masked_view(wave, mask, opt.dim);
+        auto out = rebaseline_masked_dispatch(mv.wave, mv.mask, opt);
+        return restore_rebaseline_shape(out, mv.permuted, mv.permutation);
+    }
+
+
+    torch::Tensor rebaseline_masked_rows(const torch::Tensor& wave,
+                                         const torch::Tensor& mask,
+                                         const std::vector<std::pair<int64_t,int64_t>>& rows,
+                                         const MaskRebaselineOptions& opt)
+    {
+        if (rows.empty()) {
+            return rebaseline_masked(wave, mask, opt);
+        }
+        auto mv = masked_view(wave, mask, opt.dim);
+        const int64_t B = mv.wave.size(0);
+        auto out = torch::where(mv.mask, mv.wave, torch::zeros_like(mv.wave));
+        for (const auto& [r0, r1] : rows) {
+            if (r0 < 0 || r1 < r0 || r1 > B) {
+                raise<ValueError>("rebaseline_masked_rows: bad row range [%d,%d) for %d rows",
+                                  r0, r1, B);
+            }
+            if (r1 == r0) {
+                continue;
+            }
+            out.slice(0, r0, r1).copy_(
+                rebaseline_masked_dispatch(mv.wave.slice(0, r0, r1), mv.mask.slice(0, r0, r1), opt));
+        }
+        return restore_rebaseline_shape(out, mv.permuted, mv.permutation);
     }
 
 }
