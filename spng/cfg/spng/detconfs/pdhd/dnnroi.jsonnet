@@ -25,9 +25,7 @@ function (tpc, prefix="dnnroi", output_scale=1.0, nticks=6000, tick_per_slice=4,
         type: "TorchService",
         name: "dnnroi",
         data: {
-            // where is this one?
-            #model: "/nfs/data/1/abashyal/spng/model_files/Pytorch-UNet/ts-model-2.3/unet-l23-cosmic500-e50.ts",
-            model: "/nfs/data/1/calcuttj/toolkit_testing/dunereco/dunereco/DUNEWireCell/pdhd/pipe_distill_transformer_6ch.ts",
+            model: "pipe_distill_transformer_6ch.ts", #Set WIRECELL_PATH i.e. to /nfs/data/1/calcuttj/toolkit_testing/dunereco/dunereco/DUNEWireCell/pdhd/
             device: device, // "gpucpu",
             concurrency: 1,
         },
