@@ -32,7 +32,10 @@ function(tpc)
             // per-job-unique (below) so concurrent workflow jobs do not collide.
             dump_2d_spectra: false,
             dump_2d_prefix: dump_prefix,
-            do_not_mp_protect_traditional: true, 
+            // false (C++ default) as in pgrapher/experiment/pdhd/sp.jsonnet.
+            do_not_mp_protect_traditional: false,
+            // MAD-based cal_RMS in ROI finding, as in pgrapher pdhd (C++ default false).
+            roi_mad_rms: true,
             field_response: wc.tn(tpc.fr),
             filter_responses_tn: [ ], // FIXME: this needs to be special for "bad APA1"
             elecresponse: wc.tn(tpc.er),
@@ -79,7 +82,7 @@ function(tpc)
             use_roi_refinement: true,   
             mp3_roi_tag: 'mp3_roi%d' % anode.data.ident,
             mp2_roi_tag: 'mp2_roi%d' % anode.data.ident,
-            mp_tick_resolution: 10,
+            mp_tick_resolution: 4,  // C++ default, as in pgrapher pdhd
             // mp_th1: if anode.data.ident==0 then 200 else 1000,
             // mp_th2: if anode.data.ident==0 then 100 else 500,
             
