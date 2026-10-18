@@ -1107,7 +1107,9 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     ///
     /// FIXME: There is likely a mismatch in the feature order between what is
     /// provided and what OG DNNROI expects.
-    dnnroi_forward_view(model, view, do_transpose=true, extra_name="")::
+    ///
+    /// The threshold converts the DNN output into the Boolean ROI mask.
+    dnnroi_forward_view(model, view, do_transpose=true, extra_name="", threshold=0.5)::
         local prefix = "v"+std.toString(view)+"_dnnroi";
         
         local pre_ops = [
@@ -1176,7 +1178,7 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             type: 'SPNGThreshold',
             name: thresh_name,
             data: {
-                nominal: 0.5,   // FIXME: a study is needed to best set this
+                nominal: threshold,
                 tag: "roi",
                 datapath_format: "/traces/Threshold/" + thresh_name,
             } + control
@@ -1331,10 +1333,41 @@ function(tpc, control={}, pg=real_pg, context_name="") {
             
 
 
+    /// Default options for applying ROIs with SPNGMaskRebaseliner, which
+    /// anchors the per-ROI linear baseline anchor_pad samples *outside* the
+    /// ROI on the unmasked waveform (the legacy SPNGRebaseliner anchors on the
+    /// ROI's own edge samples, which sit on the pulse and so remove charge).
+    /// "views" lists the views that are rebaselined; others get waveform*mask.
+    rebaseline_default:: {
+        anchor_pad: 4,
+        anchor_width: 1,
+        min_roi_size: 1,
+        keep_pad: false,
+        remove_negative: false,
+        views: [0, 1, 2],
+    },
+
+    /// Translate a list of views into [begin,end) channel-row ranges of a
+    /// tensor formed by concatenating cat_views along the channel dimension.
+    /// Requires tpc.view_nchans.
+    view_rows(sel_views, cat_views=[0, 1, 2])::
+        assert std.type(tpc.view_nchans) == "array" :
+            "tpc.view_nchans is required to select views by channel rows";
+        local n = [tpc.view_nchans[v] for v in cat_views];
+        local off = [std.foldl(function(a, b) a + b, n[0:i], 0) for i in std.range(0, std.length(n) - 1)];
+        [[off[i], off[i] + n[i]] for i in std.range(0, std.length(n) - 1)
+         if std.member(sel_views, cat_views[i])],
+
     /// Return pnode for single view that applies ROIs.  It takes in a dense (eg
     /// gauss) on iport=0 and roi on iport=1 and outputs signal on its only
     /// oport=0.
-    applyroi_view(view, extra_name="")::
+    ///
+    /// With rebaseline=null the legacy pair SPNGReduce(mul)+SPNGRebaseliner is
+    /// used.  Otherwise rebaseline is an object like $.rebaseline_default and a
+    /// single SPNGMaskRebaseliner node is used.  rows restricts rebaselining
+    /// to [begin,end) channel-row ranges (empty = all) and enabled, if not
+    /// null, overrides the per-view enable derived from rebaseline.views.
+    applyroi_view(view, extra_name="", rebaseline=null, rows=[], enabled=null)::
         local name = $.this_name(extra_name, "v"+std.toString(view)+"_applyroi");
         local mul = pg.pnode({
             type: 'SPNGReduce',
@@ -1351,12 +1384,35 @@ function(tpc, control={}, pg=real_pg, context_name="") {
                 datapath_format: "/traces/Rebaseliner/" + name
             } + control
         }, nin=1, nout=1);
-        pg.pipeline([mul, rbl]),
+        if rebaseline == null then
+            pg.pipeline([mul, rbl])
+        else
+            pg.pnode({
+                type: 'SPNGMaskRebaseliner',
+                name: name,
+                data: {
+                    anchor_pad: rebaseline.anchor_pad,
+                    anchor_width: rebaseline.anchor_width,
+                    min_roi_size: rebaseline.min_roi_size,
+                    keep_pad: rebaseline.keep_pad,
+                    remove_negative: rebaseline.remove_negative,
+                    rows: rows,
+                    enabled: if enabled == null then std.member(rebaseline.views, view) else enabled,
+                    tag: "signal",
+                    datapath_format: "/traces/MaskRebaseliner/" + name,
+                } + control
+            }, nin=2, nout=1),
 
     /// Return object with .roi_sink, .dense_sink and .signal_source with apply
-    /// ROIs in the middle.  All inputs/outputs are size that of views.
-    applyroi_views(views=[0,1,2], extra_name="")::
-        local perview = [$.applyroi_view(view, extra_name) for view in views];
+    /// ROIs in the middle.  All inputs/outputs are size that of views.  See
+    /// applyroi_view() for rebaseline; rows_per_view gives the rows argument
+    /// for each view.
+    applyroi_views(views=[0,1,2], extra_name="", rebaseline=null, rows_per_view=null, enabled=null)::
+        local perview = [
+            $.applyroi_view(views[i], extra_name, rebaseline=rebaseline,
+                            rows=if rows_per_view == null then [] else rows_per_view[i],
+                            enabled=enabled)
+            for i in std.range(0, std.length(views) - 1)];
         {
             dense_sink: pg.intern(iports=[pv.iports[0] for pv in perview]),
             roi_sink: pg.intern(iports=[pv.iports[1] for pv in perview]),
@@ -1680,20 +1736,28 @@ function(tpc, control={}, pg=real_pg, context_name="") {
     /// multiplicity one; their "v0" name prefix is nominal and does not mean
     /// view 0 -- the tensor spans all views.
     dnnroi_inference_cat(modelfile="unet-l23-cosmic500-e50.ts", views=[0,1,2],
-                         rebin=4, scale=1.0/4000, do_transpose=true, extra_name="")::
+                         rebin=4, scale=1.0/4000, do_transpose=true, extra_name="",
+                         threshold=0.5, rebaseline=$.rebaseline_default)::
         local pre = $.gauss_dense_cat_preface(views=views, rebin=rebin, scale=scale,
                                               extra_name=extra_name+'_PRE');
 
         local model = $.dnnroi_model(modelfile);
         local dnnroifwd = $.dnnroi_forward_view(model, view=0,
                                                 do_transpose=do_transpose,
-                                                extra_name=extra_name+'_FWD');
+                                                extra_name=extra_name+'_FWD',
+                                                threshold=threshold);
         local unbin = $.unbin_views(rebin=rebin, views=[0],
                                     extra_name=extra_name+'_UNBIN');
         local rois = pg.shuntlines([pre.dense, dnnroifwd, unbin]);
 
-        /// Gives .roi_sink, .dense_sink and .signal_source
-        local applyrois = $.applyroi_views(views=[0], extra_name=extra_name+'_APPLY');
+        /// Gives .roi_sink, .dense_sink and .signal_source.  The single
+        /// "view 0" node spans all concatenated views, so the per-view
+        /// selection in rebaseline.views is done by channel rows.
+        local rows = if rebaseline == null then [] else $.view_rows(rebaseline.views, views);
+        local applyrois = $.applyroi_views(
+            views=[0], extra_name=extra_name+'_APPLY',
+            rebaseline=rebaseline, rows_per_view=[rows],
+            enabled=if rebaseline == null then null else std.length(rebaseline.views) > 0);
         local rois_cap = pg.shuntline(rois, applyrois.roi_sink);
         local dense_cap = pg.shuntline(pre.gauss, applyrois.dense_sink);
 

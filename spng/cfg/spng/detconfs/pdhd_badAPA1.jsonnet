@@ -213,6 +213,7 @@ local tpcs = [
             pirs=pirs(anode, this_fr), noise=noise,
             view_groups=view_groups,
             view_wpids=view_wpids,
+            view_nchans=[800, 800, 960],
             // filters=(if ianode == 0 then filters_ap1 else filters),
             filters=filters,
             crossview_thresholds=(if ianode == 0 then cvts_apa1 else cvts),

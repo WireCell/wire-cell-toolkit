@@ -164,6 +164,7 @@ local tpcs = [
             pirs=pirs(anode), noise=noise,
             view_groups=view_groups,
             view_wpids=view_wpids,
+            view_nchans=[800, 800, 960],
             filters=filters,
             crossview_thresholds=cvts,
             osp_subgraphs=osp)
