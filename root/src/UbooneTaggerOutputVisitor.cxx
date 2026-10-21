@@ -1,3 +1,4 @@
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/UbooneTaggerOutputVisitor.h"
 
 #include "TFile.h"
@@ -32,11 +33,6 @@ namespace {
     /// No '%' in the name => the name is returned unchanged, so a
     /// one-event-per-process job writes exactly the file it always wrote.
     /// Same idiom as QLMatching's calib dump.
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
 
     /// sbnd_xin/docs/128-129: the particle-flow display id of a segment,
     /// cluster_id*1000 + (id() if set, else graph_index) -- the Bee PF node
@@ -130,7 +126,7 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // Open existing ROOT file in UPDATE mode to add trees.  Same template as
     // the tracking visitor that RECREATE'd it earlier in the pipeline, so both
     // land on this event's file.
-    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);

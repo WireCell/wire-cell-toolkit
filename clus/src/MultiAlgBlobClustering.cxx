@@ -1,4 +1,5 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
+#include "WireCellClus/PerEventName.h"
 
 #include <functional>
 #include "WireCellClus/Facade_Summary.h"
@@ -228,7 +229,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
         m_bee_zip = bee_zip;
         // A '%' means one zip per event, opened lazily by ensure_own_sink().
-        m_bee_zip_templated = m_bee_zip.find('%') != std::string::npos;
+        m_bee_zip_templated = per_event_templated(m_bee_zip);
         if (!m_bee_zip_templated) {
             m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
         }
@@ -648,7 +649,7 @@ void MultiAlgBlobClustering::ensure_own_sink()
     if (m_bee_zip_open_evt >= 0) {
         m_sink.close();
     }
-    const std::string name = String::format(m_bee_zip, m_eventNo);
+    const std::string name = per_event_name(m_bee_zip, m_eventNo, m_runNo, m_subRunNo, m_eventNo);
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(name);

@@ -870,6 +870,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // zip) create that directory themselves (PR 535 review).  The conversion is boost::format, so
 // use %1% (not %d) when the id appears more than once in one name.  Empty by
 // default => the names are literal and production is byte-identical.
+// The ID is the set ident = the art event number, which collides when one
+// process holds several subruns whose event numbers restart (gen2 BNB: 20
+// subruns x events 1..10 per lar job): the tokens {run}, {subrun}, {event}
+// and {ident} (Clus::per_event_name) name the directory by the resolved RSE,
+// e.g. evt_subdir='pr_evt{run}_{subrun}_{event}'.
 //
 // event_from_ident (default false) / rse_map (default {}): the multi-event
 // counterpart of rse_from_ident that KEEPS the real run and subrun.  When a

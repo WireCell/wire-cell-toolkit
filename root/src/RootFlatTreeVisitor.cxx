@@ -1,4 +1,5 @@
 // ai-helper issue 39: see the header for the layout.
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/RootFlatTreeVisitor.h"
 
 #include "WireCellClus/Facade_Ensemble.h"
@@ -210,11 +211,6 @@ namespace {
         return nullptr;
     }
 
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
 }  // namespace
 
 Root::RootFlatTreeVisitor::RootFlatTreeVisitor()
@@ -336,7 +332,7 @@ bool Root::RootFlatTreeVisitor::flatten_file(const std::string& filename, const 
 
 void Root::RootFlatTreeVisitor::visit(Clus::Facade::Ensemble& ensemble) const
 {
-    const std::string fname = event_filename(m_output_filename, ensemble.ident());
+    const std::string fname = Clus::per_event_name(m_output_filename, ensemble);
     std::string error;
     if (!flatten_file(fname, m_tree_name, m_prefix, m_drop_row_trees, error)) {
         log->error("RootFlatTreeVisitor: {}: no {} written: {}", fname, m_tree_name, error);

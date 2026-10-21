@@ -15,7 +15,10 @@
 // Multi-event: the tar holds every event of the step-1 lar job.  The per-event
 // outputs (tracking-pr.root) go to output_dir/<evt_subdir>/ with evt_subdir a
 // boost::format template of the set ident (the art event number), default
-// 'pr_evt%1%' -- the writers create those directories themselves.
+// 'pr_evt%1%' -- the writers create those directories themselves.  The tokens
+// {run}, {subrun}, {event} (Clus::per_event_name) name it by the resolved RSE
+// instead: 'pr_evt{run}_{subrun}_{event}' for a tar whose subruns' event
+// numbers collide (the gen2 BNB multi-reco1 units).
 // evt_subdir='' writes ./tracking-pr.root, correct only for a one-event tar.
 // RSE: every MABC takes run/subrun/event from the set metadata stamped in step 1
 // (rse_from_metadata; rse_from_ident is the fallback), exactly as in the 1-step.
