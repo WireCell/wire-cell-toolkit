@@ -272,13 +272,17 @@ TEST_CASE("blobdepolabel reproduces blobdepofill bit for bit and keeps per-track
     CHECK(table->metadata()["columns"][3].asString() == "trackid");
     REQUIRE(summary->shape().size() == 2);
     CHECK(summary->shape()[0] == refvals.size());
-    CHECK(summary->shape()[1] == 5);
+    CHECK(summary->shape()[1] == 7);
+    CHECK(summary->metadata()["ndepos"].asUInt64() == 2);
+    CHECK(summary->metadata()["q_depos"].asDouble() == doctest::Approx(s.qa + s.qb));
+    CHECK(summary->metadata()["q_depos_window"].asDouble() == doctest::Approx(s.qa + s.qb));
     const double* srow = reinterpret_cast<const double*>(summary->data());
     size_t n_a = 0, n_ghost = 0;
     for (size_t r = 0; r < summary->shape()[0]; ++r) {
-        const int bident = (int)srow[5 * r];
-        const double q_true = srow[5 * r + 1];
-        const int tid_top = (int)srow[5 * r + 3];
+        const int bident = (int)srow[7 * r];
+        CHECK((int)srow[7 * r + 1] == s.face->ident());
+        const double q_true = srow[7 * r + 3];
+        const int tid_top = (int)srow[7 * r + 5];
         CHECK((float)q_true == refvals.at(bident));
         if (bident == s.ident_a) { ++n_a; CHECK(tid_top == 7); }
         if (tid_top == Truth::tid_ghost) { ++n_ghost; CHECK(q_true == 0.0); }

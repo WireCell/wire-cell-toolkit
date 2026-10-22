@@ -205,12 +205,12 @@ def main():
         anc_dict = dict(anc)
 
         # ---- SimEnergyDeposits: ids per deposit and electrons per trackid ----
-        sed_ids = np.zeros((0, 2), np.int32); sed_trackq = np.zeros((0, 2))
+        sed_ids = np.zeros((0, 2), np.int32); sed_trackq = np.zeros((0, 2)); sed_energy = np.zeros(0, np.float32)
         edep_row = collections.defaultdict(float)
         if have_sed:
             seds = handle("vector<sim::SimEnergyDeposit>", sed_lab, sed_inst).product()
             ns = seds.size()
-            sed_ids = np.zeros((ns, 2), np.int32)
+            sed_ids = np.zeros((ns, 2), np.int32); sed_energy = np.zeros(ns, np.float32)
             tq = collections.defaultdict(float)
             for k in range(ns):
                 s = seds[k]
@@ -219,7 +219,7 @@ def main():
                     otid = int(s.OrigTrackID())
                 except Exception:
                     otid = tid
-                sed_ids[k, 0] = tid; sed_ids[k, 1] = otid
+                sed_ids[k, 0] = tid; sed_ids[k, 1] = otid; sed_energy[k] = s.Energy()
                 tq[tid] += s.NumElectrons()
                 kept = abs(tid)
                 if kept not in row_of and kept in anc_dict: kept = anc_dict[kept]
@@ -238,7 +238,7 @@ def main():
         meta.update(meta_extra)
         for k in ("DUNESW_VERSION", "SBNDCODE_VERSION", "LARSOFT_VERSION"):
             if os.environ.get(k): meta[k.lower()] = os.environ[k]
-        T.write_truth_npz(out, nu, pf, sed_ids=sed_ids, sed_trackq=sed_trackq, anc_map=anc, gen_labels=gen_labels, meta=meta)
+        T.write_truth_npz(out, nu, pf, sed_ids=sed_ids, sed_trackq=sed_trackq, anc_map=anc, gen_labels=gen_labels, meta=meta, sed_energy=sed_energy)
         nnu = int((nu[:, T.nu_col("nu_idx")] >= 0).sum()) if len(nu) else 0
         line = ("entry %d r%d s%d e%d: %d nu rows (%d neutrinos), %d particles (%d labelled), %d deposits, %d trackids with charge -> %s"
                 % (entry, run, sub, evt, len(nu), nnu, n, int((pf[:, T.pf_col("nu_row")] >= 0).sum()), len(sed_ids), len(sed_trackq), out))

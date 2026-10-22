@@ -225,6 +225,7 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
                 continue;       // depo is behind the face.
             }
             depos.push_back(maybe);
+            res.q_depos += std::abs(maybe->charge());
             dwcenter.push_back(pimpos->transform(maybe->pos())[1]);
             tran_sigma.push_back(smeared(maybe->extent_tran(), params.extra_smear_tran));
             const IDepo* src = maybe.get();
@@ -232,15 +233,26 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
                 src = maybe->prior().get();
             }
             int tid = src->id();
+            double energy = src->energy();
+            if (params.energy_map && tid >= 0 && (size_t)tid < params.energy_map->size()) {
+                energy = (*params.energy_map)[tid];
+            }
             if (params.id_map && tid >= 0 && (size_t)tid < params.id_map->size()) {
                 tid = (*params.id_map)[tid];
             }
             key_id.push_back(tid);
-            key_energy.push_back(src->energy());
+            key_energy.push_back(energy);
         }
         res.ndepos += depos.size();
-        log->debug("depo_blob_assoc: face={} nblobs={} ndepos={}",
-                   ianodeface->ident(), bdescvector.size(), depos.size());
+        for (const auto& d : depos) {
+            const double t = d->time() + params.time_offset;
+            if (t >= sbins.min() && t < sbins.max()) {
+                ++res.ndepos_window;
+                res.q_depos_window += std::abs(d->charge());
+            }
+        }
+        log->debug("depo_blob_assoc: face={} nblobs={} ndepos={} in window {}",
+                   ianodeface->ident(), bdescvector.size(), depos.size(), res.ndepos_window);
 
         auto gr = slice_and_dice_depos(sbins, depos, tran_sigma, *pimpos, params);
 

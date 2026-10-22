@@ -194,6 +194,9 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         map->reserve(tt.sed_ids.size());
         for (const auto& [tid, orig] : tt.sed_ids) map->push_back(tid);
         assoc.id_map = map;
+        if (!tt.sed_energy.empty()) {
+            assoc.energy_map = std::make_shared<std::vector<float>>(tt.sed_energy);
+        }
     }
 
     // 2. the association (blob labels identical to BlobDepoLabel)

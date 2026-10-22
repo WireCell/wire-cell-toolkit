@@ -59,7 +59,7 @@ ITensor::vector Truth::blobtruth_tensors(const ICluster::pointer& icluster,
 {
     // Rows in graph vertex order; tracks in key order.
     std::vector<double> table;   // M x 6
-    std::vector<double> summary; // B x 5
+    std::vector<double> summary; // B x 7
     size_t nrows = 0, nblobs = 0;
     const auto& gr = icluster->graph();
     for (const auto& vdesc : mir(boost::vertices(gr))) {
@@ -82,7 +82,7 @@ ITensor::vector Truth::blobtruth_tensors(const ICluster::pointer& icluster,
             ++ntracks;
             if (q > q_top) { q_top = q; tid_top = tid; }
         }
-        summary.insert(summary.end(), {bident, e.q_total, q_top, (double)tid_top, (double)ntracks});
+        summary.insert(summary.end(), {bident, face, sident, e.q_total, q_top, (double)tid_top, (double)ntracks});
         ++nblobs;
     }
 
@@ -102,6 +102,11 @@ ITensor::vector Truth::blobtruth_tensors(const ICluster::pointer& icluster,
         md["datapath"] = datapath + "/blobtruth_sum";
         md["ident"] = icluster->ident();
         md["columns"] = columns_md(Truth::blobtruth_sum_columns());
+        md["ndepos"] = (Json::UInt64)res.ndepos;      // depos in the faces' sensitive volumes
+        md["q_depos"] = res.q_depos;                   // their |charge| sum
+        md["ndepos_window"] = (Json::UInt64)res.ndepos_window;   // of those, inside the slices' time span
+        md["q_depos_window"] = res.q_depos_window;     // the completeness denominator
+        md["nblobs"] = (Json::UInt64)nblobs;
         ITensor::shape_t shape{nblobs, Truth::blobtruth_sum_columns().size()};
         out.push_back(std::make_shared<Aux::SimpleTensor>(shape, summary.data(), md));
     }

@@ -29,7 +29,7 @@ The association knobs of `BlobDepoLabel` (`time_offset`, `nsigma`, `speed`, `pin
 | datatype | shape | columns (also in `md["columns"]`) |
 | --- | --- | --- |
 | `blobtruth` | double (M, 6) | `blob_ident, face, slice_ident, trackid, q_bk, e_bk`; one row per (blob, track) with charge |
-| `blobtruth_sum` | double (B, 5) | `blob_ident, q_true, q_top, tid_top, ntracks`; one row per blob in graph vertex order; `tid_top = -1` for a blob with no true charge |
+| `blobtruth_sum` | double (B, 7) | `blob_ident, face, slice_ident, q_true, q_top, tid_top, ntracks`; one row per blob in graph vertex order (blob idents repeat across slices and faces: join on the triple); `tid_top = -1` for a blob with no true charge; `md.ndepos` / `md.q_depos` = the depos in the anode's sensitive volumes and their charge sum |
 | `cluster`, `clnodeset`, `cledgeset` | TensorDM | the filled cluster, when `with_cluster` |
 
 `e_bk` is the key depo's `energy()` times the charge share and is meaningful only when the depo file carried the truth sidecar (`DepoFileSink.truth_sidecar`). Schema: `WireCellTruth/Schema.h`.

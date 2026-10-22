@@ -54,6 +54,9 @@ namespace WireCell::Truth {
         /// is the truth file's sed_ids trackid column).  An id outside
         /// the map keeps itself.  Null = identity.
         std::shared_ptr<const std::vector<int>> id_map;
+        /// Optional map from the key depo's id() to its energy (index
+        /// mode: the truth file's sed_energy); replaces energy().
+        std::shared_ptr<const std::vector<float>> energy_map;
         /// Record, per blob, the depos that deposited charge in it
         /// (for per-point refinement).  Off = no extra bookkeeping;
         /// the integration itself is unchanged either way.
@@ -75,6 +78,11 @@ namespace WireCell::Truth {
         std::unordered_map<cluster_vertex_t, BlobEntry> blobs;
         size_t nblobs{0};
         size_t ndepos{0};       // depos in a sensitive volume of some face
+        double q_depos{0.0};    // sum of |charge| of those depos
+        /// Of those, the depos whose (offset) time lies inside the span
+        /// of the face's slices: the completeness denominator.
+        size_t ndepos_window{0};
+        double q_depos_window{0.0};
     };
 
     /// Run the association.  Every b-node of the cluster gets an entry

@@ -26,10 +26,12 @@ Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& as
         const IDepo* key = d.get();
         if (assoc.id_from_prior && d->prior()) key = d->prior().get();
         int tid = key->id();
+        double energy = key->energy();
+        if (assoc.energy_map && tid >= 0 && (size_t)tid < assoc.energy_map->size()) energy = (*assoc.energy_map)[tid];
         if (assoc.id_map && tid >= 0 && (size_t)tid < assoc.id_map->size()) tid = (*assoc.id_map)[tid];
         auto& pl = out[tid];
         if (!pl) pl = std::make_shared<DepoPolyline>();
-        pl->add(position(*d), key->time(), key->energy());
+        pl->add(position(*d), key->time(), energy);
     }
     for (auto& [tid, pl] : out) pl->build();
     return out;

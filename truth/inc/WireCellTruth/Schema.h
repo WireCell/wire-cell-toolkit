@@ -17,7 +17,7 @@
 namespace WireCell::Truth {
 
     /// Bumped on any change of a name, order or sentinel below.
-    constexpr int schema_version = 2;
+    constexpr int schema_version = 3;
     std::string schema_version_string();
 
     /// Sentinels of the per-point / per-blob track key "tid".
@@ -44,7 +44,8 @@ namespace WireCell::Truth {
     /// blobtruth: sparse (blob, track) charge table.
     const std::vector<std::string>& blobtruth_columns();
 
-    /// blobtruth_sum: one row per blob.
+    /// blobtruth_sum: one row per blob (blob idents repeat across
+    /// slices and faces: join on (face, slice_ident, blob_ident)).
     const std::vector<std::string>& blobtruth_sum_columns();
 
     /// Keys of the per-blob-node local point cloud named "truth"

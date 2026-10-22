@@ -7,6 +7,7 @@
       truth_nu   (Nn, 12) double   one row per generator interaction
       truth_pf   (Np, 25) double   one row per G4 particle, all kept
       sed_ids    (Ns, 2)  int32    per SimEnergyDeposit: trackid, orig_trackid
+      sed_energy (Ns,)    float32  per SimEnergyDeposit: energy (MeV)
       sed_trackq (Nt, 2)  double   per trackid: visible electrons (IonAndScint)
 
     plus the string tables columns_nu / columns_pf / process_names /
@@ -44,6 +45,8 @@ namespace WireCell::Truth {
         std::vector<std::pair<int,int>> sed_ids;
         /// Per trackid: visible electrons from Stage A.  Empty when absent.
         std::map<int, double> sed_trackq;
+        /// Per SED row: energy (MeV).  Empty when the file has none.
+        std::vector<float> sed_energy;
         /// Generator labels, in nu_row order of the non-neutrino rows.
         std::vector<std::string> gen_labels;
         /// Where the table came from: "file", "depos" or "".

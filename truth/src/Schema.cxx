@@ -51,7 +51,7 @@ const std::vector<std::string>& Truth::blobtruth_columns()
 const std::vector<std::string>& Truth::blobtruth_sum_columns()
 {
     static const std::vector<std::string> cols = {
-        "blob_ident", "q_true", "q_top", "tid_top", "ntracks"};
+        "blob_ident", "face", "slice_ident", "q_true", "q_top", "tid_top", "ntracks"};
     return cols;
 }
 

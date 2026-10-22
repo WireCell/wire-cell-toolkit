@@ -21,8 +21,8 @@ namespace {
 
 TEST_CASE("truth schema columns are unique and ordered")
 {
-    CHECK(Truth::schema_version == 2);
-    CHECK(Truth::schema_version_string() == "wct-truth-schema-2");
+    CHECK(Truth::schema_version == 3);
+    CHECK(Truth::schema_version_string() == "wct-truth-schema-3");
 
     CHECK(unique(Truth::truth_nu_columns()));
     CHECK(unique(Truth::truth_pf_columns()));

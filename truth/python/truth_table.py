@@ -9,6 +9,7 @@ The file holds, per event, the tables of truth/inc/WireCellTruth/Schema.h:
                                   (the depo id of Stage A index mode is the row number)
   sed_trackq   (Nt, 2)  float64   per trackid: visible electrons summed over its deposits
   anc_map      (Na, 2)  int32     dropped descendant trackid -> kept ancestor trackid (ParticleAncestryMap)
+  sed_energy   (Ns,)    float32   energy (MeV) per SimEnergyDeposit in vector order (the depo energy of index mode)
   columns_nu, columns_pf, process_names, gen_labels, meta
                         (K, L) uint8 ASCII matrices, zero padded (the toolkit's cnpy reads no unicode)
 
@@ -23,7 +24,7 @@ file and reads it back.
 import io, json, sys, zipfile
 import numpy as np
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 NU_COLUMNS = ["nu_idx", "pdg", "ccnc", "mode", "int_type", "flavor",
               "E", "vtx_x", "vtx_y", "vtx_z", "t", "edep"]
@@ -98,15 +99,16 @@ def savez_nozip64(fn, **arrs):
             z.writestr(k + ".npy", b.getvalue())
 
 
-def write_truth_npz(fn, nu, pf, sed_ids=None, sed_trackq=None, anc_map=None, gen_labels=(), meta=None):
+def write_truth_npz(fn, nu, pf, sed_ids=None, sed_trackq=None, anc_map=None, gen_labels=(), meta=None, sed_energy=None):
     nu = np.asarray(nu, dtype=np.float64).reshape(-1, len(NU_COLUMNS))
     pf = np.asarray(pf, dtype=np.float64).reshape(-1, len(PF_COLUMNS))
     sed_ids = np.zeros((0, 2), np.int32) if sed_ids is None else np.asarray(sed_ids, dtype=np.int32).reshape(-1, 2)
     sed_trackq = np.zeros((0, 2), np.float64) if sed_trackq is None else np.asarray(sed_trackq, dtype=np.float64).reshape(-1, 2)
     anc_map = np.zeros((0, 2), np.int32) if anc_map is None else np.asarray(anc_map, dtype=np.int32).reshape(-1, 2)
+    sed_energy = np.zeros(0, np.float32) if sed_energy is None else np.asarray(sed_energy, dtype=np.float32).reshape(-1)
     meta = dict(meta or {})
     meta.setdefault("schema_version", SCHEMA_VERSION)
-    savez_nozip64(fn, truth_nu=nu, truth_pf=pf, sed_ids=sed_ids, sed_trackq=sed_trackq, anc_map=anc_map,
+    savez_nozip64(fn, truth_nu=nu, truth_pf=pf, sed_ids=sed_ids, sed_trackq=sed_trackq, anc_map=anc_map, sed_energy=sed_energy,
                   columns_nu=strings_to_u8(NU_COLUMNS), columns_pf=strings_to_u8(PF_COLUMNS),
                   process_names=strings_to_u8(PROCESS_NAMES), gen_labels=strings_to_u8(list(gen_labels)),
                   meta=strings_to_u8([json.dumps(meta, sort_keys=True)]))

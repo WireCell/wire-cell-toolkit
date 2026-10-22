@@ -127,6 +127,13 @@ Truth::TruthTable Truth::TruthTable::load(const std::string& fname, Log::logptr_
             }
         }
     }
+    {
+        auto it = npz.find("sed_energy");
+        if (it != npz.end() && it->second.word_size == 4 && it->second.shape.size() == 1) {
+            const float* d = it->second.data<float>();
+            tt.sed_energy.assign(d, d + it->second.shape[0]);
+        }
+    }
     for (const auto& row : load_table<double>(npz, truth_file_sed_trackq, 2)) {
         tt.sed_trackq[(int)row[0]] = row[1];
     }
