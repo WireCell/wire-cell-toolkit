@@ -38,6 +38,39 @@ Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& as
     return out;
 }
 
+Truth::particle_polylines_t
+Truth::build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
+                                const depo_position_f& position, const std::vector<int>* orig_ids)
+{
+    // key -> particle -> polyline; the keys as build_polylines makes them
+    std::map<int, std::map<int, std::shared_ptr<DepoPolyline>>> byp;
+    for (const auto& d : depos) {
+        if (!d) continue;
+        const IDepo* key = d.get();
+        if (assoc.id_from_prior && d->prior()) key = d->prior().get();
+        const int raw = key->id();
+        int tid = raw;
+        double energy = key->energy();
+        if (assoc.energy_map && tid >= 0 && (size_t)tid < assoc.energy_map->size()) energy = (*assoc.energy_map)[tid];
+        if (assoc.id_map && tid >= 0 && (size_t)tid < assoc.id_map->size()) tid = (*assoc.id_map)[tid];
+        if (assoc.fold_negative_ids && tid < 0) tid = -tid;
+        int part = raw;
+        if (orig_ids && raw >= 0 && (size_t)raw < orig_ids->size()) part = (*orig_ids)[raw];
+        auto& pl = byp[tid][part];
+        if (!pl) pl = std::make_shared<DepoPolyline>();
+        pl->add(position(*d), key->time(), energy);
+    }
+    particle_polylines_t out;
+    for (auto& [tid, parts] : byp) {
+        auto& v = out[tid];
+        for (auto& [part, pl] : parts) {
+            pl->build();
+            v.push_back(pl);
+        }
+    }
+    return out;
+}
+
 namespace {
 
     int scalar_int(const Dataset& scalar, const std::string& key, int def = std::numeric_limits<int>::min())
@@ -121,7 +154,8 @@ Truth::label_live_tree(node_t& root,
                        const std::map<int, std::shared_ptr<DepoPolyline>>& polylines,
                        const PointLabelParams& params,
                        const depo_position_f& position,
-                       Log::logptr_t log)
+                       Log::logptr_t log,
+                       const particle_polylines_t* particles)
 {
     PointLabelSummary sum;
     sum.void_roots = pf.void_roots;
@@ -153,8 +187,19 @@ Truth::label_live_tree(node_t& root,
         auto it = track_kps.find(tid);
         if (it != track_kps.end()) return it->second;
         std::vector<DepoPolyline::Keypoint> kps;
-        auto pit = polylines.find(tid);
-        if (pit != polylines.end()) kps = pit->second->keypoints(params.kink_window, params.kink_angle);
+        if (particles) {
+            auto qit = particles->find(tid);
+            if (qit != particles->end()) {
+                for (const auto& q : qit->second) {
+                    auto qk = q->keypoints(params.kink_window, params.kink_angle);
+                    kps.insert(kps.end(), qk.begin(), qk.end());
+                }
+            }
+        }
+        else {
+            auto pit = polylines.find(tid);
+            if (pit != polylines.end()) kps = pit->second->keypoints(params.kink_window, params.kink_angle);
+        }
         return track_kps.emplace(tid, std::move(kps)).first->second;
     };
     sum.npolylines = polylines.size();
@@ -269,20 +314,37 @@ Truth::label_live_tree(node_t& root,
                 // trajectory
                 double dtraj = params.d_cap;
                 if (tid >= 0) {
-                    auto pit = polylines.find(tid);
-                    if (pit != polylines.end()) {
-                        const auto& pl = *pit->second;
-                        auto hit = pl.nearest(p);
-                        if (hit.valid) {
-                            dtraj = std::min(hit.dist, params.d_cap);
-                            col.dir_x[i] = hit.tangent.x();
-                            col.dir_y[i] = hit.tangent.y();
-                            col.dir_z[i] = hit.tangent.z();
-                            col.s_t[i] = pl.length() > 0 ? hit.s / pl.length() : 0.0;
-                            col.dedx[i] = hit.dedx * units::cm;
-                            if (hit.s <= params.end_window) col.end[i] = 1;
-                            else if (pl.length() - hit.s <= params.end_window) col.end[i] = 2;
+                    const DepoPolyline* pl = nullptr;
+                    DepoPolyline::Hit hit;
+                    if (particles) {
+                        // the nearest of the key's particles; a tie keeps the lower particle id
+                        auto qit = particles->find(tid);
+                        if (qit != particles->end()) {
+                            for (const auto& q : qit->second) {
+                                auto qhit = q->nearest(p);
+                                if (qhit.valid && (!pl || qhit.dist < hit.dist)) {
+                                    pl = q.get();
+                                    hit = qhit;
+                                }
+                            }
                         }
+                    }
+                    else {
+                        auto pit = polylines.find(tid);
+                        if (pit != polylines.end()) {
+                            pl = pit->second.get();
+                            hit = pl->nearest(p);
+                        }
+                    }
+                    if (pl && hit.valid) {
+                        dtraj = std::min(hit.dist, params.d_cap);
+                        col.dir_x[i] = hit.tangent.x();
+                        col.dir_y[i] = hit.tangent.y();
+                        col.dir_z[i] = hit.tangent.z();
+                        col.s_t[i] = pl->length() > 0 ? hit.s / pl->length() : 0.0;
+                        col.dedx[i] = hit.dedx * units::cm;
+                        if (hit.s <= params.end_window) col.end[i] = 1;
+                        else if (pl->length() - hit.s <= params.end_window) col.end[i] = 2;
                     }
                     const auto& kps = kps_of(tid);
                     col.v_end[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::end, params.heat_sigma);

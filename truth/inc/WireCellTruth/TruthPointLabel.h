@@ -53,6 +53,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <vector>
 
 namespace WireCell::Truth {
 
@@ -103,8 +104,25 @@ namespace WireCell::Truth {
     build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
                     const depo_position_f& position);
 
+    /// Per-particle polylines of every track key (pr_ml doc 23 sec 7.4):
+    /// the depos of a key grouped by their Geant4 particle -- orig_ids[depo
+    /// id] when given (Stage A index mode: the sed_ids orig_trackid
+    /// column), else the depo id before id_map and folding -- one polyline
+    /// per particle, in particle-id order.  A key folded from several
+    /// particles is then a set of polylines instead of one time-ordered
+    /// zigzag across them.
+    using particle_polylines_t = std::map<int, std::vector<std::shared_ptr<DepoPolyline>>>;
+    particle_polylines_t
+    build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
+                             const depo_position_f& position,
+                             const std::vector<int>* orig_ids = nullptr);
+
     /// Label the tree in place.  Throws ValueError when a node has no
-    /// matching blob.
+    /// matching blob.  With particles, the per-point trajectory fields
+    /// (d_traj, dir, s_t, dedx, end) come from the nearest particle
+    /// polyline of the key and the end / kink heat from the keypoints of
+    /// all of them; without, from the key's single polyline (the legacy
+    /// path).  The vertex and conversion keypoints use polylines either way.
     PointLabelSummary
     label_live_tree(PointCloud::Tree::Points::node_t& root,
                     const ICluster::pointer& cluster,
@@ -115,7 +133,8 @@ namespace WireCell::Truth {
                     const std::map<int, std::shared_ptr<DepoPolyline>>& polylines,
                     const PointLabelParams& params,
                     const depo_position_f& position,
-                    Log::logptr_t log = nullptr);
+                    Log::logptr_t log = nullptr,
+                    const particle_polylines_t* particles = nullptr);
 }
 
 #endif

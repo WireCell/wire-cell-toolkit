@@ -49,6 +49,9 @@ function(
     truth_table = '',
     // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
     truth_fold_negative_ids = false,
+    // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
+    truth_polyline_drift_volume_only = true,
+    truth_polyline_per_particle = true,
     // '' keeps the all-APA stage's default sink; a path writes the post-clustering
     // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
     save_tensors = '',
@@ -90,7 +93,8 @@ function(
         eventNo=event,
         truth_point_label=truth_point_label, truth_depos=truth_depos,
         truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
-        truth_fold_negative_ids=truth_fold_negative_ids);
+        truth_fold_negative_ids=truth_fold_negative_ids,
+        truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false)
                         for n in std.range(0, nanodes - 1)];
 

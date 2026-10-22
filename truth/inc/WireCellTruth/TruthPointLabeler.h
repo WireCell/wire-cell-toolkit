@@ -32,6 +32,16 @@
       labels_meta     file to write the labels_meta JSON to ("" = none);
                       the same JSON is in the output set metadata
       label_dead      reserved (dead nodes are not labelled yet; true warns)
+      polyline_drift_volume_only  build the trajectories from the depos of the
+                      face's drift volume only (x between its anode and
+                      cathode planes, any y / z; not behind the response
+                      plane); false = every depo of the event, so a track
+                      crossing the cathode gets a mirrored copy (pr_ml doc
+                      23 sec 7.4)
+      polyline_per_particle  one trajectory per Geant4 particle of a key
+                      (truth table sed_ids orig_trackid in index mode, else
+                      the depo id before folding); false = one time-ordered
+                      polyline per key, a zigzag for folded keys (doc 23)
 
     wcp-porting-img pr_ml/docs/19 sec 3.6 (T6).
  */
@@ -79,6 +89,8 @@ namespace WireCell::Truth {
         std::string m_id_mode{"auto"};
         std::string m_labels_meta{""};
         bool m_label_dead{false};
+        bool m_polyline_drift_volume_only{false};
+        bool m_polyline_per_particle{false};
         IAnodePlane::pointer m_anode;
         int m_face{0};
         IDetectorVolumes::pointer m_dv;

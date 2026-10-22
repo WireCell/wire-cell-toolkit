@@ -66,7 +66,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           truth_point_label=false, truth_depos='', truth_time_offset=0 * wc.us,
           truth_speed=null, truth_table='',
           // doc 20 sec 6.1: fold larg4's negative EM-daughter track ids to the ancestor (C++ default false)
-          truth_fold_negative_ids=false)
+          truth_fold_negative_ids=false,
+          // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
+          truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -353,7 +355,9 @@ local clus_per_face (
                                           speed=truth_assoc_speed, time_offset=truth_time_offset,
                                           truth_table=truth_table,
                                           // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
-                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true}),
+                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true,
+                                                 [if truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
+                                                 [if truth_polyline_per_particle then 'polyline_per_particle']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

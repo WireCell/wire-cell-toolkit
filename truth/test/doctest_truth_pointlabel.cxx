@@ -432,3 +432,165 @@ TEST_CASE("truth point labeler node relabels a tensor set")
     CHECK(out2->tensors()->size() == dead.size());
     CHECK(!out2->metadata().isMember("labels_meta"));
 }
+
+// pr_ml doc 23 sec 7.4: the two default-off trajectory knobs of the labeler.
+namespace {
+
+    ITensorSet::pointer run_node(const Setup& s, IDepoSet::pointer depos, bool drift_volume_only, bool per_particle)
+    {
+        auto root = make_tree(s);
+        auto tens = Aux::TensorDM::as_tensors(*root, "pointtrees/100/live");
+        Configuration md;
+        md["ident"] = 100;
+        auto ints = std::make_shared<Aux::SimpleTensorSet>(100, md, std::make_shared<ITensor::vector>(tens));
+        Truth::TruthPointLabeler node;
+        auto cfg = node.default_configuration();
+        cfg["speed"] = speed;
+        cfg["anode"] = String::format("AnodePlane:%d", s.anode->ident());
+        cfg["face"] = 0;
+        cfg["drift_speed"] = speed;
+        // Aux::time2drift places x from the collection wires; put the
+        // depos on the tree's x (response plane + drift of the time)
+        const double xorig = s.face->planes()[2]->wires().front()->center().x();
+        cfg["reco_time_offset"] = s.face->dirx() * (s.xresp - xorig) / speed;
+        cfg["tick"] = tick;
+        cfg["pfmerger"]["q_min"] = 100;
+        if (drift_volume_only) cfg["polyline_drift_volume_only"] = true;
+        if (per_particle) cfg["polyline_per_particle"] = true;
+        node.configure(cfg);
+        ITensorSet::pointer out;
+        REQUIRE(node(std::make_tuple(ints, s.cluster, depos), out));
+        REQUIRE(out);
+        return out;
+    }
+
+    // every truth column of the relabelled tree, concatenated over the blob nodes
+    std::map<std::string, std::vector<double>> truth_columns(const ITensorSet::pointer& out)
+    {
+        auto back = Aux::TensorDM::as_pctree(*out->tensors(), "pointtrees/100/live");
+        REQUIRE(back);
+        std::map<std::string, std::vector<double>> cols;
+        for (auto* n : blob_nodes(*back)) {
+            const auto& tpc = n->value.local_pcs().at("truth");
+            for (const auto& k : tpc.keys()) {
+                const auto arr = tpc.get(k);
+                auto& c = cols[k];
+                if (arr->is_type<int>()) {
+                    for (int v : arr->elements<int>()) c.push_back(v);
+                }
+                else {
+                    for (double v : arr->elements<double>()) c.push_back(v);
+                }
+            }
+        }
+        return cols;
+    }
+}
+
+TEST_CASE("truth point labels: per-particle polylines keep folded daughters apart")
+{
+    // key 5 = an ancestor along z at y = 0 and its unsaved EM daughter
+    // (larg4 id -5, folded) along z at y = 20 mm, their depos interleaved
+    // in time: one polyline per key zigzags between the two lines.
+    IDepo::vector dv;
+    for (int k = 0; k < 4; ++k) {
+        const double z = k * 10 * units::mm;
+        auto pa = std::make_shared<Aux::SimpleDepo>(2 * k * units::ns, Point(0, 0, z), 1.0, nullptr, 0, 0, 5, 11, 1.0);
+        auto pd = std::make_shared<Aux::SimpleDepo>((2 * k + 1) * units::ns, Point(0, 20 * units::mm, z), 1.0, nullptr, 0, 0, -5, 22, 1.0);
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(0, pa->pos(), 1.0, pa, 0, 0, 5));
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(0, pd->pos(), 1.0, pd, 0, 0, -5));
+    }
+    Truth::DepoBlobAssocParams ap;
+    ap.fold_negative_ids = true;
+    Truth::depo_position_f position = [](const IDepo& d) { return d.pos(); };
+
+    auto keyed = Truth::build_polylines(dv, ap, position);
+    REQUIRE(keyed.size() == 1);
+    CHECK(keyed.at(5)->nvertices() == 8);
+    auto parts = Truth::build_particle_polylines(dv, ap, position);
+    REQUIRE(parts.size() == 1);
+    REQUIRE(parts.at(5).size() == 2);   // particles -5 and 5, in id order
+    CHECK(parts.at(5)[0]->start().y() == doctest::Approx(20 * units::mm));
+    CHECK(parts.at(5)[1]->start().y() == doctest::Approx(0));
+    CHECK(parts.at(5)[1]->length() == doctest::Approx(30 * units::mm));
+
+    // a point on the ancestor between two of its depos: on the particle,
+    // off the zigzag's chords
+    const Point p(0, 0, 15 * units::mm);
+    CHECK(keyed.at(5)->nearest(p).dist > 4 * units::mm);   // nearest chord D1 -> A2 at 4.47 mm
+    double dmin = 1e9;
+    for (const auto& q : parts.at(5)) dmin = std::min(dmin, q->nearest(p).dist);
+    CHECK(dmin == doctest::Approx(0).epsilon(1e-9));
+
+    // Stage A index mode: depo ids are rows of sed_ids, id_map gives the
+    // (folded) key and orig_ids the particle
+    IDepo::vector dvi;
+    const std::vector<int> rows{0, 1, 2, 3};
+    for (int r : rows) {
+        auto pr = std::make_shared<Aux::SimpleDepo>(r * units::ns, Point(0, 0, r * 10 * units::mm), 1.0, nullptr, 0, 0, r);
+        dvi.push_back(std::make_shared<Aux::SimpleDepo>(0, pr->pos(), 1.0, pr, 0, 0, r));
+    }
+    ap.id_map = std::make_shared<std::vector<int>>(std::vector<int>{5, 5, -5, -5});
+    const std::vector<int> orig{5, 5, 11, 12};
+    auto pi = Truth::build_particle_polylines(dvi, ap, position, &orig);
+    REQUIRE(pi.size() == 1);
+    CHECK(pi.at(5).size() == 3);
+    CHECK(Truth::build_polylines(dvi, ap, position).at(5)->nvertices() == 4);
+}
+
+TEST_CASE("truth point labeler: polyline_drift_volume_only drops the other drift volume's depos, per_particle is neutral on single-particle keys")
+{
+    auto s = make_setup();
+    const auto base = truth_columns(run_node(s, s.depos, false, false));
+    REQUIRE(base.count("d_traj"));
+
+    // a depo of track 7 in the other drift volume (face 1 side), in time
+    // between two of the track's depos and 30 mm off in z: the legacy
+    // polyline places it with face 0's drift relation and detours
+    IDepo::vector dv(s.depos->depos()->begin(), s.depos->depos()->end());
+    {
+        const Point pos(-s.xresp, s.cen_a.y(), s.cen_a.z() + 30 * units::mm);
+        auto prior = std::make_shared<Aux::SimpleDepo>(-1.0 * units::ms + 0.05 * units::us, pos, s.qa, nullptr,
+                                                      0.0, 0.0, 7, 13, 2.5);
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(span, pos, s.qa, prior, 0.1 * units::mm, 1.0 * units::mm, 7, 0, 1.0));
+    }
+    auto mirrored = std::make_shared<Aux::SimpleDepoSet>(0, dv);
+
+    const auto legacy = truth_columns(run_node(s, mirrored, false, false));
+    CHECK(legacy.at("tid") == base.at("tid"));          // the association never sees it
+    CHECK(legacy.at("s_t") != base.at("s_t"));          // the legacy trajectory does
+    for (size_t i = 0; i < base.at("tid").size(); ++i) {
+        if (base.at("tid")[i] >= 0) CHECK(base.at("d_traj")[i] < 5 * units::mm);   // the frames line up
+    }
+    const auto fixed = truth_columns(run_node(s, mirrored, true, false));
+    CHECK(fixed == base);
+
+    // the same depo on this face's drift side but beyond the face's z
+    // extent (over a neighbouring anode) is part of the trajectory and stays
+    IDepo::vector dv2(s.depos->depos()->begin(), s.depos->depos()->end());
+    {
+        const auto sens = s.face->sensitive();
+        const auto& bb = sens.bounds();
+        const double zout = std::max(bb.first.z(), bb.second.z()) + 100 * units::mm;
+        const Point pos(s.xresp - s.face->dirx() * 3e-6 * units::mm, s.cen_a.y(), zout);
+        auto prior = std::make_shared<Aux::SimpleDepo>(-1.0 * units::ms + 0.05 * units::us, pos, s.qa, nullptr,
+                                                      0.0, 0.0, 7, 13, 2.5);
+        dv2.push_back(std::make_shared<Aux::SimpleDepo>(span, pos, s.qa, prior, 0.1 * units::mm, 1.0 * units::mm, 7, 0, 1.0));
+    }
+    auto beside = std::make_shared<Aux::SimpleDepoSet>(0, dv2);
+    const auto beside_legacy = truth_columns(run_node(s, beside, false, false));
+    CHECK(beside_legacy.at("s_t") != base.at("s_t"));
+    CHECK(truth_columns(run_node(s, beside, true, false)) == beside_legacy);
+
+    // keys 7 and 8 are one particle each: the per-particle path gives the
+    // legacy bytes
+    auto out_pp = run_node(s, s.depos, false, true);
+    CHECK(truth_columns(out_pp) == base);
+    const auto pl = out_pp->metadata()["labels_meta"]["point_label"];
+    CHECK(pl["polyline_per_particle"].asBool());
+    CHECK(!pl.isMember("polyline_drift_volume_only"));
+    // off: the metadata keeps its legacy keys
+    const auto pl0 = run_node(s, s.depos, false, false)->metadata()["labels_meta"]["point_label"];
+    CHECK(!pl0.isMember("polyline_per_particle"));
+    CHECK(!pl0.isMember("polyline_drift_volume_only"));
+}

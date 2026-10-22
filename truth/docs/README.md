@@ -22,7 +22,8 @@ per-component documentation as the components land.
 | T7 | `python/validate_2d.py` (E0.5: native depo projection vs SP frames, the sec 6.3 timing self-check) | done 2026-10-21 |
 | T8 | `python/validate_3d.py` (E0.6: per-blob from `blobtruth`, per-point from the `truth` cloud, count-based matching) | done 2026-10-21 |
 | T9 | `python/qa_report.py` (sec 8 items; 3-5 and 8 placeholders) | done 2026-10-21 |
-| WP0.2 G | `clus/src/SteinerTruthLabeler.cxx` (clus visitor: `steiner_truth` / `steiner_edges` cluster clouds from the `truth` cloud), `python/steiner_truth.py` (edge classes, flow, vertex flags, skeleton metrics) | started 2026-10-22 (pr_ml doc 23) |
+| WP0.2 G | `clus/src/SteinerTruthLabeler.cxx` (clus visitor: `steiner_truth` / `steiner_edges` cluster clouds from the `truth` cloud), `python/steiner_truth.py` (edge classes, flow, vertex flags, skeleton metrics; bands 15 / 40 mm) | started 2026-10-22 (pr_ml doc 23) |
+| T6 fixes | `TruthPointLabeler` knobs `polyline_drift_volume_only`, `polyline_per_particle` (C++ default false; jsonnet `truth_polyline_drift_volume_only` / `truth_polyline_per_particle` on every clustering job, default true there -- truth-label jobs only), `build_particle_polylines` | done 2026-10-22 (pr_ml doc 23 sec 10) |
 
 ## Python
 

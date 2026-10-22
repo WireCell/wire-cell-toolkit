@@ -354,7 +354,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                      // tensors, forwarded by this face's MABC (aux_datatypes).  truth_time_offset = the BlobDepoFill
                      // association offset of the SBND truth tier (268 us), speed = drift_speed; truth_table names
                      // the Stage A truth file ('' = particle table from the depos).  false => byte-identical.
-                     truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false) = {
+                     truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false,
+                       // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
+                       truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -393,7 +395,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                                           speed=drift_speed, time_offset=truth_time_offset,
                                           truth_table=truth_table,
                                           // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
-                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true}),
+                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true,
+                                                 [if truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
+                                                 [if truth_polyline_per_particle then 'polyline_per_particle']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes=[truth_cfo, ptb],
         centernodes=[truth_depo_src],
@@ -934,7 +938,9 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // 19/20 T6): per-point truth labels in the per-face stage, see clus_per_face.
 // Defaults off => every call site passes the pre-change defaults => byte-identical.
 function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data',
-         truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false) {
+         truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false,
+           // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
+           truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true) {
     // Output prefix for the per-event writers: output_dir/ normally, and
     // output_dir/<evt_subdir>/ when a group runs in one process (see the
     // evt_subdir doc above).
@@ -972,7 +978,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
-                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids),
+                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
+                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
@@ -983,7 +990,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
                       nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut,
-                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids),
+                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
+                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,

@@ -446,6 +446,9 @@ function(
     truth_table = '',
     // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
     truth_fold_negative_ids = false,
+    // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
+    truth_polyline_drift_volume_only = true,
+    truth_polyline_per_particle = true,
 )
 
 local params_w = if wires_file == '' then params else params { files+: { wires: wires_file } };
@@ -478,7 +481,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         cluster_id_order=clus_cluster_id_order,
                         truth_point_label=truth_point_label, truth_depos=truth_depos,
                         truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
-                        truth_fold_negative_ids=truth_fold_negative_ids);
+                        truth_fold_negative_ids=truth_fold_negative_ids,
+                        truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final

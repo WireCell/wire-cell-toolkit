@@ -62,6 +62,8 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["shared_frac"] = m_label.shared_frac;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
+    cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
+    cfg["polyline_per_particle"] = m_polyline_per_particle;
     return cfg;
 }
 
@@ -104,6 +106,8 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.shared_frac = get(cfg, "shared_frac", m_label.shared_frac);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
+    m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
+    m_polyline_per_particle = get(cfg, "polyline_per_particle", m_polyline_per_particle);
     if (m_label_dead) {
         log->warn("label_dead is reserved: dead nodes are not labelled in this version");
     }
@@ -118,6 +122,9 @@ Configuration Truth::TruthPointLabeler::labels_meta(const TruthTable& tt, const 
     m["pf_source"] = tt.source;
     m["pfmerger"] = m_pfparams.meta();
     m["point_label"] = m_label.meta();
+    // recorded only when on, so that the legacy metadata keeps its bytes
+    if (m_polyline_drift_volume_only) m["point_label"]["polyline_drift_volume_only"] = true;
+    if (m_polyline_per_particle) m["point_label"]["polyline_per_particle"] = true;
     m["assoc"] = assoc_default_configuration(m_assoc);
     m["id_mode"] = m_id_mode;
     m["reco_time_offset"] = m_reco_time_offset;
@@ -266,8 +273,45 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         const double x = Aux::time2drift(face, toff, speed, d.time() + depo_toff);
         return Point(x, d.pos().y(), d.pos().z());
     };
-    auto polylines = build_polylines(depos, assoc, position);
-    auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log);
+    // pr_ml doc 23 sec 7.4: the depos of the face's drift volume -- x
+    // between its anode and cathode planes (the x extent of its sensitive
+    // box, any y / z, so a track keeps its part over a neighbouring anode
+    // of the same drift side) and not behind the response plane (as
+    // DepoBlobAssoc); the other drift volume's depos would be mirrored.
+    IDepo::vector face_depos;
+    if (m_polyline_drift_volume_only) {
+        const auto sens = face->sensitive();
+        const auto& bb = sens.bounds();
+        const double xlo = std::min(bb.first.x(), bb.second.x()), xhi = std::max(bb.first.x(), bb.second.x());
+        const Pimpos* pimpos = face->planes()[m_assoc.pindex]->pimpos();
+        const int dirx = face->dirx();
+        const double behind_tolerance = 0.01 * units::mm;
+        for (const auto& d : depos) {
+            const double x = d->pos().x();
+            if (x < xlo || x > xhi) continue;
+            if (dirx * pimpos->relative(d->pos())[0] < -behind_tolerance) continue;
+            face_depos.push_back(d);
+        }
+    }
+    const IDepo::vector& pl_depos = m_polyline_drift_volume_only ? face_depos : depos;
+    auto polylines = build_polylines(pl_depos, assoc, position);
+    particle_polylines_t particles;
+    if (m_polyline_per_particle) {
+        std::vector<int> orig_ids;
+        if (index_mode) {
+            orig_ids.reserve(tt.sed_ids.size());
+            for (const auto& [tid, orig] : tt.sed_ids) orig_ids.push_back(orig);
+        }
+        particles = build_particle_polylines(pl_depos, assoc, position, index_mode ? &orig_ids : nullptr);
+    }
+    auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log,
+                               m_polyline_per_particle ? &particles : nullptr);
+    if (m_polyline_drift_volume_only || m_polyline_per_particle) {
+        size_t nparts = 0;
+        for (const auto& [tid, v] : particles) nparts += v.size();
+        log->debug("call={} polylines: {} of {} depos on the face (drift_volume_only={}), {} keys, {} particle polylines",
+                   m_count, pl_depos.size(), depos.size(), m_polyline_drift_volume_only, polylines.size(), nparts);
+    }
 
     // 5. the output set: pass-through tensors, the relabelled tree, the truth tensors
     auto tv = std::make_shared<ITensor::vector>();

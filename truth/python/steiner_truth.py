@@ -13,7 +13,8 @@ original id, sed_ids column 1), placed in the reconstructed frame of THEIR OWN f
 sampler places blobs) and ordered by the time of their undrifted prior.  The track key of a particle is its larg4 id
 folded as the labeler folds it (an unsaved EM daughter's "-ancestor" -> the ancestor); labels are made per particle
 (doc 12 sec 4.1: daughters keep their own id, so fragment labels exist) and the key is stored beside them, so the
-merging can change offline.  Labels (doc 15 sec 2.2, doc 12 sec 4.3), tau_on / tau_off in wire pitches (2 / 5):
+merging can change offline.  Labels (doc 15 sec 2.2, doc 12 sec 4.3), tau_on / tau_off = 15 / 40 mm on every detector
+(owner 2026-10-22, doc 23 sec 7.1; --tau-on-pitch / --tau-off-pitch give the per-pitch bands of doc 12, e.g. 2 / 5):
 
   node  kstar, dstar     nearest particle and distance (the distance field of doc 12 sec 4.1); key = its track key
         is_vertex        a true vertex within 1 cm: the start of a particle (length >= 1 cm) that another such
@@ -388,14 +389,18 @@ def main():
     ap.add_argument("--reco-toff-us", type=float, default=0.0)
     ap.add_argument("--speed-mmus", type=float, required=True)
     ap.add_argument("--pitch-mm", type=float, required=True)
-    ap.add_argument("--tau-on-pitch", type=float, default=2.0, help="tau_on in wire pitches (doc 12 sec 4.1)")
-    ap.add_argument("--tau-off-pitch", type=float, default=5.0, help="tau_off in wire pitches")
+    ap.add_argument("--tau-on-mm", type=float, default=15.0, help="tau_on in mm, one band for all detectors (doc 23 sec 7.1)")
+    ap.add_argument("--tau-off-mm", type=float, default=40.0, help="tau_off in mm")
+    ap.add_argument("--tau-on-pitch", type=float, default=None, help="tau_on in wire pitches instead (doc 12 sec 4.1: 2)")
+    ap.add_argument("--tau-off-pitch", type=float, default=None, help="tau_off in wire pitches instead (doc 12: 5)")
     ap.add_argument("--d-cap-mm", type=float, default=25.0, help="the C++ labeler's d_traj cap (cross-check)")
     ap.add_argument("--event", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
-    prm = dict(pitch=a.pitch_mm, tau_on=a.tau_on_pitch * a.pitch_mm, tau_off=a.tau_off_pitch * a.pitch_mm, dv=1 * CM, step=3.0)
+    tau_on = a.tau_on_mm if a.tau_on_pitch is None else a.tau_on_pitch * a.pitch_mm
+    tau_off = a.tau_off_mm if a.tau_off_pitch is None else a.tau_off_pitch * a.pitch_mm
+    prm = dict(pitch=a.pitch_mm, tau_on=tau_on, tau_off=tau_off, dv=1 * CM, step=3.0)
     truth = a.truth or None
 
     try:
