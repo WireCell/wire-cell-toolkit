@@ -33,6 +33,10 @@ Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
     // Record which depos fed each blob (per-point refinement in
     // TruthPointLabeler).  Bookkeeping only; off by default.
     cfg["keep_depos"] = p.keep_depos;
+    // Fold a negative track key (larg4's "-ancestor" of a dropped EM
+    // shower daughter) to the ancestor.  Off = the key stays negative
+    // (R1 behaviour); see DepoBlobAssocParams.
+    cfg["fold_negative_ids"] = p.fold_negative_ids;
     // Truth file (truth/python/dump_truth_table.py) whose sed_ids map a
     // Stage A index-mode depo id to the G4 track id (and sed_energy to
     // the deposit energy).  "" = the depo ids are track ids already.
@@ -50,6 +54,7 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.extra_smear_long = get(cfg, "extra_smear_long", p.extra_smear_long);
     p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
     p.keep_depos = get(cfg, "keep_depos", p.keep_depos);
+    p.fold_negative_ids = get(cfg, "fold_negative_ids", p.fold_negative_ids);
     const std::string tfile = get<std::string>(cfg, "truth_table", "");
     if (!tfile.empty()) {
         auto tt = TruthTable::load(tfile);

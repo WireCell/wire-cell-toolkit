@@ -40,6 +40,18 @@ function(
     DT            = 8.8,
     lifetime      = 35.0,
     driftSpeed    = 1.563,
+    // pr_ml doc 19/20 T6: per-point truth labels (see clus.jsonnet clus_per_face)
+    // and the pctree output.  false / '' / 0 => the clus.jsonnet defaults and the
+    // all_apa default sink => byte-identical compiled config.
+    truth_point_label = false,
+    truth_depos = '',
+    truth_time_offset_us = 0,
+    truth_table = '',
+    // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
+    truth_fold_negative_ids = false,
+    // '' keeps the all-APA stage's default sink; a path writes the post-clustering
+    // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
+    save_tensors = '',
 )
     // Build params inside function so all physics values are TLAs.
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
@@ -75,7 +87,10 @@ function(
         output_dir=output_dir,
         runNo=run,
         subRunNo=subrun,
-        eventNo=event);
+        eventNo=event,
+        truth_point_label=truth_point_label, truth_depos=truth_depos,
+        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
+        truth_fold_negative_ids=truth_fold_negative_ids);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false)
                         for n in std.range(0, nanodes - 1)];
 
@@ -89,7 +104,7 @@ function(
         ]
     ) for n in std.range(0, nanodes - 1)];
 
-    local clus_all = clus_maker.all_apa(anodes);
+    local clus_all = clus_maker.all_apa(anodes, tensor_outname=save_tensors);
 
     local graph = g.intern(
         innodes=   img_clus_pipe,
@@ -107,7 +122,8 @@ function(
         type: 'wire-cell',
         data: {
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellSio', 'WireCellSigProc',
-                      'WireCellImg', 'WireCellRoot', 'WireCellTbb', 'WireCellClus'],
+                      'WireCellImg', 'WireCellRoot', 'WireCellTbb', 'WireCellClus']
+                     + (if truth_point_label then ['WireCellTruth'] else []),  // pr_ml doc 19 T6; off => the same list
             apps: ['Pgrapher'],
         },
     };

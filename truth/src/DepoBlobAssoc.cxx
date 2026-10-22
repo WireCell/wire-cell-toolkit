@@ -240,6 +240,9 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
             if (params.id_map && tid >= 0 && (size_t)tid < params.id_map->size()) {
                 tid = (*params.id_map)[tid];
             }
+            if (params.fold_negative_ids && tid < 0) {
+                tid = -tid;     // larg4: a dropped EM daughter's deposit is keyed "-ancestor"
+            }
             key_id.push_back(tid);
             key_energy.push_back(energy);
         }

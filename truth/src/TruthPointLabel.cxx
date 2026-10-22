@@ -29,6 +29,7 @@ Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& as
         double energy = key->energy();
         if (assoc.energy_map && tid >= 0 && (size_t)tid < assoc.energy_map->size()) energy = (*assoc.energy_map)[tid];
         if (assoc.id_map && tid >= 0 && (size_t)tid < assoc.id_map->size()) tid = (*assoc.id_map)[tid];
+        if (assoc.fold_negative_ids && tid < 0) tid = -tid;   // as the association: larg4's "-ancestor"
         auto& pl = out[tid];
         if (!pl) pl = std::make_shared<DepoPolyline>();
         pl->add(position(*d), key->time(), energy);

@@ -419,4 +419,16 @@ TEST_CASE("truth point labeler node relabels a tensor set")
     // EOS passes through
     REQUIRE(node(std::make_tuple(nullptr, nullptr, nullptr), out));
     CHECK(out == nullptr);
+
+    // A set without a point tree at inpath (a face PointTreeBuilding never
+    // sampled, PDHD wall faces) passes through unchanged: same object, no
+    // truth tensors added.
+    auto dead = Aux::TensorDM::as_tensors(*make_tree(s), "pointtrees/101/dead");
+    auto ints2 = std::make_shared<Aux::SimpleTensorSet>(101, md, std::make_shared<ITensor::vector>(dead));
+    ITensorSet::pointer out2;
+    REQUIRE(node(std::make_tuple(ints2, s.cluster, s.depos), out2));
+    REQUIRE(out2);
+    CHECK(out2.get() == ints2.get());
+    CHECK(out2->tensors()->size() == dead.size());
+    CHECK(!out2->metadata().isMember("labels_meta"));
 }

@@ -307,3 +307,62 @@ TEST_CASE("blobdepolabel reproduces blobdepofill bit for bit and keeps per-track
     CHECK(sum2 == doctest::Approx(tot2).epsilon(1e-9));
     CHECK(tot2 > 0.0);
 }
+
+TEST_CASE("blobdepolabel folds larg4's negative EM-daughter ids to the ancestor when asked")
+{
+    // the two depos keyed on the LArSoft "-ancestor" convention: the proton's
+    // deposit is a dropped EM daughter of track 1 (-1, the ghost sentinel of
+    // the per-point labels) and the muon's of track 7 (-7).
+    auto s = make_setup();
+    IDepo::vector dv;
+    for (const auto& d : *s.depos->depos()) {
+        const int id = d->id() == 7 ? -7 : -1;
+        auto prior = std::make_shared<Aux::SimpleDepo>(d->prior()->time(), d->prior()->pos(), d->charge(), nullptr,
+                                                       0.0, 0.0, id, d->prior()->pdg(), d->prior()->energy());
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(d->time(), d->pos(), d->charge(), prior,
+                                                       d->extent_long(), d->extent_tran(), id, 0, 1.0));
+    }
+    Truth::DepoBlobAssocParams p;
+    p.speed = 1.6 * units::mm / units::us;
+
+    // off (the R1 behaviour): the keys stay negative
+    auto res = Truth::depo_blob_assoc(s.cluster, dv, p);
+    std::set<int> keys;
+    for (const auto& [vd, e] : res.blobs) for (const auto& [tid, qe] : e.by_track) keys.insert(tid);
+    CHECK(keys.count(-1) == 1);
+    CHECK(keys.count(-7) == 1);
+    CHECK(keys.count(1) == 0);
+
+    // on: the charge is keyed on the ancestor, totals unchanged
+    p.fold_negative_ids = true;
+    auto res2 = Truth::depo_blob_assoc(s.cluster, dv, p);
+    std::set<int> keys2;
+    double q1 = 0.0, q7 = 0.0;
+    for (const auto& [vd, e] : res2.blobs) {
+        for (const auto& [tid, qe] : e.by_track) {
+            keys2.insert(tid);
+            if (tid == 1) q1 += qe.first;
+            if (tid == 7) q7 += qe.first;
+        }
+    }
+    CHECK(keys2.count(1) == 1);
+    CHECK(keys2.count(7) == 1);
+    CHECK(keys2.count(-1) == 0);
+    CHECK(keys2.count(-7) == 0);
+    double qm1 = 0.0, qm7 = 0.0;
+    for (const auto& [vd, e] : res.blobs) {
+        for (const auto& [tid, qe] : e.by_track) {
+            if (tid == -1) qm1 += qe.first;
+            if (tid == -7) qm7 += qe.first;
+        }
+    }
+    CHECK(q1 == qm1);
+    CHECK(q7 == qm7);
+    CHECK(q1 > 0.0);
+    CHECK(q7 > 0.0);
+
+    // the config key round-trips through the component
+    Truth::BlobDepoLabel label;
+    auto cfg = label.default_configuration();
+    CHECK(cfg["fold_negative_ids"].asBool() == false);
+}

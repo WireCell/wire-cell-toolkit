@@ -109,7 +109,14 @@ function(
     // (compiled config byte-identical to before the flip).  The default of
     // clus.jsonnet's own argument stays null, so pr.jsonnet is unchanged.
     clus_cluster_id_order = 'tree',
-
+    // pr_ml doc 19/20 T6: per-point truth labels (see clus.jsonnet).  false /
+    // '' / 0 => args passed as their clus.jsonnet defaults => byte-identical.
+    truth_point_label = false,
+    truth_depos = '',
+    truth_time_offset_us = 0,
+    truth_table = '',
+    // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
+    truth_fold_negative_ids = false,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -127,7 +134,10 @@ local trigger_offset = trigger_offset_us * wc.us;
 local clus = import 'pgrapher/experiment/pdhd/clus.jsonnet';
 local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, eventNo=event,
                         time_offset=time_offset, trigger_offset=trigger_offset,
-                        cluster_id_order=clus_cluster_id_order);
+                        cluster_id_order=clus_cluster_id_order,
+                        truth_point_label=truth_point_label, truth_depos=truth_depos,
+                        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
+                        truth_fold_negative_ids=truth_fold_negative_ids);
 
 // Drift-side groups: x-aligned APAs viewed through a COMMON face, i.e. one
 // drift volume: even idents (APA0+APA2) image through face 0 (drift -x), odd
@@ -222,7 +232,8 @@ local app = {
 local cmdline = {
     type: "wire-cell",
     data: {
-        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellRoot", "WireCellTbb", "WireCellClus", "WireCellMatch", "WireCellAux"],
+        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellRoot", "WireCellTbb", "WireCellClus", "WireCellMatch", "WireCellAux"]
+                 + (if truth_point_label then ["WireCellTruth"] else []),  // pr_ml doc 19 T6; off => the same list
         apps: ["Pgrapher"]
     }
 };

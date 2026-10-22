@@ -227,11 +227,37 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
 
     // 4. the tree
     Aux::TensorDM::TensorIndex ti(*ints->tensors());
-    auto root = Aux::TensorDM::as_pctree(ti, inpath);
+    std::unique_ptr<PointCloud::Tree::Points::node_t> root;
+    if (ti.get(inpath)) {
+        try {
+            root = Aux::TensorDM::as_pctree(ti, inpath);
+        }
+        catch (const KeyError& err) {
+            // a tree tensor whose named point clouds are not in the set
+            root = nullptr;
+        }
+    }
     if (!root) {
-        THROW(ValueError() << errmsg{"TruthPointLabeler: no point tree at " + inpath});
+        // A face without a point tree: PointTreeBuilding emits no tree for
+        // a face it never sampled (PDHD wall faces, pr_ml doc 20 R2), so
+        // there is nothing to label -- the set passes through unchanged.
+        log->debug("call={} ident {} cluster {}: no point tree at {}, passing the set through",
+                   m_count, ident, icluster->ident(), inpath);
+        out = ints;
+        ++m_count;
+        return true;
     }
     IAnodeFace::pointer face = m_anode->face(m_face);
+    if (!face) {
+        // SBND's per-APA clustering runs every APA as "face 0" while APA 1
+        // only has face 1 (doc 20 sec 4.5): take the anode's first face.
+        for (const auto& f : m_anode->faces()) {
+            if (f) { face = f; break; }
+        }
+        if (face) {
+            log->debug("no face {} on anode {}, using face {}", m_face, m_anode->ident(), face->which());
+        }
+    }
     if (!face) {
         THROW(ValueError() << errmsg{"TruthPointLabeler: no face " + std::to_string(m_face)});
     }

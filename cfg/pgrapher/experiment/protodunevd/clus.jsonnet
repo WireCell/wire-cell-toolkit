@@ -64,7 +64,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           // the graph, every component and the compiled config are the
           // pre-change bytes.
           truth_point_label=false, truth_depos='', truth_time_offset=0 * wc.us,
-          truth_speed=null, truth_table='')
+          truth_speed=null, truth_table='',
+          // doc 20 sec 6.1: fold larg4's negative EM-daughter track ids to the ancestor (C++ default false)
+          truth_fold_negative_ids=false)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -349,7 +351,9 @@ local clus_per_face (
     }, nin=0, nout=1),
     local truth_tpl = truth.point_labeler('%s-%d'%[anode.name, face], anode, face, dv,
                                           speed=truth_assoc_speed, time_offset=truth_time_offset,
-                                          truth_table=truth_table),
+                                          truth_table=truth_table,
+                                          // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
+                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

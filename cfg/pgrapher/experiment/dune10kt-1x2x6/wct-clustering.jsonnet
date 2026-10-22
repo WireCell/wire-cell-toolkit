@@ -32,6 +32,14 @@ function(
     save_tensors = '',
     wrapped_channel_charge = true,
     clus_save_assoc_id = false,
+    // pr_ml doc 19/20 T6: per-point truth labels (see clus.jsonnet).  false /
+    // '' / 0 => args passed as their clus.jsonnet defaults => byte-identical.
+    truth_point_label = false,
+    truth_depos = '',
+    truth_time_offset_us = 0,
+    truth_table = '',
+    // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
+    truth_fold_negative_ids = false,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -49,7 +57,10 @@ local cluster_source(fname) = g.pnode({
 
 local clus = import 'pgrapher/experiment/dune10kt-1x2x6/clus.jsonnet';
 local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, eventNo=event,
-                        time_offset=time_offset, trigger_offset=0);
+                        time_offset=time_offset, trigger_offset=0,
+                        truth_point_label=truth_point_label, truth_depos=truth_depos,
+                        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
+                        truth_fold_negative_ids=truth_fold_negative_ids);
 
 local actives = [cluster_source("%s/clusters-apa-anode%d-ms-active.tar.gz"%[input, a.data.ident]) for a in anodes];
 local maskeds = [cluster_source("%s/clusters-apa-anode%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in anodes];
@@ -77,7 +88,8 @@ local app = { type: 'Pgrapher', data: { edges: g.edges(graph) } };
 local cmdline = {
     type: "wire-cell",
     data: {
-        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellTbb", "WireCellClus", "WireCellAux"],
+        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellTbb", "WireCellClus", "WireCellAux"]
+                 + (if truth_point_label then ["WireCellTruth"] else []),  // pr_ml doc 19 T6; off => the same list
         apps: ["Pgrapher"]
     }
 };

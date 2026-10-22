@@ -61,6 +61,16 @@ namespace WireCell::Truth {
         /// (for per-point refinement).  Off = no extra bookkeeping;
         /// the integration itself is unchanged either way.
         bool keep_depos{false};
+        /// Fold a negative track key to its absolute value.  LArSoft's
+        /// larg4 gives the deposits of a dropped EM-shower daughter the
+        /// track id "-ancestor" (the kept particle whose shower it is):
+        /// FD-HD, FD-VD and SBND chains write them, the ProtoDUNE chains
+        /// keep the daughters.  Off (the R1 behaviour, pr_ml doc 19
+        /// sec 14.4) keys the charge on the negative id, which for a
+        /// single primary is -1, the per-point ghost sentinel (doc 20
+        /// sec 6.1).  On = the Pandora/SPINE rollup: the charge goes
+        /// to the ancestor's row.
+        bool fold_negative_ids{false};
     };
 
     struct DepoBlobAssocResult {

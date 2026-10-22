@@ -17,6 +17,7 @@ local g = import 'pgraph.jsonnet';
 local f = import 'pgrapher/common/funcs.jsonnet';
 local clus = import 'pgrapher/common/clus.jsonnet';
 local dead_regions = import 'pgrapher/experiment/sbnd/dead_regions.jsonnet';
+local truth = import 'pgrapher/common/truth.jsonnet';  // pr_ml doc 19/20 T6 (per-point truth labels)
 
 local time_offset = -205 * wc.us;  // = -tick0_time (cfg/.../sbnd/params.jsonnet sim.tick0_time)
 local drift_speed = 1.563 * wc.mm / wc.us;
@@ -345,7 +346,15 @@ local bs_dead_face(apa, face) = {
 // 423 cm main that is really a 412 cm through-going cosmic touching a 343 cm
 // second track at 0.35 cm.  false omits the key => compiled config
 // byte-identical to before the knob existed (runner: -sep-recarve).
-local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='', dg_length_cut=0) = {
+local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per_face_bee=true, bee_sink=null, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, pos_offset_on=true, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, evt_subdir='', dg_length_cut=0,
+                     // pr_ml doc 19/20 T6: per-point truth labels (counterpart of protodunevd/clus.jsonnet).
+                     // truth_point_label=true fans the live ICluster out to the PointTreeBuilding and to a
+                     // TruthPointLabeler (point tree + cluster + the drifted depos of truth_depos) that adds the
+                     // "truth" local point cloud to every live blob node and the blobtruth / truth_nu / truth_pf
+                     // tensors, forwarded by this face's MABC (aux_datatypes).  truth_time_offset = the BlobDepoFill
+                     // association offset of the SBND truth tier (268 us), speed = drift_speed; truth_table names
+                     // the Stage A truth file ('' = particle table from the depos).  false => byte-identical.
+                     truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -366,7 +375,37 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
             inject_dead_winds: [dead_regions.region(anode.data.ident)],
         },
     }, nin=2, nout=1, uses=[bsl, bsd, dv]),
-    local cluster2pct = ptb,
+    // pr_ml doc 19 T6: with truth_point_label the live cluster is fanned out to the
+    // PointTreeBuilding and to a TruthPointLabeler that joins the point tree, the
+    // cluster and the drifted depos; the intern keeps PTB's two input ports (live
+    // through the fanout, dead direct).  Off => the bare ptb, byte-identical.
+    local truth_cfo = g.pnode({
+        type: 'ClusterFanout',
+        name: 'truth-cfo-%s-%d' % [anode.name, face],
+        data: { multiplicity: 2 },
+    }, nin=1, nout=2),
+    local truth_depo_src = g.pnode({
+        type: 'DepoFileSource',
+        name: 'truth-depos-%s-%d' % [anode.name, face],
+        data: { inname: truth_depos, scale: 1 },
+    }, nin=0, nout=1),
+    local truth_tpl = truth.point_labeler('%s-%d' % [anode.name, face], anode, face, dv,
+                                          speed=drift_speed, time_offset=truth_time_offset,
+                                          truth_table=truth_table,
+                                          // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
+                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true}),
+    local cluster2pct = if truth_point_label then g.intern(
+        innodes=[truth_cfo, ptb],
+        centernodes=[truth_depo_src],
+        outnodes=[truth_tpl],
+        iports=[truth_cfo.iports[0], ptb.iports[1]],
+        edges=[
+            g.edge(truth_cfo, ptb, 0, 0),
+            g.edge(ptb, truth_tpl, 0, 0),
+            g.edge(truth_cfo, truth_tpl, 1, 1),
+            g.edge(truth_depo_src, truth_tpl, 0, 2),
+        ]
+    ) else ptb,
     local face_name = '%s-%d' % [anode.name, face],
     local cm = clus.clustering_methods(
         prefix=face_name,
@@ -464,6 +503,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
         type: 'MultiAlgBlobClustering',
         name: name,
         data: {
+            // pr_ml doc 19 T6: forward the truth tensors of TruthPointLabeler
+            // (C++ default: none).  Key omitted when off => byte-identical.
+            [if truth_point_label then 'aux_datatypes']: ['truth_nu', 'truth_pf', 'blobtruth'],
             inpath: 'pointtrees/%d',
             outpath: 'pointtrees/%d',
             perf: true,
@@ -888,7 +930,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // the configured runNo/eventNo auto-increment.  Used by the bundled standalone chain
 // (one wire-cell call over many events) whose ident already carries the real event
 // id.  Default false keeps production byte-identical (the key is omitted).
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data') {
+// truth_point_label / truth_depos / truth_time_offset / truth_table (pr_ml doc
+// 19/20 T6): per-point truth labels in the per-face stage, see clus_per_face.
+// Defaults off => every call site passes the pre-change defaults => byte-identical.
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data',
+         truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false) {
     // Output prefix for the per-event writers: output_dir/ normally, and
     // output_dir/<evt_subdir>/ when a group runs in one process (see the
     // evt_subdir doc above).
@@ -925,7 +971,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
     per_face(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
-                      bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on),
+                      bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
+                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
@@ -935,7 +982,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       trace_bee=trace_bee, save_assoc_id=save_assoc_id, sep_vertex_veto=sep_vertex_veto,
                       sep_track_recarve=sep_track_recarve, sep_fv_point=sep_fv_point,
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
-                      nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut),
+                      nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut,
+                      truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,

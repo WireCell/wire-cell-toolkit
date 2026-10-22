@@ -25,9 +25,30 @@ local clus = import "pgrapher/common/clus.jsonnet";
 local P = import "pgrapher/experiment/dune10kt-1x2x6/clus_params.jsonnet";
 
 function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
-          time_offset=0 * wc.us, trigger_offset=0 * wc.us)
+          time_offset=0 * wc.us, trigger_offset=0 * wc.us,
+          // pr_ml doc 19/20 (native MC-truth plumbing, T6): per-point truth
+          // labels, the counterpart of protodunevd/clus.jsonnet.
+          // truth_point_label=true inserts a TruthPointLabeler between every
+          // per-face PointTreeBuilding and its MultiAlgBlobClustering (a
+          // ClusterFanout gives it the live ICluster, a DepoFileSource reading
+          // truth_depos -- the drifted sim-depos of Stage B -- the IDepoSet),
+          // which adds the "truth" local point cloud to every live blob node
+          // and the blobtruth / truth_nu / truth_pf tensors, forwarded by the
+          // per-face MABC (aux_datatypes).  truth_time_offset / truth_speed are
+          // the BlobDepoFill association knobs of the detector's truth tier
+          // (FD-HD 1x2x6: 64.5 us, P.drift_speed); truth_table names the
+          // Stage A truth file ('' = particle table from the depos).  false =>
+          // the graph, every component and the compiled config are the
+          // pre-change bytes.
+          truth_point_label=false, truth_depos='', truth_time_offset=0 * wc.us,
+          truth_speed=null, truth_table='',
+          // doc 20 sec 6.1: fold larg4's negative EM-daughter track ids to the ancestor (C++ default false)
+          truth_fold_negative_ids=false)
 
 local drift_speed = P.drift_speed;
+// pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
+local truth = import "pgrapher/common/truth.jsonnet";
+local truth_assoc_speed = if truth_speed == null then drift_speed else truth_speed;
 local initial_index = "0";
 local index = std.parseInt(initial_index);
 
@@ -182,7 +203,38 @@ local clus_per_face (
         }
     }, nin=2, nout=1, uses=[bsl, bsd, dv]),
 
-    local cluster2pct = g.intern(
+    // pr_ml doc 19 T6: with truth_point_label the live cluster is fanned out
+    // to the PointTreeBuilding and to a TruthPointLabeler that joins the
+    // point tree, the cluster and the drifted depos.  Off => the legacy
+    // two-node intern, byte-identical.
+    local truth_cfo = g.pnode({
+        type: 'ClusterFanout',
+        name: 'truth-cfo-%s-%d'%[an, face],
+        data: { multiplicity: 2 },
+    }, nin=1, nout=2),
+    local truth_depo_src = g.pnode({
+        type: 'DepoFileSource',
+        name: 'truth-depos-%s-%d'%[an, face],
+        data: { inname: truth_depos, scale: 1 },
+    }, nin=0, nout=1),
+    local truth_tpl = truth.point_labeler('%s-%d'%[an, face], anode, face, dv,
+                                          speed=truth_assoc_speed, time_offset=truth_time_offset,
+                                          truth_table=truth_table,
+                                          // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
+                                          extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true}),
+    local cluster2pct = if truth_point_label then g.intern(
+        innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
+        centernodes = [truth_cfo, ptb, truth_depo_src],
+        outnodes = [truth_tpl],
+        edges = [
+            g.edge(cluster_scope_filter_live, truth_cfo, 0, 0),
+            g.edge(truth_cfo, ptb, 0, 0),
+            g.edge(cluster_scope_filter_dead, ptb, 0, 1),
+            g.edge(ptb, truth_tpl, 0, 0),
+            g.edge(truth_cfo, truth_tpl, 1, 1),
+            g.edge(truth_depo_src, truth_tpl, 0, 2),
+        ]
+    ) else g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [],
         outnodes = [ptb],
@@ -218,6 +270,9 @@ local clus_per_face (
         type: "MultiAlgBlobClustering",
         name: name,
         data:  {
+            // pr_ml doc 19 T6: forward the truth tensors of TruthPointLabeler
+            // (C++ default: none).  Key omitted when off => byte-identical.
+            [if truth_point_label then 'aux_datatypes']: ['truth_nu', 'truth_pf', 'blobtruth'],
             inpath: "pointtrees/%d",
             outpath: "pointtrees/%d",
             perf: true,

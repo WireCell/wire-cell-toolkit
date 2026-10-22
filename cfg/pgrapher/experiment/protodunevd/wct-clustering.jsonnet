@@ -444,6 +444,8 @@ function(
     truth_depos = '',
     truth_time_offset_us = 0,
     truth_table = '',
+    // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
+    truth_fold_negative_ids = false,
 )
 
 local params_w = if wires_file == '' then params else params { files+: { wires: wires_file } };
@@ -475,7 +477,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         drift_speed_b=drift_speed_bot, drift_speed_t=drift_speed_top,
                         cluster_id_order=clus_cluster_id_order,
                         truth_point_label=truth_point_label, truth_depos=truth_depos,
-                        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table);
+                        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
+                        truth_fold_negative_ids=truth_fold_negative_ids);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final

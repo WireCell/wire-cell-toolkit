@@ -134,7 +134,10 @@ def per_blob(bt_files, cl_files, shared_frac, truth_tab):
             cols_tab = m["columns"]
         if cl_files and i < len(cl_files) and cl_files[i]:
             solved.append(cluster_blob_values(cl_files[i]))
-    S = np.concatenate(rows_sum) if rows_sum else np.zeros((0, 7))
+    if not rows_sum:
+        # an event whose imaging made no blob at all (R2: a PDHD K+ that decayed before the TPC): no table, no metrics
+        return {"nblobs": 0, "nfilled": 0, "nghost": 0, "note": "no blobtruth_sum table in the archives"}, np.zeros(0)
+    S = np.concatenate(rows_sum)
     Tb = np.concatenate(rows_tab) if rows_tab else np.zeros((0, 6))
     c = {k: cols_sum.index(k) for k in cols_sum}
     q_true, q_top, tid_top, ntr = S[:, c["q_true"]], S[:, c["q_top"]], S[:, c["tid_top"]].astype(int), S[:, c["ntracks"]].astype(int)
@@ -190,7 +193,10 @@ def per_blob(bt_files, cl_files, shared_frac, truth_tab):
 
 def per_point(pctree_file, pitch_mm, truth_tab, shared_frac):
     tens = load_tensors(pctree_file)
-    tree = PCTree(tens)
+    try:
+        tree = PCTree(tens)
+    except RuntimeError as err:   # an empty dump (an event without blobs)
+        return {"error": str(err)}, None
     if "truth" not in tree.arrays:
         return {"error": "no truth cloud in the dump"}, None
     tr, p3 = tree.arrays["truth"], tree.arrays["3d"]
