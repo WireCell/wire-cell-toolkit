@@ -21,8 +21,8 @@ namespace {
 
 TEST_CASE("truth schema columns are unique and ordered")
 {
-    CHECK(Truth::schema_version == 1);
-    CHECK(Truth::schema_version_string() == "wct-truth-schema-1");
+    CHECK(Truth::schema_version == 2);
+    CHECK(Truth::schema_version_string() == "wct-truth-schema-2");
 
     CHECK(unique(Truth::truth_nu_columns()));
     CHECK(unique(Truth::truth_pf_columns()));
@@ -54,4 +54,15 @@ TEST_CASE("truth schema columns are unique and ordered")
     CHECK(std::string(Truth::truth_pc_name) == "truth");
     CHECK(Truth::truth_pc_keys().front() == "tid");
     CHECK(Truth::depo_truth_columns().size() == 3);
+
+    // process codes: stable, unique, "unknown" first, "primary" second
+    const auto& pn = Truth::process_names();
+    CHECK(unique(pn));
+    CHECK(pn[Truth::process_unknown] == "unknown");
+    CHECK(Truth::process_code("primary") == 1);
+    CHECK(Truth::process_code("no-such-process") == Truth::process_unknown);
+    CHECK(Truth::process_code("muMinusCaptureAtRest") == Truth::column_index(pn, "muMinusCaptureAtRest"));
+    CHECK(Truth::column_index(pf, "process") == 5);
+    CHECK(Truth::column_index(pf, "nope") == -1);
+    CHECK(Truth::sed_ids_columns() == std::vector<std::string>{"trackid", "orig_trackid"});
 }

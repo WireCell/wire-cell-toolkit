@@ -17,7 +17,7 @@
 namespace WireCell::Truth {
 
     /// Bumped on any change of a name, order or sentinel below.
-    constexpr int schema_version = 1;
+    constexpr int schema_version = 2;
     std::string schema_version_string();
 
     /// Sentinels of the per-point / per-blob track key "tid".
@@ -63,6 +63,30 @@ namespace WireCell::Truth {
     /// Members of the depo file written by DepoFileSink when
     /// truth_sidecar is on: depo_truth_<ident>.npy columns.
     const std::vector<std::string>& depo_truth_columns();
+
+    /// Index of a column name in a column list, or -1.
+    int column_index(const std::vector<std::string>& cols, const std::string& name);
+
+    /// Geant4 creation-process names, in code order.  The "process"
+    /// column of truth_pf is the index into this list; an unlisted
+    /// process gets process_unknown (0).  python/truth_table.py
+    /// carries the same list (checked by the dumper against the
+    /// "process_names" member it writes).
+    const std::vector<std::string>& process_names();
+    constexpr int process_unknown = 0;
+    int process_code(const std::string& name);
+
+    /// Columns of the sed_ids table of the truth file (one row per
+    /// SimEnergyDeposit, in vector order): the depo id in Stage A
+    /// index mode is the row number.
+    const std::vector<std::string>& sed_ids_columns();
+
+    /// Members of the truth file (truth_<ident>.npz) written by
+    /// python/dump_truth_table.py and read by TruthTable.
+    constexpr const char* truth_file_nu = "truth_nu";
+    constexpr const char* truth_file_pf = "truth_pf";
+    constexpr const char* truth_file_sed_ids = "sed_ids";
+    constexpr const char* truth_file_sed_trackq = "sed_trackq";
 }
 
 #endif

@@ -71,3 +71,45 @@ const std::vector<std::string>& Truth::depo_truth_columns()
     static const std::vector<std::string> cols = {"energy", "orig_id", "reserved"};
     return cols;
 }
+
+int Truth::column_index(const std::vector<std::string>& cols, const std::string& name)
+{
+    for (size_t i = 0; i < cols.size(); ++i) {
+        if (cols[i] == name) return (int)i;
+    }
+    return -1;
+}
+
+const std::vector<std::string>& Truth::process_names()
+{
+    // Index = code.  Append only; never reorder (schema_version).
+    static const std::vector<std::string> names = {
+        "unknown", "primary",
+        "eIoni", "muIoni", "hIoni", "ionIoni",
+        "eBrem", "muBrems", "hBrems",
+        "annihil", "conv", "compt", "phot", "Rayl",
+        "Decay", "muMinusCaptureAtRest", "muMinusAtomicCapture",
+        "hadElastic", "CoulombScat", "msc",
+        "neutronInelastic", "protonInelastic", "pi+Inelastic", "pi-Inelastic",
+        "kaon+Inelastic", "kaon-Inelastic", "kaon0LInelastic", "kaon0SInelastic",
+        "lambdaInelastic", "sigma+Inelastic", "sigma-Inelastic",
+        "anti_protonInelastic", "anti_neutronInelastic",
+        "dInelastic", "tInelastic", "He3Inelastic", "alphaInelastic", "ionInelastic",
+        "nCapture", "hFritiofCaptureAtRest", "hBertiniCaptureAtRest",
+        "muPairProd", "hPairProd", "photonNuclear", "electronNuclear", "muonNuclear",
+        "RadioactiveDecay", "RadioactiveDecayBase", "Radioactivation",
+        "Transportation", "StepLimiter"};
+    return names;
+}
+
+int Truth::process_code(const std::string& name)
+{
+    const int ind = column_index(process_names(), name);
+    return ind < 0 ? process_unknown : ind;
+}
+
+const std::vector<std::string>& Truth::sed_ids_columns()
+{
+    static const std::vector<std::string> cols = {"trackid", "orig_trackid"};
+    return cols;
+}
