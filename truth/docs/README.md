@@ -15,7 +15,7 @@ per-component documentation as the components land.
 |---|---|---|
 | T1 | package skeleton: `wscript_build`, `CMakeLists.txt`, `Schema.h`, `wcdoctest-truth` | done 2026-10-21 |
 | T2 | depo identity round trip: `Aux::fill` child-index defect fix, `DepoFileSource` legacy fallback, `DepoFileSink.truth_sidecar` | done 2026-10-21 (in `aux/`, `sio/`) |
-| T3 | `DepoBlobAssoc`, `BlobDepoLabel`, `BlobDepoLabelTensor` | pending |
+| T3 | `DepoBlobAssoc`, `BlobDepoLabel`, `BlobDepoLabelTensor` (+ `iface/IClusterDepoTensor`) | done 2026-10-21 (`docs/components/`) |
 | T4 | `TruthTableSource`, `python/dump_truth_table.py` | pending |
 | T5 | `PFMerger`, `DepoPolyline`, `Matching` | pending |
 | T6 | `TruthPointLabeler` | pending |

@@ -1,0 +1,100 @@
+#include "WireCellTruth/BlobDepoLabel.h"
+
+#include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/NamedFactory.h"
+
+WIRECELL_FACTORY(BlobDepoLabel, WireCell::Truth::BlobDepoLabel,
+                 WireCell::INamed,
+                 WireCell::IBlobDepoFill, WireCell::IConfigurable)
+
+using namespace WireCell;
+
+Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
+{
+    Configuration cfg;
+    // As BlobDepoFill: added to depo times before associating with slices.
+    cfg["time_offset"] = p.time_offset;
+    // As BlobDepoFill: number of sigma of the depo Gaussian to consider.
+    cfg["nsigma"] = p.nsigma;
+    // As BlobDepoFill: drift speed converting extent_long to time.  Required.
+    cfg["speed"] = p.speed;
+    // As BlobDepoFill: the primary plane the depos are diced onto.
+    cfg["pindex"] = p.pindex;
+    // Track key and energy from the depo's prior() (the undrifted G4
+    // depo) when it exists, else from the depo itself.
+    cfg["id_from_prior"] = p.id_from_prior;
+    // Extra widths added in quadrature to the depo extents, in time
+    // (longitudinal) and distance (transverse), e.g. the signal
+    // processing filter widths.  0 = off: the integration is then
+    // exactly BlobDepoFill's and the filled cluster is bit-identical.
+    cfg["extra_smear_long"] = p.extra_smear_long;
+    cfg["extra_smear_tran"] = p.extra_smear_tran;
+    return cfg;
+}
+
+void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
+{
+    p.time_offset = get(cfg, "time_offset", p.time_offset);
+    p.nsigma = get(cfg, "nsigma", p.nsigma);
+    p.speed = get(cfg, "speed", p.speed);
+    p.pindex = get(cfg, "pindex", p.pindex);
+    p.id_from_prior = get(cfg, "id_from_prior", p.id_from_prior);
+    p.extra_smear_long = get(cfg, "extra_smear_long", p.extra_smear_long);
+    p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
+    if (p.speed <= 0.0) {
+        THROW(ValueError() << errmsg{"no speed provided"});
+    }
+}
+
+Truth::BlobDepoLabel::BlobDepoLabel()
+    : Aux::Logger("BlobDepoLabel", "truth")
+{
+}
+Truth::BlobDepoLabel::~BlobDepoLabel()
+{
+}
+
+Configuration Truth::BlobDepoLabel::default_configuration() const
+{
+    return assoc_default_configuration(m_params);
+}
+
+void Truth::BlobDepoLabel::configure(const Configuration& cfg)
+{
+    assoc_configure(m_params, cfg);
+}
+
+bool Truth::BlobDepoLabel::operator()(const input_tuple_type& intup,
+                                      output_pointer& out)
+{
+    out = nullptr;
+    auto icluster = std::get<0>(intup);
+    auto ideposet = std::get<1>(intup);
+    if (!icluster or !ideposet) {
+        if (icluster) {
+            log->warn("join node got non-EOS ICluster {} on EOS", icluster->ident());
+        }
+        if (ideposet) {
+            log->warn("join node got non-EOS IDepoSet {} on EOS", ideposet->ident());
+        }
+        log->debug("EOS at call={}", m_count);
+        ++m_count;
+        return true;
+    }
+
+    auto res = depo_blob_assoc(icluster, *ideposet->depos(), m_params, log);
+
+    size_t nfilled = 0, nmixed = 0;
+    for (const auto& [vd, e] : res.blobs) {
+        if (e.by_track.empty()) continue;
+        ++nfilled;
+        if (e.by_track.size() > 1) ++nmixed;
+    }
+    log->debug("call={} cluster {} deposet {}: nblobs={} ndepos={} filled={} mixed={}",
+               m_count, icluster->ident(), ideposet->ident(),
+               res.nblobs, res.ndepos, nfilled, nmixed);
+
+    out = filled_cluster(icluster, res);
+    ++m_count;
+    return true;
+}

@@ -12,6 +12,7 @@
 #include "WireCellIface/IApplication.h"
 #include "WireCellIface/IBlob.h"
 #include "WireCellIface/IBlobDepoFill.h"
+#include "WireCellIface/IClusterDepoTensor.h"
 #include "WireCellIface/IBlobSampler.h"
 #include "WireCellIface/IBlobSampling.h"
 #include "WireCellIface/IBlobSet.h"
@@ -122,6 +123,7 @@ IAnodePlane::~IAnodePlane() {}
 IApplication::~IApplication() {}
 IBlob::~IBlob() {}
 IBlobDepoFill::~IBlobDepoFill() {}
+IClusterDepoTensor::~IClusterDepoTensor() {}
 IBlobSampler::~IBlobSampler() {}
 IBlobSampling::~IBlobSampling() {}
 IBlobSet::~IBlobSet() {}
