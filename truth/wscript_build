@@ -1,0 +1,6 @@
+# -*- python -*-
+# WireCellTruth: native MC-truth plumbing (per-blob and per-point G4
+# identity, particle-flow truth tables, labelling helpers).  Plugin
+# depending on the util/iface/aux spine only; never on another plugin
+# (toolkit AGENTS.md).  Design: wcp-porting-img pr_ml/docs/19.
+bld.smplpkg('WireCellTruth', use='WireCellUtil WireCellIface WireCellAux')
