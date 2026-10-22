@@ -359,6 +359,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
                 data: { grouping: 'live', bundle_gid: 0, cluster_t0: bundle_t0 },
             },
             switch_scope: cm_old.switch_scope(),
+            // pr_ml doc 23 (WP0.2 G labels): truth labels on the Steiner graph; needs the per-point
+            // truth cloud (truth_point_label in the clustering job).  Name it after the last Steiner
+            // stage.  Absent from pipeline_names => absent from the compiled config.
+            steiner_truth: cm.steiner_truth(),
             steiner: cm.steiner(retiler=steiner_args.retiler, perf=steiner_args.perf,
                                 require_beam_flash=steiner_args.require_beam_flash,
                                 beam_window_only=steiner_args.beam_window_only,

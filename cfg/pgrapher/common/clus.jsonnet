@@ -1724,6 +1724,21 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             uses: [detector_volumes, pc_transforms, retiler]
         },
 
+        // pr_ml doc 23 (WP0.2 G labels): MC-truth labels on the Steiner graph.
+        // Reads steiner_graph/steiner_pc and the per-point "truth" cloud of
+        // TruthPointLabeler, adds the steiner_truth / steiner_edges cluster
+        // clouds; never touches the graph.  Place it after the last Steiner
+        // stage the consumer reads.  A new component: only compiled in when a
+        // pipeline names it.  C++ default join_radius 0.5 cm.
+        steiner_truth(name="", grouping="live", join_radius=0.5*wc.cm) :: {
+            type: "SteinerTruthLabeler",
+            name: prefix+name,
+            data: {
+                grouping: grouping,
+                join_radius: join_radius,
+            },
+        },
+
         // Add a "FiducialUtils" to a grouping.  
         fiducialutils(name="", live_grouping="live", dead_grouping="dead", target_grouping="live") :: {
             type: "MakeFiducialUtils",

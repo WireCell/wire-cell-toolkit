@@ -22,10 +22,11 @@ per-component documentation as the components land.
 | T7 | `python/validate_2d.py` (E0.5: native depo projection vs SP frames, the sec 6.3 timing self-check) | done 2026-10-21 |
 | T8 | `python/validate_3d.py` (E0.6: per-blob from `blobtruth`, per-point from the `truth` cloud, count-based matching) | done 2026-10-21 |
 | T9 | `python/qa_report.py` (sec 8 items; 3-5 and 8 placeholders) | done 2026-10-21 |
+| WP0.2 G | `clus/src/SteinerTruthLabeler.cxx` (clus visitor: `steiner_truth` / `steiner_edges` cluster clouds from the `truth` cloud), `python/steiner_truth.py` (edge classes, flow, vertex flags, skeleton metrics) | started 2026-10-22 (pr_ml doc 23) |
 
 ## Python
 
-`python/truth_table.py` (file layout, column/process lists), `dump_truth_table.py` (Stage A dumper, gallery), `validate_2d.py`, `validate_3d.py`, `qa_report.py`; every script prints its usage with `-h`. The R1 campaign drivers that call them live in `wcp-porting-img/pr_ml/r1/`.
+`python/truth_table.py` (file layout, column/process lists), `dump_truth_table.py` (Stage A dumper, gallery), `validate_2d.py`, `validate_3d.py`, `qa_report.py`, `xres_check.py` (doc 21), `parity_larsoft.py` (doc 22), `steiner_truth.py` (doc 23); every script prints its usage with `-h`. The R1 campaign drivers that call them live in `wcp-porting-img/pr_ml/r1/`.
 
 ## Rules
 

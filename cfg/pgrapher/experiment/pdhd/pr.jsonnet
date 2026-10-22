@@ -1575,6 +1575,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             // instead) -- process every scope-passing cluster, narrowed to the
             // beam-coincident bundle when beam_window_only is on (the default; see
             // the pr() argument).  Keys omitted when off => byte-identical.
+            // pr_ml doc 23 (WP0.2 G labels): truth labels on the Steiner graph; needs the per-point
+            // truth cloud (truth_point_label in the clustering job).  Name it after the last Steiner
+            // stage.  Absent from pipeline_names => absent from the compiled config.
+            steiner_truth: cm.steiner_truth(),
             steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false,
                                 beam_window_only=beam_gate,
                                 beam_window_low=beam_window[0],
