@@ -19,7 +19,13 @@ per-component documentation as the components land.
 | T4 | `TruthTable`, `TruthTableSource`, `python/{truth_table,dump_truth_table}.py` | done 2026-10-21 (`docs/components/TruthTableSource.md`) |
 | T5 | `PFMerger`, `DepoPolyline`, `Matching` (header-only, `inc/`) | done 2026-10-21 |
 | T6 | `TruthPointLabel` (algorithm), `TruthPointLabeler` (+ `iface/ITruthPointLabeler`), `cfg/pgrapher/common/truth.jsonnet`, PDVD `clus.jsonnet` args | done 2026-10-21 (`docs/components/TruthPointLabeler.md`) |
-| T7–T9 | `validate_2d.py`, `validate_3d.py`, `qa_report.py` | pending |
+| T7 | `python/validate_2d.py` (E0.5: native depo projection vs SP frames, the sec 6.3 timing self-check) | done 2026-10-21 |
+| T8 | `python/validate_3d.py` (E0.6: per-blob from `blobtruth`, per-point from the `truth` cloud, count-based matching) | done 2026-10-21 |
+| T9 | `python/qa_report.py` (sec 8 items; 3-5 and 8 placeholders) | done 2026-10-21 |
+
+## Python
+
+`python/truth_table.py` (file layout, column/process lists), `dump_truth_table.py` (Stage A dumper, gallery), `validate_2d.py`, `validate_3d.py`, `qa_report.py`; every script prints its usage with `-h`. The R1 campaign drivers that call them live in `wcp-porting-img/pr_ml/r1/`.
 
 ## Rules
 

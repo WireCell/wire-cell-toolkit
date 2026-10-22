@@ -25,5 +25,7 @@
 | `id_from_prior` | track key and energy taken from the depo's `prior()` (the undrifted G4 depo) when it exists (default true) |
 | `extra_smear_long` | width in time added in quadrature to the longitudinal extent; 0 = off, integration exactly BlobDepoFill's (default 0) |
 | `extra_smear_tran` | width in distance added in quadrature to the transverse extent; 0 = off (default 0) |
+| `keep_depos` | record per blob the depos that fed it (bookkeeping for `TruthPointLabeler`; default false) |
+| `truth_table` | truth file whose `sed_ids` map Stage A index-mode depo ids to track ids and `sed_energy` gives the deposit energy; '' = ids are track ids (default '') |
 
 Design and parity gate: `wcp-porting-img/pr_ml/docs/19_native_truth_plumbing.md` sec 3.5.

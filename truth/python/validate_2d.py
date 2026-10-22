@@ -189,13 +189,13 @@ def project(data, key, face_geo, t0, tick, nticks, toff, speed, smear, nsigma, s
         gp = pix_o[grp]; gk = k_o[grp]
         ntid = np.zeros(nw * nticks, dtype=np.int32)
         np.add.at(ntid, gp, 1)
-        best = np.full(nw * nticks, -1, dtype=np.int64); bestq = np.zeros(nw * nticks)
-        for p_, kk_, qq_ in zip(gp, gk, qsum):
-            if qq_ > bestq[p_]:
-                bestq[p_] = qq_; best[p_] = kk_
-        qtrack = {}
-        for kk_, qq_ in zip(gk, qsum):
-            qtrack[int(kk_)] = qtrack.get(int(kk_), 0.0) + float(qq_)
+        # per pixel: the (pixel, track) group with the largest charge -> sort by (pixel, -q) and keep the first of each pixel
+        o2 = np.lexsort((-qsum, gp))
+        first = np.concatenate(([True], gp[o2][1:] != gp[o2][:-1]))
+        best = np.full(nw * nticks, -1, dtype=np.int64)
+        best[gp[o2][first]] = gk[o2][first]
+        uk, inv = np.unique(gk, return_inverse=True)
+        qtrack = dict(zip(uk.tolist(), np.bincount(inv, weights=qsum).tolist()))
         out[pi] = (grid, best.reshape(nw, nticks), ntid.reshape(nw, nticks), qtrack)
     return out
 
@@ -249,14 +249,11 @@ def analyse(frames, geo, data, key, tid_of_key, cls_of_tid, anode, toff, speed, 
                 # whole-plane time-profile cross-correlation: the lag (ticks) of truth onto reco, 0 when the offset is right
                 pt, pr = tru.sum(axis=0), np.clip(reco, 0, None).sum(axis=0)
                 if pt.sum() > 0 and pr.sum() > 0:
-                    best = (0, -2.0)
-                    for lag in range(-400, 401, 2):
-                        sh = np.roll(pt, lag)
-                        if lag > 0: sh[:lag] = 0
-                        elif lag < 0: sh[lag:] = 0
-                        c = np.corrcoef(sh, pr)[0, 1]
-                        if c > best[1]: best = (lag, c)
-                    A["profile_lag_ticks"] = best[0]; A["profile_corr"] = float(best[1])
+                    a_ = (pt - pt.mean()) / (pt.std() + 1e-12); b_ = (pr - pr.mean()) / (pr.std() + 1e-12)
+                    n_ = len(a_); L = 400
+                    xc = np.correlate(np.pad(b_, (L, L)), a_, mode="valid") / n_   # xc[j]: lag = j - L (truth shifted by +lag onto reco)
+                    j = int(np.argmax(xc))
+                    A["profile_lag_ticks"] = int(j - L); A["profile_corr"] = float(xc[j])
                 else:
                     A["profile_lag_ticks"] = None; A["profile_corr"] = None
                 A["closure"] = float(reco.sum() / tru.sum()) if tru.sum() > 0 else None

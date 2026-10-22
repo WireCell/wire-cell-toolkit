@@ -1,4 +1,5 @@
 #include "WireCellTruth/BlobDepoLabel.h"
+#include "WireCellTruth/TruthTable.h"
 
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -32,6 +33,10 @@ Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
     // Record which depos fed each blob (per-point refinement in
     // TruthPointLabeler).  Bookkeeping only; off by default.
     cfg["keep_depos"] = p.keep_depos;
+    // Truth file (truth/python/dump_truth_table.py) whose sed_ids map a
+    // Stage A index-mode depo id to the G4 track id (and sed_energy to
+    // the deposit energy).  "" = the depo ids are track ids already.
+    cfg["truth_table"] = "";
     return cfg;
 }
 
@@ -45,6 +50,19 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.extra_smear_long = get(cfg, "extra_smear_long", p.extra_smear_long);
     p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
     p.keep_depos = get(cfg, "keep_depos", p.keep_depos);
+    const std::string tfile = get<std::string>(cfg, "truth_table", "");
+    if (!tfile.empty()) {
+        auto tt = TruthTable::load(tfile);
+        if (!tt.sed_ids.empty()) {
+            auto map = std::make_shared<std::vector<int>>();
+            map->reserve(tt.sed_ids.size());
+            for (const auto& [tid, orig] : tt.sed_ids) map->push_back(tid);
+            p.id_map = map;
+        }
+        if (!tt.sed_energy.empty()) {
+            p.energy_map = std::make_shared<std::vector<float>>(tt.sed_energy);
+        }
+    }
     if (p.speed <= 0.0) {
         THROW(ValueError() << errmsg{"no speed provided"});
     }

@@ -57,24 +57,25 @@ def check_blobtruth(fn):
         return {"file": fn, "ok": None, "why": "no tables"}
     mt, T = tab; ms, S = sumt
     ct = {c: i for i, c in enumerate(mt["columns"])}; cs = {c: i for i, c in enumerate(ms["columns"])}
-    key_t = np.stack([T[:, ct["face"]], T[:, ct["slice_ident"]], T[:, ct["blob_ident"]]], axis=1) if "face" in ct else None
-    per_blob = {}
-    for r in T:
-        k = (int(r[ct["face"]]), int(r[ct["slice_ident"]]), int(r[ct["blob_ident"]]))
-        per_blob[k] = per_blob.get(k, 0.0) + float(r[ct["q_bk"]])
-    bad = 0; worst = 0.0
-    if "face" in cs:
-        for r in S:
-            k = (int(r[cs["face"]]), int(r[cs["slice_ident"]]), int(r[cs["blob_ident"]]))
-            q = float(r[cs["q_true"]]); s_ = per_blob.get(k, 0.0)
-            if q > 0 and abs(s_ - q) > 1e-6 * max(q, 1.0):
-                bad += 1; worst = max(worst, abs(s_ - q) / max(q, 1.0))
+    # both tensors are in graph vertex order: the table rows of blob i are the ntracks_i rows after those of blobs < i
+    # (blob idents alone are not unique: they repeat across slices and faces)
+    bad = 0; worst = 0.0; pos = 0
+    nt = S[:, cs["ntracks"]].astype(int); q_bk = T[:, ct["q_bk"]]
+    if nt.sum() != len(T):
+        return {"file": os.path.basename(fn), "ok": False, "why": "table rows %d != sum of ntracks %d" % (len(T), int(nt.sum()))}
+    for i, r in enumerate(S):
+        q = float(r[cs["q_true"]]); s_ = float(q_bk[pos:pos + nt[i]].sum()); pos += nt[i]
+        if q > 0 and abs(s_ - q) > 1e-6 * max(q, 1.0):
+            bad += 1; worst = max(worst, abs(s_ - q) / max(q, 1.0))
     qwin = float(ms.get("q_depos_window", ms.get("q_depos", 0.0)))
     qblobs = float(S[:, cs["q_true"]].sum())
-    leak = qwin > 0 and qblobs > qwin * (1 + 1e-6)
+    # q_blobs / q_window is reported, not judged: before solving (tru0) overlapping blobs of a slice share wires and a depo's
+    # charge is counted in each of them, so the sum over blobs legitimately exceeds the depo total (the inverted-interval
+    # defect of wcfm doc 05 showed as per-blob leaks into W columns, which the per-track-sum identity and the live-tier
+    # ratio catch).
     return {"file": os.path.basename(fn), "nblobs": int(len(S)), "sum_mismatch": bad, "worst_rel": worst,
             "q_blobs": qblobs, "q_window": qwin, "q_blobs_over_window": (qblobs / qwin) if qwin > 0 else None,
-            "ok": bool(bad == 0 and not leak), "why": "" if (bad == 0 and not leak) else ("per-track sums != q_true" if bad else "more charge in blobs than depos in the window")}
+            "ok": bool(bad == 0), "why": "" if bad == 0 else "per-track sums != q_true"}
 
 
 def main():
