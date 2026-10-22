@@ -102,6 +102,7 @@
 #include "WireCellIface/ITerminal.h"
 #include "WireCellIface/ITiling.h"
 #include "WireCellIface/ITrace.h"
+#include "WireCellIface/ITruthPointLabeler.h"
 #include "WireCellIface/ITraceRanker.h"
 #include "WireCellIface/ITrackSegment.h"
 #include "WireCellIface/ITrackSegmentSampler.h"
@@ -124,6 +125,7 @@ IApplication::~IApplication() {}
 IBlob::~IBlob() {}
 IBlobDepoFill::~IBlobDepoFill() {}
 IClusterDepoTensor::~IClusterDepoTensor() {}
+ITruthPointLabeler::~ITruthPointLabeler() {}
 IBlobSampler::~IBlobSampler() {}
 IBlobSampling::~IBlobSampling() {}
 IBlobSet::~IBlobSet() {}

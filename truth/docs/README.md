@@ -16,9 +16,9 @@ per-component documentation as the components land.
 | T1 | package skeleton: `wscript_build`, `CMakeLists.txt`, `Schema.h`, `wcdoctest-truth` | done 2026-10-21 |
 | T2 | depo identity round trip: `Aux::fill` child-index defect fix, `DepoFileSource` legacy fallback, `DepoFileSink.truth_sidecar` | done 2026-10-21 (in `aux/`, `sio/`) |
 | T3 | `DepoBlobAssoc`, `BlobDepoLabel`, `BlobDepoLabelTensor` (+ `iface/IClusterDepoTensor`) | done 2026-10-21 (`docs/components/`) |
-| T4 | `TruthTableSource`, `python/dump_truth_table.py` | pending |
-| T5 | `PFMerger`, `DepoPolyline`, `Matching` | pending |
-| T6 | `TruthPointLabeler` | pending |
+| T4 | `TruthTable`, `TruthTableSource`, `python/{truth_table,dump_truth_table}.py` | done 2026-10-21 (`docs/components/TruthTableSource.md`) |
+| T5 | `PFMerger`, `DepoPolyline`, `Matching` (header-only, `inc/`) | done 2026-10-21 |
+| T6 | `TruthPointLabel` (algorithm), `TruthPointLabeler` (+ `iface/ITruthPointLabeler`), `cfg/pgrapher/common/truth.jsonnet`, PDVD `clus.jsonnet` args | done 2026-10-21 (`docs/components/TruthPointLabeler.md`) |
 | T7–T9 | `validate_2d.py`, `validate_3d.py`, `qa_report.py` | pending |
 
 ## Rules
@@ -29,7 +29,8 @@ per-component documentation as the components land.
   exception is the `Aux::fill` child-index defect fix (doc 19 sec 3.3, owner decision O2),
   which changes the `child` column of depo files written with priors.
 - `Schema.h` is the contract: names, orders, sentinels (`tid_ghost = -1`, `tid_shared = -2`),
-  class codes. Any change bumps `schema_version`.
+  class codes, process codes. Any change bumps `schema_version` (2 since T4: the process code
+  table). `python/truth_table.py` mirrors the column and process lists.
 
 ## Depo file format (after T2)
 

@@ -231,7 +231,11 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
             if (params.id_from_prior && maybe->prior()) {
                 src = maybe->prior().get();
             }
-            key_id.push_back(src->id());
+            int tid = src->id();
+            if (params.id_map && tid >= 0 && (size_t)tid < params.id_map->size()) {
+                tid = (*params.id_map)[tid];
+            }
+            key_id.push_back(tid);
             key_energy.push_back(src->energy());
         }
         res.ndepos += depos.size();
@@ -322,6 +326,15 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
                         bt.first += dq;
                         if (depo_q > 0.0) {
                             bt.second += energy * (dq / depo_q);
+                        }
+                        if (params.keep_depos) {
+                            auto& ds = bw.entry->depos;
+                            if (!ds.empty() && ds.back().depo == idepo.get()) {
+                                ds.back().dq += dq;   // the same depo on the next wire
+                            }
+                            else {
+                                ds.push_back({idepo.get(), tid, dq});
+                            }
                         }
                     } // over blobs on the wire
                 } // over wires

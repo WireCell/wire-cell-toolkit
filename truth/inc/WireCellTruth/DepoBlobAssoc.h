@@ -27,7 +27,9 @@
 #include "WireCellUtil/Logging.h"
 
 #include <map>
+#include <memory>
 #include <unordered_map>
+#include <vector>
 
 namespace WireCell::Truth {
 
@@ -47,6 +49,15 @@ namespace WireCell::Truth {
         /// which case the integration is exactly BlobDepoFill's.
         double extra_smear_long{0.0};
         double extra_smear_tran{0.0};
+        /// Optional map from the key depo's id() to the track key
+        /// (Stage A index mode: id = SimEnergyDeposit index, the map
+        /// is the truth file's sed_ids trackid column).  An id outside
+        /// the map keeps itself.  Null = identity.
+        std::shared_ptr<const std::vector<int>> id_map;
+        /// Record, per blob, the depos that deposited charge in it
+        /// (for per-point refinement).  Off = no extra bookkeeping;
+        /// the integration itself is unchanged either way.
+        bool keep_depos{false};
     };
 
     struct DepoBlobAssocResult {
@@ -55,6 +66,10 @@ namespace WireCell::Truth {
             double q_total{0.0};
             /// track key -> (charge, energy share), sorted by key.
             std::map<int, std::pair<double, double>> by_track;
+            /// With keep_depos: (depo, track key, charge in this blob),
+            /// in integration order; a depo appears once per blob.
+            struct DepoShare { const IDepo* depo; int tid; double dq; };
+            std::vector<DepoShare> depos;
         };
         /// Keyed by the blob's vertex descriptor in the input cluster graph.
         std::unordered_map<cluster_vertex_t, BlobEntry> blobs;

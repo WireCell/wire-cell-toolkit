@@ -29,6 +29,9 @@ Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
     // exactly BlobDepoFill's and the filled cluster is bit-identical.
     cfg["extra_smear_long"] = p.extra_smear_long;
     cfg["extra_smear_tran"] = p.extra_smear_tran;
+    // Record which depos fed each blob (per-point refinement in
+    // TruthPointLabeler).  Bookkeeping only; off by default.
+    cfg["keep_depos"] = p.keep_depos;
     return cfg;
 }
 
@@ -41,6 +44,7 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.id_from_prior = get(cfg, "id_from_prior", p.id_from_prior);
     p.extra_smear_long = get(cfg, "extra_smear_long", p.extra_smear_long);
     p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
+    p.keep_depos = get(cfg, "keep_depos", p.keep_depos);
     if (p.speed <= 0.0) {
         THROW(ValueError() << errmsg{"no speed provided"});
     }

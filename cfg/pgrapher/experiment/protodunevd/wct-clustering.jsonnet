@@ -438,6 +438,12 @@ function(
     // '' => the inert dump_mode sink in clus.jsonnet is unchanged => byte-identical.
     // Runner: run_clus_evt.sh -save-pctree => work/<RUN6>_<EVT>/pctree-evt<ID>.tar.gz.
     pctree_outname = '',
+    // pr_ml doc 19 T6: per-point truth labels (see clus.jsonnet).  false /
+    // '' / 0 => args passed as their clus.jsonnet defaults => byte-identical.
+    truth_point_label = false,
+    truth_depos = '',
+    truth_time_offset_us = 0,
+    truth_table = '',
 )
 
 local params_w = if wires_file == '' then params else params { files+: { wires: wires_file } };
@@ -467,7 +473,9 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         time_offset=time_offset, relax_containment_filter=relax_containment_filter,
                         trigger_offset=trigger_offset_bot, trigger_offset_top=trigger_offset_top,
                         drift_speed_b=drift_speed_bot, drift_speed_t=drift_speed_top,
-                        cluster_id_order=clus_cluster_id_order);
+                        cluster_id_order=clus_cluster_id_order,
+                        truth_point_label=truth_point_label, truth_depos=truth_depos,
+                        truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final
@@ -737,7 +745,8 @@ local app = {
 local cmdline = {
     type: "wire-cell",
     data: {
-        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellRoot", "WireCellTbb", "WireCellClus", "WireCellMatch", "WireCellAux"],
+        plugins: ["WireCellGen", "WireCellPgraph", "WireCellSio", "WireCellSigProc", "WireCellImg", "WireCellRoot", "WireCellTbb", "WireCellClus", "WireCellMatch", "WireCellAux"]
+                 + (if truth_point_label then ["WireCellTruth"] else []),  // pr_ml doc 19 T6; off => the same list
         apps: ["Pgrapher"]
     }
 };

@@ -26,6 +26,17 @@
 
 namespace WireCell::Truth {
 
+    /// The blobtruth (M,6) and blobtruth_sum (B,5) tensors of an
+    /// association result, rows in graph vertex order, tracks in key
+    /// order; datapaths "<datapath>/blobtruth" and
+    /// "<datapath>/blobtruth_sum".  Shared by BlobDepoLabelTensor and
+    /// TruthPointLabeler.
+    ITensor::vector blobtruth_tensors(const ICluster::pointer& icluster,
+                                      const DepoBlobAssocResult& res,
+                                      const std::string& datapath,
+                                      double min_frac = 0.0,
+                                      size_t* nrows_out = nullptr);
+
     class BlobDepoLabelTensor : public Aux::Logger,
                                 public IClusterDepoTensor,
                                 public IConfigurable
