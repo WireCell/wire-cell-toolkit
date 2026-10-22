@@ -363,6 +363,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
             // truth cloud (truth_point_label in the clustering job).  Name it after the last Steiner
             // stage.  Absent from pipeline_names => absent from the compiled config.
             steiner_truth: cm.steiner_truth(),
+            // pr_ml doc 23 sec 11 (WP0.2 R labels): the PR point assignment of every segment; after
+            // tagger_check_neutrino.  Absent from pipeline_names => absent from the compiled config.
+            pr_truth: cm.pr_truth(),
             steiner: cm.steiner(retiler=steiner_args.retiler, perf=steiner_args.perf,
                                 require_beam_flash=steiner_args.require_beam_flash,
                                 beam_window_only=steiner_args.beam_window_only,

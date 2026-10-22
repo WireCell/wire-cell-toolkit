@@ -19,7 +19,9 @@ merging can change offline.  Labels (doc 15 sec 2.2, doc 12 sec 4.3), tau_on / t
   node  kstar, dstar     nearest particle and distance (the distance field of doc 12 sec 4.1); key = its track key
         is_vertex        a true vertex within 1 cm: the start of a particle (length >= 1 cm) that another such
                          particle passes within 1 cm of
-        is_nu_vertex     the neutrino vertex (median start of the primaries of an interaction) within 1 cm
+        is_nu_vertex     the neutrino vertex (median start of the primaries of an interaction) within 1 cm; every
+                         truth_nu row counts, including a CORSIKA row on SBND bnb events (doc 23 sec 12: on
+                         the R2 events that row labels no node; pr_truth.py leaves it out)
   edge  cls4             0 on-trajectory: kstar(a) = kstar(b) = p, both within tau_on, every chord sample (3 mm)
                            within tau_on of T_p, and |s(b) - s(a)| <= 1.5 |ab| + 1 pitch (arc-length slack)
                          1 junction: different particles, both ends within tau_on, and the start of one of the two
@@ -27,7 +29,9 @@ merging can change offline.  Labels (doc 15 sec 2.2, doc 12 sec 4.3), tau_on / t
                          2 false bridge: different particles, both ends within tau_on, no such start
                          3 ghost: an end beyond tau_off
                         -1 don't care (the band cases)
-        same_key         the two ends' particles carry the same track key (a parent and its folded daughter)
+        same_key         the two ends' particles carry the same track key (a parent and its folded daughter); a node
+                         with no particle within tau_off has key -1 (kstar -1, dstar inf; sec 12), so an edge
+                         between two such nodes (a ghost, cls4 3) also reads 1
         flow             +1 / -1: sign of the trajectory tangent (time order) along src -> dst at the midpoint,
                          on-trajectory edges only; else 0
 
@@ -96,6 +100,9 @@ def per_node(tree, name):
 
 
 # ---------------------------------------------------------------------------- trajectories
+SAMPLE_STEP = 2.0    # mm: spacing of the k-d samples along every trajectory segment (candidate search, OwnerIndex)
+
+
 class Polyline:
     def __init__(self, V):
         self.V = V
@@ -108,7 +115,9 @@ class Polyline:
         self.kd = cKDTree(0.5 * (self.A + self.B)) if len(self.L) else None
 
     def nearest(self, Q, kc=8):
-        """distance, arc length, unit tangent of the closest polyline point of every row of Q."""
+        """distance, arc length, unit tangent of the closest polyline point of every row of Q, among the segments
+        with the kc nearest midpoints -- the candidate rule of the C++ labeler (DepoPolyline::nearest), kept so the
+        reference computes the labeler's quantity (doc 23 sec 12)."""
         Q = np.atleast_2d(Q)
         if self.kd is None:
             d = np.linalg.norm(Q - self.V[0], axis=1)
@@ -127,6 +136,67 @@ class Polyline:
         return d[r, best], self.s[seg] + u[r, best] * L[r, best], self.T[seg]
 
 
+class OwnerIndex:
+    """Nearest of several polylines ("owners"), searching every owner that can be nearest.
+
+    Every segment of every owner carries k-d samples at most `step` apart, so an owner whose polyline passes within
+    D of a query has a sample within D + step / 2 of it.  A first pass takes the owner of the nearest sample as the
+    upper bound D; every owner with a sample within min(D, cap) + step / 2 is then evaluated with its own
+    Polyline.nearest, and the smallest distance wins (ties to the lower owner index).  Owners farther than `cap` are
+    not searched (distance +inf).  doc 23 sec 12: until 2026-10-22 the candidates were the owners of the 8 nearest
+    depo vertices, which misses a particle whose segment passes closer without one of those vertices (dense showers)."""
+
+    def __init__(self, polys, step=SAMPLE_STEP):
+        self.polys, self.step = polys, step
+        S, O = [], []
+        for i, pl in enumerate(polys):
+            if len(pl.L):
+                n = np.maximum(1, np.ceil(pl.L / step).astype(int))
+                rep = np.repeat(np.arange(len(pl.L)), n)
+                f = (np.arange(len(rep)) - np.repeat(np.r_[0, np.cumsum(n)[:-1]], n) + 0.5) / n[rep]
+                S.append(pl.A[rep] + (pl.B - pl.A)[rep] * f[:, None])
+            else:
+                S.append(pl.V[:1])
+            O.append(np.full(len(S[-1]), i))
+        self.kd = cKDTree(np.concatenate(S))
+        self.owner = np.concatenate(O)
+
+    def _eval(self, Q, qi, oi, D, S, T, O):
+        pr = np.unique(np.column_stack([oi, qi]), axis=0)
+        st = np.r_[0, np.flatnonzero(np.diff(pr[:, 0])) + 1]
+        en = np.r_[st[1:], len(pr)]
+        for s0, e0 in zip(st, en):          # owners in ascending order: strict < keeps the lower owner on a tie
+            o, qs = int(pr[s0, 0]), pr[s0:e0, 1]
+            d, s, t = self.polys[o].nearest(Q[qs])
+            better = d < D[qs]
+            q = qs[better]
+            D[q], S[q], T[q], O[q] = d[better], s[better], t[better], o
+
+    def nearest(self, Q, cap=np.inf, chunk=20000):
+        """distance, arc length, unit tangent and owner index of the nearest polyline of every row of Q."""
+        Q = np.atleast_2d(np.asarray(Q, float))
+        n = len(Q)
+        D = np.full(n, np.inf); S = np.zeros(n); T = np.zeros((n, 3)); O = np.full(n, -1, dtype=np.int64)
+        for c0 in range(0, n, chunk):
+            q = Q[c0:c0 + chunk]
+            m = len(q)
+            d, s, t, o = np.full(m, np.inf), np.zeros(m), np.zeros((m, 3)), np.full(m, -1, dtype=np.int64)
+            _, i0 = self.kd.query(q)
+            self._eval(q, np.arange(m), self.owner[i0], d, s, t, o)
+            r = np.minimum(d, cap) + 0.5 * self.step
+            lists = self.kd.query_ball_point(q, r)
+            lens = np.fromiter((len(x) for x in lists), dtype=np.int64, count=m)
+            if lens.sum():
+                qi = np.repeat(np.arange(m), lens)
+                oi = self.owner[np.concatenate([np.asarray(x, dtype=np.int64) for x in lists if len(x)])]
+                d[:] = np.inf; o[:] = -1                 # re-evaluate from scratch so ties follow the owner order
+                self._eval(q, qi, oi, d, s, t, o)
+            far = d > cap
+            d[far] = np.inf; o[far] = -1
+            D[c0:c0 + m], S[c0:c0 + m], T[c0:c0 + m], O[c0:c0 + m] = d, s, t, o
+        return D, S, T, O
+
+
 class KeyTraj:
     """The trajectory T_k of one track key: one Polyline per original G4 id carrying the key.  A positive larg4 id
     is its own key with one unit; the unsaved EM daughters keyed "-ancestor" (doc 20 sec 6.1) are folded to the
@@ -139,34 +209,22 @@ class KeyTraj:
         self.origs = origs
         V = [u.V for u in units]
         self.V = np.concatenate(V)
-        self.vunit = np.concatenate([np.full(len(v), i) for i, v in enumerate(V)])
-        self.kd = cKDTree(self.V)
         self.length = float(sum(u.length for u in units))
         main = [i for i, o in enumerate(origs) if o == key]
         self.main = main[0] if main else int(np.argmin(t0s))
         self.start = units[self.main].V[0]
+        self._oi = None
 
-    def nearest(self, Q, kc=8):
-        """distance, arc length on its unit, tangent and unit index of the closest point of T_k."""
-        Q = np.atleast_2d(Q)
-        n = len(Q)
-        d = np.full(n, np.inf); s = np.zeros(n); t = np.zeros((n, 3)); u = np.full(n, -1)
+    def nearest(self, Q):
+        """distance, arc length on its unit, tangent and unit index of the closest point of T_k, every unit searched
+        (as the C++ labeler's polyline_per_particle: the nearest of the key's particles; doc 23 sec 12)."""
         if len(self.units) == 1:
             d, s, t = self.units[0].nearest(Q)
-            return d, s, t, np.zeros(n, dtype=int)
-        k = min(kc, len(self.V))
-        _, ii = self.kd.query(Q, k=k)
-        ii = ii.reshape(n, k)
-        pairs = np.unique(np.column_stack([self.vunit[ii].ravel(), np.repeat(np.arange(n), k)]), axis=0)
-        st = np.r_[0, np.flatnonzero(np.diff(pairs[:, 0])) + 1]
-        en = np.r_[st[1:], len(pairs)]
-        for s0, e0 in zip(st, en):
-            ui, qs = int(pairs[s0, 0]), pairs[s0:e0, 1]
-            dd, ss, tt = self.units[ui].nearest(Q[qs])
-            better = dd < d[qs]
-            q = qs[better]
-            d[q], s[q], t[q], u[q] = dd[better], ss[better], tt[better], ui
-        return d, s, t, u
+            return d, s, t, np.zeros(len(d), dtype=int)
+        if self._oi is None:
+            self._oi = OwnerIndex(self.units)
+        d, s, t, u = self._oi.nearest(Q)
+        return d, s, t, u.astype(int)
 
 
 def build_trajectories(depos, truth, wires, depo_toff_us, reco_toff_us, speed):
@@ -221,41 +279,26 @@ def build_trajectories(depos, truth, wires, depo_toff_us, reco_toff_us, speed):
 
 
 class Field:
-    """The distance field over all trajectories: nearest track key and distance of query points."""
+    """The distance field over all trajectories: nearest track key and distance of query points; every particle that
+    can be nearest is searched (OwnerIndex); +inf beyond reach."""
 
     def __init__(self, trajs, reach):
         self.trajs = trajs
         self.keys = np.array(sorted(trajs), dtype=np.int64)
-        pts, lab = [], []
+        polys, own = [], []
         for i, k in enumerate(self.keys):
-            pts.append(trajs[k].V); lab.append(np.full(len(trajs[k].V), i))
-        self.P = np.concatenate(pts); self.lab = np.concatenate(lab)
-        self.kd = cKDTree(self.P)
+            for u in trajs[k].units:
+                polys.append(u); own.append(i)
+        self.own = np.array(own, dtype=np.int64)
+        self.oi = OwnerIndex(polys)
         self.maxseg = max((float(u.L.max()) for t in trajs.values() for u in t.units if len(u.L)), default=0.0)
-        self.reach = reach + 0.5 * self.maxseg
+        self.reach = reach
 
-    def nearest(self, Q, kc=8):
-        """candidate tracks = the tracks of the kc nearest depo vertices within reach (depo steps are sub-mm, so
-        the nearest trajectory always owns one of them); exact polyline distance per candidate track."""
+    def nearest(self, Q):
         Q = np.atleast_2d(Q)
-        kstar = np.full(len(Q), -1, dtype=np.int64)
-        dstar = np.full(len(Q), np.inf)
-        k = min(kc, len(self.P))
-        dd, ii = self.kd.query(Q, k=k, distance_upper_bound=self.reach)
-        dd, ii = dd.reshape(len(Q), k), ii.reshape(len(Q), k)
-        ok = np.isfinite(dd)
-        qi = np.repeat(np.arange(len(Q)), k).reshape(len(Q), k)[ok]
-        pairs = np.unique(np.column_stack([self.lab[ii[ok]], qi]), axis=0)
-        if not len(pairs):
-            return kstar, dstar
-        st = np.r_[0, np.flatnonzero(np.diff(pairs[:, 0])) + 1]
-        en = np.r_[st[1:], len(pairs)]
-        for s0, e0 in zip(st, en):
-            qs = pairs[s0:e0, 1]
-            d = self.trajs[int(self.keys[pairs[s0, 0]])].nearest(Q[qs])[0]
-            better = d < dstar[qs]
-            dstar[qs[better]] = d[better]; kstar[qs[better]] = self.keys[pairs[s0, 0]]
-        return kstar, dstar
+        d, _, _, o = self.oi.nearest(Q, cap=self.reach)
+        kstar = np.where(o >= 0, self.keys[self.own[np.maximum(o, 0)]], -1)
+        return kstar, d
 
 
 def true_vertices(trajs, lmin, dv):

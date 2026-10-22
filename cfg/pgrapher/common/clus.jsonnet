@@ -1739,6 +1739,21 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
             },
         },
 
+        // pr_ml doc 23 sec 11 (WP0.2 R labels): exports the PR chain's point
+        // assignment (each PR segment's associate_points -> cluster point
+        // index) as the pr_segments / pr_seg_points cluster clouds; the matching
+        // to truth is offline (truth/python/pr_truth.py).  Reads the graph the
+        // neutrino tagger leaves on the grouping, so place it after
+        // tagger_check_neutrino.  A new component: only compiled in when a
+        // pipeline names it.
+        pr_truth(name="", grouping="live") :: {
+            type: "PRTruthExport",
+            name: prefix+name,
+            data: {
+                grouping: grouping,
+            },
+        },
+
         // Add a "FiducialUtils" to a grouping.  
         fiducialutils(name="", live_grouping="live", dead_grouping="dead", target_grouping="live") :: {
             type: "MakeFiducialUtils",
