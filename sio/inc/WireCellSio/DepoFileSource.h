@@ -19,8 +19,13 @@
 
 #include <string>
 #include <vector>
+#include <memory>
 
 namespace WireCell::Sio {
+
+    /// One archive member read ahead of its use (see
+    /// DepoFileSource::next()).  Defined in the .cxx.
+    struct DepoFilePending;
 
     class DepoFileSource : public Aux::Logger,
                            public IDepoSetSource,
@@ -46,10 +51,20 @@ namespace WireCell::Sio {
         /// will be streamed.
         ///
         /// Depos are read from the tar stream as Numpy .npy files.
+        /// Each set is the pair depo_data_<ident>.npy and
+        /// depo_info_<ident>.npy, optionally followed by the sidecar
+        /// depo_truth_<ident>.npy (energy, orig_id, reserved) which
+        /// DepoFileSink writes when its "truth_sidecar" is true.
+        /// When the sidecar is present the energy is restored,
+        /// otherwise it is the SimpleDepo default (1.0).
         std::string m_inname;
 
         // The output stream
         boost::iostreams::filtering_istream m_in;
+
+        // One member read ahead while looking for a sidecar; it is
+        // consumed first by the next call.
+        std::unique_ptr<DepoFilePending> m_pending;
 
         IDepoSet::pointer next();
 

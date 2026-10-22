@@ -19,6 +19,21 @@ using namespace WireCell;
 using namespace WireCell::Stream;
 using namespace WireCell::String;
 
+// ident, type, tag, ext
+struct filemd_t {
+    std::string fname{""};
+    bool okay{false};
+    int ident{0};
+    std::string type{""}, tag{""}, ext{""};
+    // "depo", "data|info|truth", "npy
+};
+
+// A member read ahead of its use.
+struct WireCell::Sio::DepoFilePending {
+    pigenc::File pig;
+    filemd_t fmd;
+};
+
 Sio::DepoFileSource::DepoFileSource()
     : Aux::Logger("DepoFileSource", "io")
 {
@@ -47,6 +62,7 @@ void Sio::DepoFileSource::configure(const WireCell::Configuration& cfg)
     m_scale = get(cfg, "scale", m_scale);
 
     m_in.clear();
+    m_pending.reset();
     input_filters(m_in, m_inname);
     if (m_in.empty()) {
         THROW(ValueError() << errmsg{"DepoFileSource: unsupported inname: " + m_inname});
@@ -54,15 +70,6 @@ void Sio::DepoFileSource::configure(const WireCell::Configuration& cfg)
 
     log->debug("reading {} with scale={}", m_inname, m_scale);
 }
-
-// ident, type, tag, ext
-struct filemd_t {
-    std::string fname{""};
-    bool okay{false};
-    int ident{0};
-    std::string type{""}, tag{""}, ext{""};
-    // "depo", "data|info", "npy
-};
 
 static
 filemd_t parse_filename(const std::string& fname)
@@ -88,12 +95,21 @@ filemd_t read_pig(std::istream& si, pigenc::File& pig)
 // Read one file set from tar stream and save to frame if tag matches
 IDepoSet::pointer Sio::DepoFileSource::next()
 {
-    // Full eager load of next two files
+    // Full eager load of next two files, the first possibly already
+    // read ahead by the previous call while looking for a sidecar.
     pigenc::File pig1, pig2;
-    auto fmd1 = read_pig(m_in, pig1);
-    if (m_in.eof()) {
-        log->debug("call={}, read1 depo stream EOF with file={}", m_count, m_inname);
-        return nullptr;
+    filemd_t fmd1;
+    if (m_pending) {
+        pig1 = std::move(m_pending->pig);
+        fmd1 = m_pending->fmd;
+        m_pending.reset();
+    }
+    else {
+        fmd1 = read_pig(m_in, pig1);
+        if (m_in.eof()) {
+            log->debug("call={}, read1 depo stream EOF with file={}", m_count, m_inname);
+            return nullptr;
+        }
     }
     auto fmd2 = read_pig(m_in, pig2);
     if (m_in.eof()) {
@@ -129,6 +145,32 @@ IDepoSet::pointer Sio::DepoFileSource::next()
     /// Note, this emits have non-ascii chars from Numpy header
     // log->debug("call={}, data header: {}", m_count, dpig->header().str());
     // log->debug("call={}, info header: {}", m_count, ipig->header().str());
+
+    // Optional third member: the truth sidecar.  Read one member
+    // ahead; if it is not ours, keep it for the next call.
+    using array_xxdrw = Eigen::Array<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    array_xxdrw tarr;
+    bool have_truth = false;
+    {
+        auto pend = std::make_unique<DepoFilePending>();
+        pend->fmd = read_pig(m_in, pend->pig);
+        if (m_in.eof() || !m_in) {
+            // last set of the stream, no sidecar; the next call will
+            // see the same EOF.
+        }
+        else if (pend->fmd.okay && pend->fmd.tag == "truth" && pend->fmd.ident == ident) {
+            if (pigenc::eigen::load(pend->pig, tarr)) {
+                have_truth = true;
+            }
+            else {
+                log->warn("call={}, failed to load truth sidecar {} in file={}, ignoring",
+                          m_count, pend->fmd.fname, m_inname);
+            }
+        }
+        else {
+            m_pending = std::move(pend);
+        }
+    }
 
     using array_xxfrw = Eigen::Array<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
     array_xxfrw darr;
@@ -166,7 +208,7 @@ IDepoSet::pointer Sio::DepoFileSource::next()
         return nullptr;
     }
     const size_t ndepos = darr.rows();
-        
+
     const size_t ndata = 7;
     if (darr.cols() != ndata) {
         log->error("call={}, data column mismatch got={} want={}",
@@ -174,19 +216,47 @@ IDepoSet::pointer Sio::DepoFileSource::next()
         return nullptr;
     }
 
-    const size_t ninfo = 4; 
-    if (darr.cols() != ndata) {
+    const size_t ninfo = 4;
+    if (iarr.cols() != ninfo) {
         log->error("call={}, info column mismatch got={} want={}",
                    m_count, iarr.cols(), ninfo);
         return nullptr;
     }
-        
+
+    const size_t ntruth = 3;
+    if (have_truth) {
+        if ((size_t)tarr.rows() != ndepos || (size_t)tarr.cols() != ntruth) {
+            log->warn("call={}, truth sidecar shape mismatch got=({},{}) want=({},{}), ignoring",
+                      m_count, tarr.rows(), tarr.cols(), ndepos, ntruth);
+            have_truth = false;
+        }
+    }
+
+    // Files written before 2026-10-21 carry child == own row index on
+    // every gen>0 row (see Aux::fill).  Rows are pushed depth-first,
+    // so in that case the depo a prior belongs to is the previous row.
+    size_t nprior_rows = 0, nself = 0;
+    for (size_t ind=0; ind < ndepos; ++ind) {
+        if (iarr(ind, 2) > 0) {
+            ++nprior_rows;
+            if ((size_t)iarr(ind, 3) == ind) {
+                ++nself;
+            }
+        }
+    }
+    const bool legacy_child = nprior_rows > 0 && nself == nprior_rows;
+    if (legacy_child) {
+        log->warn("call={}, legacy self-referencing child indices on {} prior rows in file={}, using row order",
+                  m_count, nprior_rows, m_inname);
+    }
+
     // build list of depos in order given
     std::vector<std::shared_ptr<Aux::SimpleDepo>> all_sdepos;
 
     // First pass make all depos
     for (size_t ind=0; ind < ndepos; ++ind) {
 
+        const double energy = have_truth ? tarr(ind, 0) : 1.0;
         auto sdepo = std::make_shared<Aux::SimpleDepo>(
             darr(ind, 0),        // t
             Point(darr(ind, 2),  // x
@@ -197,7 +267,8 @@ IDepoSet::pointer Sio::DepoFileSource::next()
             darr(ind, 5),        // extent_long
             darr(ind, 6),        // extent_tran
             iarr(ind, 0),        // id
-            iarr(ind, 1));       // pdg
+            iarr(ind, 1),        // pdg
+            energy);
 
         all_sdepos.push_back(sdepo);
     }
@@ -214,9 +285,16 @@ IDepoSet::pointer Sio::DepoFileSource::next()
             continue;
         }
 
-        // Prior
-        const size_t other = iarr(ind, 3);
-        if (other >= all_sdepos.size()) {
+        // Prior: "other" is the row of the depo whose prior this is.
+        size_t other = iarr(ind, 3);
+        if (legacy_child) {
+            other = ind - 1;    // ind > 0 as a gen>0 row follows its child
+            if (iarr(other, 2) != gen - 1) {
+                ++npriors_missing;
+                continue;
+            }
+        }
+        if (other >= all_sdepos.size() || other == ind) {
             ++npriors_missing;
         }
         else {
@@ -237,8 +315,8 @@ IDepoSet::pointer Sio::DepoFileSource::next()
     }
     sdepos.clear();
 
-    log->debug("call={} loaded {} active, {} total depos from ident {} stream {} with {} priors",
-               m_count, idepos.size(), ndepos, ident, m_inname, npriors);
+    log->debug("call={} loaded {} active, {} total depos from ident {} stream {} with {} priors, truth sidecar={}",
+               m_count, idepos.size(), ndepos, ident, m_inname, npriors, have_truth);
 
     return std::make_shared<Aux::SimpleDepoSet>(ident, idepos);
 }

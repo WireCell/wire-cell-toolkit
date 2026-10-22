@@ -56,6 +56,13 @@ namespace WireCell::Sio {
         /// details.
         std::string m_outname{"wct-depos.tar.bz2"};
 
+        /// If true, a third array depo_truth_<ident>.npy, double
+        /// shaped (ndepos, 3) = (energy, orig_id, reserved), is
+        /// written after depo_info (see Aux::fill_truth).  Default
+        /// false: the output stream is byte-identical to before the
+        /// knob existed.
+        bool m_truth_sidecar{false};
+
         // The output stream
         boost::iostreams::filtering_ostream m_out;
 
