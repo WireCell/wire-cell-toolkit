@@ -11,12 +11,14 @@
 #define WIRECELLAUX_CASCADERUN
 
 #include "WireCellAux/CascadeGraph.h"
+#include "WireCellAux/CascadeXdet.h"
 #include "WireCellAux/CellSteiner.h"
 #include "WireCellAux/Logger.h"
 #include "WireCellIface/IBlob.h"
 #include "WireCellIface/ITensorForward.h"
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -49,6 +51,10 @@ namespace WireCell::Aux::Cascade {
         // pdvd doc 130: length of a final-level edge between two cells, for the length pricing of the repair
         // (steiner.len_cost / steiner.max_bridge_len).  Empty = no lengths, the repair of wcfm doc 14.
         std::function<double(const IBlob::pointer&, const IBlob::pointer&)> edge_length;
+        // wcfm doc 53 W7: the G + D columns of the pooled model, looked up per level (CascadeXdet.h).  Null = off:
+        // the forward gets the 9 tensors of the shipped models and the dumps are unchanged.  Set: the forward gets
+        // the 12 inputs of xdet/lean_x.py CascadeGNNLeanX and the dumps also carry xb_cols, xw_cols, live.
+        std::shared_ptr<const XdetColumns> xdet;
     };
 
     struct RunResult {

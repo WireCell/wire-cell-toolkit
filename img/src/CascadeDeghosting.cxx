@@ -6,6 +6,7 @@
 #include "WireCellImg/GeomClusteringUtil.h"
 
 #include "WireCellAux/CascadeRun.h"
+#include "WireCellAux/CascadeXdet.h"
 
 #include "WireCellAux/SimpleBlob.h"
 #include "WireCellAux/SimpleCluster.h"
@@ -55,6 +56,7 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["iso_fallback"] = Json::nullValue;   // off; see the header for the members
     cfg["final_guard"] = m_final_guard;
     cfg["keep_slices"] = m_keep_slices;
+    cfg["xdet_columns_file"] = m_xdet_columns_file;   // wcfm doc 53 W7, "" = off
     return cfg;
 }
 
@@ -126,6 +128,23 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     log->debug("levels:{} cut max_depth={} min_length={} guard={} max_level_nodes={} repair={} budget={:.4f} policy={} charge_scale={} nthreads={}", desc,
                m_cut_max_depth, m_cut_min_length, m_guard, m_max_level_nodes, m_repair, m_repair_budget, m_policy, m_charge_scale,
                m_nthreads);
+    // wcfm doc 53 W7: the G + D columns of the pooled model from a file (test path), read once per configure
+    m_xdet_columns_file = get(cfg, "xdet_columns_file", m_xdet_columns_file);
+    m_xdet.reset();
+    if (!m_xdet_columns_file.empty()) {
+        auto xc = std::make_shared<Aux::Cascade::XdetColumns>(Aux::Cascade::load_xdet_columns(m_xdet_columns_file));
+        if (xc->levels.size() < m_levels.size()) {
+            THROW(ValueError() << errmsg{String::format("CascadeDeghosting: xdet_columns_file %s has %d levels, the cascade %d",
+                                                        m_xdet_columns_file, (int) xc->levels.size(), (int) m_levels.size())});
+        }
+        size_t nb = 0, nw = 0;
+        for (const auto& t : xc->levels) {
+            nb += t.blob.size();
+            nw += t.wire.size();
+        }
+        log->debug("xdet_columns_file {}: {} levels, {} blob and {} wire keys", m_xdet_columns_file, xc->levels.size(), nb, nw);
+        m_xdet = xc;
+    }
 }
 
 namespace {
@@ -222,6 +241,7 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
     rp.final_guard = m_final_guard;
     rp.dump_dir = m_dump_dir;
     rp.ident_base = m_ident_base;
+    rp.xdet = m_xdet;   // wcfm doc 53 W7 (null = off)
     std::vector<Cascade::LevelSpec> levels;
     for (const auto& lc : m_levels) {
         levels.push_back({lc.width, lc.superwire, lc.threshold, lc.forward, lc.forward_tn});

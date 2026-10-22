@@ -53,6 +53,12 @@
                         >= mmin nodes per charged wire of the slice and a fraction >= amin of nodes with
                         amb_lo < logit < amb_hi, the nodes with logit >= t_keep are kept too
                         (Img::Cascade::iso_fallback).  For near-isochronous showers the model cannot resolve.
+      xdet_columns_file ("" = off) wcfm doc 53 W7, a test path: an npz of the G + D columns of the pooled
+                        cross-detector model, keyed per level (layout in WireCellAux/CascadeXdet.h; written by
+                        wcp-porting-img wcfm/scripts/d53_xdet_columns_file.py).  Set: every level's forward gets the 12
+                        inputs of xdet/lean_x.py CascadeGNNLeanX (xb, xb_cols[N,8], wq, wplane, xw_cols[M,4], live[M],
+                        bw_src, bw_dst, bw_w, bb, bb_in, ww) and the dumps also carry xb_cols, xw_cols, live; a node
+                        missing from the file is an error.  Off: the 9 inputs of the shipped models, output unchanged
       nthreads          (1) threads for the C++ level work that splits into independent parts -- the bisection of
                         the survivors to the next width, the node features and the cross-slice bb search -- run over contiguous
                         blocks and merged in order, so the output does not depend on it (wcfm doc 15 round 3;
@@ -70,8 +76,13 @@
 #include "WireCellIface/IJoinNode.h"
 #include "WireCellIface/ITensorForward.h"
 
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace WireCell::Aux::Cascade {
+    struct XdetColumns;
+}
 
 namespace WireCell::Img {
 
@@ -126,6 +137,9 @@ namespace WireCell::Img {
         bool m_final_guard{false};   // final level: every charged wire node keeps its best node (Cascade::final_guard)
         bool m_keep_slices{false};   // output: slices whose blobs were all dropped keep their node (activity -> ctpc)
         double m_iso_nmin{500}, m_iso_mmin{4}, m_iso_amin{0.8}, m_iso_t{-1.5}, m_iso_amb_lo{-3.0}, m_iso_amb_hi{0.5};
+        // wcfm doc 53 W7 (default "" = off: absent key => the 9-input forward, byte-identical output)
+        std::string m_xdet_columns_file{""};
+        std::shared_ptr<const Aux::Cascade::XdetColumns> m_xdet;
         size_t m_count{0};
     };
 

@@ -54,16 +54,34 @@ namespace {
         return std::make_shared<ViewTensor<T>>(v, shape);
     }
 
-    // (logit, qhat) of every node of the level
+    // (logit, qhat) of every node of the level.  xc null: the 9 inputs of the shipped models; set (wcfm doc 53 W7):
+    // the 12 inputs of xdet/lean_x.py CascadeGNNLeanX.forward, in its order.
     void run_forward(const ITensorForward::pointer& fwd, const Level& lev, int ident,
-                     std::vector<float>& logit, std::vector<float>& qhat)
+                     std::vector<float>& logit, std::vector<float>& qhat,
+                     const Cascade::XdetLevelCols* xc = nullptr)
     {
         const size_t N = lev.nnodes(), M = lev.wq.size(), E = lev.bw_src.size();
-        ITensor::vector tv{
-            tens(lev.xb, {N, 15}),        tens(lev.wq, {M}),        tens(lev.wplane, {M}),
-            tens(lev.bw_src, {E}),        tens(lev.bw_dst, {E}),    tens(lev.bw_w, {E}),
-            tens(lev.bb, {lev.bb.size() / 2, 2}), tens(lev.bb_in, {lev.bb_in.size() / 2, 2}),
-            tens(lev.ww, {lev.ww.size() / 2, 2})};
+        ITensor::vector tv;
+        if (!xc) {
+            tv = {tens(lev.xb, {N, 15}),        tens(lev.wq, {M}),        tens(lev.wplane, {M}),
+                  tens(lev.bw_src, {E}),        tens(lev.bw_dst, {E}),    tens(lev.bw_w, {E}),
+                  tens(lev.bb, {lev.bb.size() / 2, 2}), tens(lev.bb_in, {lev.bb_in.size() / 2, 2}),
+                  tens(lev.ww, {lev.ww.size() / 2, 2})};
+        }
+        else {
+            tv = {tens(lev.xb, {N, 15}),
+                  tens(xc->xb_cols, {N, Cascade::xdet_blob_cols}),
+                  tens(lev.wq, {M}),
+                  tens(lev.wplane, {M}),
+                  tens(xc->xw_cols, {M, Cascade::xdet_wire_cols}),
+                  tens(xc->live, {M}),
+                  tens(lev.bw_src, {E}),
+                  tens(lev.bw_dst, {E}),
+                  tens(lev.bw_w, {E}),
+                  tens(lev.bb, {lev.bb.size() / 2, 2}),
+                  tens(lev.bb_in, {lev.bb_in.size() / 2, 2}),
+                  tens(lev.ww, {lev.ww.size() / 2, 2})};
+        }
         auto in = std::make_shared<Aux::SimpleTensorSet>(ident, Configuration(), std::make_shared<ITensor::vector>(tv));
         auto out = fwd->forward(in);
         if (!out) {
@@ -127,7 +145,11 @@ Cascade::RunResult Cascade::run_cascade(const std::vector<IBlob::pointer>& blobs
         const auto tb = clock::now();
         const double rss_build = memusage_resident();
         std::vector<float> logit, qhat;
-        run_forward(lc.forward, lev, ident, logit, qhat);
+        Cascade::XdetLevelCols xcols;   // wcfm doc 53 W7: empty unless rp.xdet
+        if (rp.xdet) {
+            xcols = Cascade::xdet_level_columns(*rp.xdet, li, cur, lev);
+        }
+        run_forward(lc.forward, lev, ident, logit, qhat, rp.xdet ? &xcols : nullptr);
         const auto tf = clock::now();
         const double rss_fwd = memusage_resident();
         const size_t N = lev.nnodes();
@@ -303,6 +325,11 @@ Cascade::RunResult Cascade::run_cascade(const std::vector<IBlob::pointer>& blobs
             cnpy::npz_save(fn, "slice_ident_of_sidx", sid.data(), {sid.size()}, "a");
             cnpy::npz_save(fn, "wchan", lev.wchan.data(), {lev.wchan.size()}, "a");
             cnpy::npz_save(fn, "wsidx", lev.wsidx.data(), {lev.wsidx.size()}, "a");
+            if (rp.xdet) {   // wcfm doc 53 W7: the injected columns (absent when off: the dumps are unchanged)
+                cnpy::npz_save(fn, "xb_cols", xcols.xb_cols.data(), {N, Cascade::xdet_blob_cols}, "a");
+                cnpy::npz_save(fn, "xw_cols", xcols.xw_cols.data(), {lev.wq.size(), Cascade::xdet_wire_cols}, "a");
+                cnpy::npz_save(fn, "live", xcols.live.data(), {lev.wq.size()}, "a");
+            }
         }
         if (li + 1 < nlev) {
             cur = std::move(next);
