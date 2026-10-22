@@ -171,6 +171,10 @@ def main():
     apa, face = decode_wpid(P["wpid"])
     n = len(P["x"])
     D, I = load_depos(a.depos)
+    # the archive also holds the undrifted priors (gen 1); only the drifted depos (gen 0) are in the labeler frame
+    # (pr_ml doc 22: including the priors moved the doc 21 medians by <= 0.02 mm)
+    act = I[:, 2] == 0
+    D, I = D[act], I[act]
     keys, dface = assign_depo_faces(D, faces)
     from scipy.spatial import cKDTree
 
