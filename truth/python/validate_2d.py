@@ -304,16 +304,18 @@ def analyse(frames, geo, data, key, tid_of_key, cls_of_tid, anode, toff, speed, 
                         if cum[r, w1] - cum[r, w0] == 0:
                             nfake += 1; qfake += float(reco[r, s0:s1].sum())
                 A["fake_rois"] = nfake; A["fake_rois_per_channel"] = nfake / max(ok.sum(), 1); A["fake_q_frac"] = qfake / float(reco.sum()) if reco.sum() > 0 else None
-                # per-track efficiency: a track counts as found when the reco charge in its pixels' windows exceeds 10 %
+                # per-track efficiency: a track counts as found when the reco charge on the truth pixels it dominates
+                # exceeds 10 % of its true charge (vectorised: one bincount over the dominant-track image)
                 found = tot = 0
-                for kk_, qq_ in qtrack.items():
-                    if qq_ < MINQ:
-                        continue
-                    tot += 1
-                    m = (bst == kk_) & tmask
-                    if m.any():
-                        rr = reco[m]
-                        if rr.sum() > 0.1 * qq_:
+                big = {kk_: qq_ for kk_, qq_ in qtrack.items() if qq_ >= MINQ}
+                if big:
+                    sel_ = tmask & (bst >= 0)
+                    ids_ = bst[sel_]; rq_ = np.clip(reco[sel_], 0, None)
+                    uk_, inv_ = np.unique(ids_, return_inverse=True)
+                    rsum = dict(zip(uk_.tolist(), np.bincount(inv_, weights=rq_).tolist()))
+                    for kk_, qq_ in big.items():
+                        tot += 1
+                        if rsum.get(kk_, 0.0) > 0.1 * qq_:
                             found += 1
                 A["ntracks_minq"] = tot; A["track_eff"] = found / tot if tot else None
                 res["%s_f%s_p%d" % (tag, fi, pi)] = A
@@ -342,9 +344,13 @@ def main():
         data, info, key = load_depos(a.depos[i])
         tab = T.read_truth_npz(a.truth[i]) if i < len(a.truth) and a.truth[i] else None
         if tab is not None and len(tab["sed_ids"]):
+            # Stage A index mode: the depo key is the SimEnergyDeposit index -> map every key to its track id up front, so
+            # that n_tid, the per-track efficiency and the segment classes are per G4 track, not per deposit
             sed = tab["sed_ids"][:, 0]
-            def tid_of_key(k, sed=sed):
-                return int(sed[k]) if 0 <= k < len(sed) else int(k)
+            inrange = (key >= 0) & (key < len(sed))
+            key = np.where(inrange, sed[np.clip(key, 0, len(sed) - 1)], key)
+            def tid_of_key(k):
+                return int(k)
             pf = tab["truth_pf"]; tid2pdg = dict(zip(pf[:, T.pf_col("trackid")].astype(int), pf[:, T.pf_col("pdg")].astype(int)))
         else:
             tid_of_key = lambda k: int(k)  # noqa: E731
@@ -375,16 +381,27 @@ def main():
                              ("fake_rois_per_channel", "fake_per_ch"), ("reco_frac_on_multi_tid", "multi_tid"), ("track_eff", "track_eff")):
                 if v.get(src) is not None:
                     s[dst].append(v[src])
-    summary = {k: {m: ({"mean": float(np.mean(x)), "min": float(np.min(x)), "max": float(np.max(x)), "n": len(x)} if x else None) for m, x in v.items()} for k, v in summ.items()}
+    # the mean of per-anode-event ratios is dominated by anodes with little truth: report medians, and for the
+    # closures also the ratio of sums over all anode-events (q_reco / q_true)
+    sums = {}
+    for ev, r in per_event.items():
+        for k, v in r.items():
+            kk = "%s_p%d" % (v["tag"], v["plane"])
+            s = sums.setdefault(kk, [0.0, 0.0])
+            s[0] += v["q_reco"]; s[1] += v["q_true"]
+    summary = {k: {m: ({"median": float(np.median(x)), "mean": float(np.mean(x)), "min": float(np.min(x)), "max": float(np.max(x)), "n": len(x)} if x else None) for m, x in v.items()} for k, v in summ.items()}
+    for k in summary:
+        summary[k]["closure_of_sums"] = (sums[k][0] / sums[k][1]) if sums[k][1] > 0 else None
     summary["_args"] = vars(a)
     json.dump(summary, open(os.path.join(a.out, "summary.json"), "w"), indent=1)
     with open(os.path.join(a.out, "summary.md"), "w") as f:
-        f.write("| tag_plane | closure | closure(region) | seg eff | timing (ticks) | profile lag (ticks) | fake ROI / ch | reco on n_tid>=2 | track eff | n |\n|---|---|---|---|---|---|---|---|---|---|\n")
+        f.write("medians over anode-events; closure of sums = sum reco / sum truth over the sample\n\n| tag_plane | closure (sums) | closure | closure(region) | seg eff | timing (ticks) | profile lag (ticks) | fake ROI / ch | reco on n_tid>=2 | track eff | n |\n|---|---|---|---|---|---|---|---|---|---|---|\n")
         for k, v in summary.items():
             if k.startswith("_"):
                 continue
-            cell = lambda m: ("%.3f" % v[m]["mean"]) if v.get(m) else "-"  # noqa: E731
-            f.write("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n" % (k, cell("closure"), cell("closure_region"), cell("seg_eff"), cell("timing"), cell("lag"), cell("fake_per_ch"), cell("multi_tid"), cell("track_eff"), v["closure"]["n"] if v.get("closure") else 0))
+            cell = lambda m: ("%.3f" % v[m]["median"]) if v.get(m) else "-"  # noqa: E731
+            cs = ("%.3f" % v["closure_of_sums"]) if v.get("closure_of_sums") else "-"
+            f.write("| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n" % (k, cs, cell("closure"), cell("closure_region"), cell("seg_eff"), cell("timing"), cell("lag"), cell("fake_per_ch"), cell("multi_tid"), cell("track_eff"), v["closure"]["n"] if v.get("closure") else 0))
     print("wrote", a.out)
 
 
