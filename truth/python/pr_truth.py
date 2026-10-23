@@ -33,10 +33,23 @@ dirsign_true (the sign of the true direction of travel along the fit-point order
 matched key's points; doc 23 sec 11 compares it with the reconstructed dirsign), per-vertex is_nu_vertex /
 is_vertex (a true interaction vertex / particle start within 1 cm), and the distance of the reconstructed neutrino
 vertex to the vertex of the interaction the candidate matched.  Interactions are the truth_nu rows: "nu" (a neutrino),
-"gun" (a single-particle generator row) or "corsika" (SBND bnb events carry CORSIKA cosmics: a candidate matched to it
-is reported, never scored as a vertex); a vertex is the median start of the row's visible primaries in the
-reconstructed frame (steiner_truth's nu_vertices), else the generator vertex.  Deferred (listed in doc 23 sec 11): the boundary flag of fit points,
-same-shower / same-interaction / parent edges between segments.
+"gun" (a single-particle generator row), "corsika" (cosmic rays: SBND's CORSIKA, the ProtoDUNEs' cosmicgenerator; a
+candidate matched to it is reported, never scored as a vertex) or "radiological" (doc 24: the ProtoDUNE ar39 / ar42 /
+kr85 ... rows, never scored); a vertex is the median start of the row's visible primaries in the
+reconstructed frame (steiner_truth's nu_vertices), else the generator vertex.
+
+Doc 24 (the labels doc 23 sec 11 deferred; new output keys only, the doc 23 keys are unchanged):
+  fit points   boundary = a true particle boundary within 1 cm (doc 15 sec 2.4): d_boundary = distance to the nearest
+               start, end or kink (a direction change > 15 deg between the chords 3 cm behind and ahead, local maximum
+               within +-3 cm: the C++ DepoPolyline::keypoints rule) of any trajectory unit >= 1 cm long; d_boundary_own =
+               the same restricted to the matched key's own units
+  PF parent    parent of every PF node: the node of the first G4 ancestor (mother chain of the node's root key) whose
+               points belong to another node, -1 at the interaction (the merged truth_pf is not in the dumps); per
+               segment true_parent_node
+  edges        per candidate, every pair of segments that share a PR vertex or are both >= --min-points: adjacent,
+               reco_same_shower (same shower_id), same_pf, same_shower_true (same PF node of class shower),
+               same_interaction (the two best nodes' iid), parent_ab / parent_ba (node of a is the parent of node of b /
+               the reverse)
 
 Fit points (sec 13): every fit point of every segment with x, y, z, dQ, dx, residual range, reduced chi2 as the PR
 chain wrote them, plus the distance to the matched key's trajectory (d_true, mm, every particle of the key searched)
@@ -56,6 +69,10 @@ import truth_table as T  # noqa: E402
 
 CM = 10.0
 TRACK, SHOWER, MICHEL, DELTA, LE = 0, 1, 2, 3, 4
+# doc 24: generator labels of cosmic rays (SBND CORSIKA, ProtoDUNE cosmicgenerator) and of the ProtoDUNE radiologicals
+COSMIC_GEN = {"corsika", "cosmicgenerator"}
+RADIO_GEN = {"ar39", "ar42", "kr85", "k42fromar42", "rn222", "po210", "k40", "co60", "u238", "th232", "ar42fromk42"}
+SCORED = ("nu", "gun")       # interaction kinds whose vertex is scored
 
 
 # ---------------------------------------------------------------------------- inputs
@@ -138,7 +155,9 @@ def interaction_rows(truth, trajs):
         gl = sorted(set(int(v) for v in pf[sel, c("gen_label")]))
         names = [labels[g] for g in gl if 0 <= g < len(labels)]
         pdg = int(nu[r, cn("pdg")])
-        kind = "nu" if abs(pdg) in (12, 14, 16) else ("corsika" if names and all(n == "corsika" for n in names) else "gun")
+        kind = ("nu" if abs(pdg) in (12, 14, 16) else
+                "corsika" if names and all(n in COSMIC_GEN for n in names) else
+                "radiological" if names and all(n in RADIO_GEN for n in names) else "gun")
         prim = pf[sel & (pf[:, c("mother_trackid")] == 0)]
         S = [trajs[int(t)].start for t in prim[:, c("trackid")].astype(int) if int(t) in trajs]
         if S:
@@ -219,6 +238,95 @@ def pq(objs_rows, unit, truth_units, min_points):
     return {"TP": TP, "FP": FP, "FN": FN, "SQ": sq, "RQ": rq, "PQ": sq * rq}
 
 
+# ---------------------------------------------------------------------------- doc 24: boundaries, PF parents, edges
+def keypoints(pl, window=30.0, angle_min=np.radians(15.0)):
+    """start / end and the kinks of one Polyline, the C++ DepoPolyline::keypoints rule (mm)."""
+    V, s = pl.V, pl.s
+    n = len(V)
+    ends = [V[0]] + ([V[-1]] if n > 1 else [])
+    if n < 3 or pl.length <= 0:
+        return ends, []
+    i = np.arange(1, n - 1)
+    j = np.clip(np.searchsorted(s, s[i] - window, side="right") - 1, 0, None)
+    k = np.clip(np.searchsorted(s, s[i] + window, side="left"), None, n - 1)
+    ok = (s[i] - s[j] >= 0.5 * window) & (s[k] - s[i] >= 0.5 * window)
+    b = V[i] - V[j]
+    a = V[k] - V[i]
+    nb, na = np.linalg.norm(b, axis=1), np.linalg.norm(a, axis=1)
+    ok &= (nb > 0) & (na > 0)
+    ang = np.zeros(n)
+    c = np.einsum("ij,ij->i", a, b) / np.maximum(na * nb, 1e-12)
+    ang[i[ok]] = np.arccos(np.clip(c[ok], -1.0, 1.0))
+    kinks = []
+    for m in np.flatnonzero(ang >= angle_min):
+        if m == 0 or m == n - 1:
+            continue
+        lo = np.searchsorted(s, s[m] - window, side="left")
+        hi = np.searchsorted(s, s[m] + window, side="right")
+        w = np.arange(max(lo, 1), min(hi, n - 1))
+        w = w[w != m]
+        if np.any(ang[w] > ang[m]) or np.any((ang[w] == ang[m]) & (w < m)):
+            continue
+        kinks.append(V[m])
+    return ends, kinks
+
+
+def boundary_index(trajs, lmin=CM):
+    """k-d trees of the boundary points (start / end / kinks of every unit >= lmin) of all keys and per key."""
+    allp, own = [], {}
+    for key, tr in trajs.items():
+        pts = []
+        for u in tr.units:
+            if u.length < lmin:
+                continue
+            e, kk = keypoints(u)
+            pts += e + kk
+        if pts:
+            own[key] = np.array(pts)
+            allp.append(own[key])
+    kd = cKDTree(np.concatenate(allp)) if allp else None
+    return kd, own
+
+
+def pf_parents(ev, truth):
+    """PF node -> parent node (-1 at the interaction).  The node's root key is the key none of whose G4 ancestors is
+    another key of the same node (most points first on a tie); its parent is the node of the first ancestor that
+    carries points of another node."""
+    m = (ev["pf"] >= 0) & (ev["tid"] >= 0)
+    if not truth or not m.any():
+        return {}
+    pairs, cnt = np.unique(np.column_stack([ev["tid"][m], ev["pf"][m]]), axis=0, return_counts=True)
+    key2node, best = {}, {}
+    for (t, k), c in zip(pairs.tolist(), cnt.tolist()):
+        if c > best.get(t, 0):
+            key2node[t], best[t] = k, c
+    z = np.load(truth)["truth_pf"]
+    c_ = T.pf_col
+    mother = {int(t): int(mo) for t, mo in zip(z[:, c_("trackid")], z[:, c_("mother_trackid")])}
+
+    def ancestors(t):
+        out, seen = [], set()
+        t = mother.get(t, 0)
+        while t > 0 and t not in seen and len(out) < 10000:
+            out.append(t); seen.add(t); t = mother.get(t, 0)
+        return out
+    keys_of = {}
+    for t, k in key2node.items():
+        keys_of.setdefault(k, []).append(t)
+    parent = {}
+    for k, ks in keys_of.items():
+        kset = set(ks)
+        roots = [t for t in ks if not any(a in kset for a in ancestors(t))] or ks
+        root = max(roots, key=lambda t: (best[t], -t))
+        parent[k] = -1
+        for a in ancestors(root):
+            n2 = key2node.get(a)
+            if n2 is not None and n2 != k:
+                parent[k] = n2
+                break
+    return parent
+
+
 # ---------------------------------------------------------------------------- main
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -250,7 +358,7 @@ def main():
         for o, u in zip(tr.origs, tr.units):
             ptrajs[o] = KeyTraj(o, [u], [o], [0.0])
     irows = interaction_rows(truth, trajs)
-    nuv = [d["vertex"] for d in irows.values() if d["kind"] != "corsika"]
+    nuv = [d["vertex"] for d in irows.values() if d["kind"] in SCORED]
     vtx = true_vertices(ptrajs, 1 * CM, 1 * CM)
     res["interactions"] = {int(r): dict(kind=d["kind"], pdg=d["pdg"], vertex_mm=np.round(d["vertex"], 2).tolist(),
                                         vertex_src=d["vertex_src"], edep=d["edep"]) for r, d in irows.items()}
@@ -273,6 +381,8 @@ def main():
             pdg = int(z[tid2row[key], c("pdg")]); prim = int(z[tid2row[key], c("mother_trackid")] == 0)
         pf_info[int(k)] = dict(key=key, pdg=pdg, primary=prim, cls=int(cl_[np.argmax(cc)]), iid=int(ii[np.argmax(ic)]),
                                npts=int(m.sum()), q=float(ev["q"][m].sum()))
+    parent_of = pf_parents(ev, truth)            # doc 24
+    bkd, bown = boundary_index(trajs)
     res["n_interactions_visible"] = int(len(np.unique(ev["iid"][ev["iid"] >= 0])))
     res["interaction_points"] = {int(k): int(n) for k, n in zip(*np.unique(ev["iid"][ev["iid"] >= 0], return_counts=True))}
 
@@ -281,7 +391,7 @@ def main():
                  "tid": {"n": totals(ev["tid"], cnt), "q": totals(ev["tid"], ev["q"])},
                  "iid": {"n": totals(ev["iid"], cnt), "q": totals(ev["iid"], ev["q"])}}
 
-    seg_out, par_out, int_out, vtx_out, fit_out = [], [], [], [], []
+    seg_out, par_out, int_out, vtx_out, fit_out, edge_out = [], [], [], [], [], []
     res["candidates"] = []
     for nu, blk in blocks:
         segs = blk.get("segments", [])
@@ -307,7 +417,8 @@ def main():
             bt = t2["best_n"]
             tpdg = int(z[tid2row[bt], c("pdg")]) if truth and bt in tid2row else 0
             r.update(true_pdg=tpdg, pf_pdg=pi.get("pdg", 0), true_cls=pi.get("cls", -1), true_primary=pi.get("primary", 0),
-                     best_tid=bt, purity_tid=t2["purity_n"], completeness_tid=t2["completeness_n"])
+                     best_tid=bt, purity_tid=t2["purity_n"], completeness_tid=t2["completeness_n"],
+                     true_parent_node=parent_of.get(r["best_n"], -1) if r["best_n"] >= 0 else -2)
             # dirsign_true: true travel direction along the fit-point order, from the matched key's points
             pts = s.get("points", [])
             r["dirsign_true"] = 0
@@ -331,13 +442,40 @@ def main():
                     _, j = cKDTree(ev["X"][rr]).query(F)
                     dedx = ev["dedx"][rr[j]]
                 num = (lambda v: float("nan") if v is None else float(v))   # the JSON writes NaN as null
+                Fq = np.where(np.isfinite(F), F, 0.0)                       # doc 24: distance to the true boundaries
+                dba = bkd.query(Fq)[0] if bkd is not None else np.full(len(F), np.inf)
+                dbo = cKDTree(bown[key]).query(Fq)[0] if key in bown else np.full(len(F), np.inf)
+                bad = ~np.isfinite(F).all(axis=1)
+                dba[bad] = np.nan; dbo[bad] = np.nan
                 for i, p in enumerate(pts):
                     fit_out.append(dict(nu_index=nu, seg_id=r["seg_id"], i=i, x=num(p["x"]), y=num(p["y"]), z=num(p["z"]),
                                         dQ=num(p["dQ"]), dx=num(p["dx"]), rr=num(p.get("rr", -1.0)),
                                         reduced_chi2=num(p.get("reduced_chi2", 0.0)),
                                         best_tid=key, true_cls=r["true_cls"], true_pdg=r["true_pdg"], purity=r["purity_lab_n"],
-                                        d_true=float(dtr[i]), dedx_true=float(dedx[i])))
+                                        d_true=float(dtr[i]), dedx_true=float(dedx[i]),
+                                        d_boundary=float(dba[i]), d_boundary_own=float(dbo[i]), boundary=int(dba[i] <= CM)))
         seg_out += srows
+        # doc 24: segment-pair edges (adjacent pairs, and every pair of segments with >= min_points)
+        vset = [{int(s.get("start_vertex_id", -1)), int(s.get("end_vertex_id", -1))} - {-1} for s in segs]
+        for ia in range(len(segs)):
+            ra = srows[ia]
+            for ib in range(ia + 1, len(segs)):
+                rb = srows[ib]
+                adj = bool(vset[ia] & vset[ib])
+                if not adj and (ra["small"] or rb["small"]):
+                    continue
+                na, nb = ra["best_n"], rb["best_n"]
+                both = na >= 0 and nb >= 0
+                ia_, ib_ = pf_info.get(na, {}).get("iid", -1), pf_info.get(nb, {}).get("iid", -1)
+                edge_out.append(dict(nu_index=nu, seg_a=ra["seg_id"], seg_b=rb["seg_id"], adjacent=int(adj),
+                                     small_a=ra["small"], small_b=rb["small"],
+                                     clean=int(not ra["small"] and not rb["small"] and ra["purity_lab_n"] >= 0.8 and rb["purity_lab_n"] >= 0.8),
+                                     reco_same_shower=int(ra["shower_id"] >= 0 and ra["shower_id"] == rb["shower_id"]),
+                                     same_pf=int(both and na == nb),
+                                     same_shower_true=int(both and na == nb and pf_info.get(na, {}).get("cls") == SHOWER),
+                                     same_interaction=int(both and ia_ >= 0 and ia_ == ib_),
+                                     parent_ab=int(both and na != nb and parent_of.get(nb) == na),
+                                     parent_ba=int(both and na != nb and parent_of.get(na) == nb)))
 
         # particles: showers (union of their segments) and the segments in no shower
         showers = {int(sh["id"]): sh for sh in blk.get("showers", [])}
@@ -350,7 +488,7 @@ def main():
             sh = showers.get(shid, {})
             pobjs.append({"rows": np.unique(np.concatenate([rows_of[m] for m in ms])),
                           "meta": dict(nu_index=nu, obj_id=shid, kind=1, reco_pdg=int(sh.get("particle_id", 0)), n_seg=len(ms),
-                                       kine_best=float(sh.get("kine_best", 0.0)))})
+                                       kine_best=float("nan") if sh.get("kine_best") is None else float(sh["kine_best"]))})   # JSON null = NaN
         for s in segs:
             if int(s["shower_id"]) < 0:
                 pobjs.append({"rows": rows_of[int(s["id"])], "meta": dict(nu_index=nu, obj_id=int(s["id"]), kind=0,
@@ -386,7 +524,7 @@ def main():
             vtx_out.append(dict(nu_index=nu, vtx_id=int(v["id"]), is_main=int(bool(v.get("is_main"))), degree=int(v.get("degree", 0)),
                                 d_nu=dn, d_vertex=dv, is_nu_vertex=int(dn <= CM), is_vertex=int(dv <= CM)))
         mv = blk.get("main_vertex")
-        if mv and nu_iid in irows and irows[nu_iid]["kind"] != "corsika":
+        if mv and nu_iid in irows and irows[nu_iid]["kind"] in SCORED:
             # the vertex of the interaction the candidate matched (doc 23 sec 11: never a CORSIKA row)
             P = np.array([mv["x"], mv["y"], mv["z"]]) * CM
             TV = irows[nu_iid]["vertex"]
@@ -417,6 +555,20 @@ def main():
     res["direction"] = {"n": len(dd), "reco_dirsign_0": int(sum(r["dirsign"] == 0 for r in dd)),
                         "agree": int(sum(r["dirsign"] == r["dirsign_true"] for r in dd)),
                         "opposite": int(sum(r["dirsign"] == -r["dirsign_true"] for r in dd))}
+    # doc 24: fit-point boundaries and the segment-pair edges
+    if fit_out:
+        db = np.array([f["d_boundary"] for f in fit_out])
+        res["boundary"] = {"n_fit": len(fit_out), "boundary": int(sum(f["boundary"] for f in fit_out)),
+                           "d_boundary_median_mm": float(np.nanmedian(db)) if np.isfinite(db).any() else None}
+    E = edge_out
+    ce = [e for e in E if e["clean"]]
+    res["edges"] = {"n": len(E), "adjacent": int(sum(e["adjacent"] for e in E)), "n_clean": len(ce),
+                    "same_pf": int(sum(e["same_pf"] for e in ce)), "same_shower_true": int(sum(e["same_shower_true"] for e in ce)),
+                    "reco_same_shower": int(sum(e["reco_same_shower"] for e in ce)),
+                    "shower_both": int(sum(e["reco_same_shower"] and e["same_shower_true"] for e in ce)),
+                    "same_interaction": int(sum(e["same_interaction"] for e in ce)),
+                    "parent": int(sum(e["parent_ab"] or e["parent_ba"] for e in ce)),
+                    "parent_adjacent": int(sum((e["parent_ab"] or e["parent_ba"]) and e["adjacent"] for e in ce))}
     pid = {}
     for r in clean:
         if r["true_cls"] == TRACK and not r["flag_shower"] and abs(r["true_pdg"]) in (13, 211, 321, 2212):
@@ -441,7 +593,7 @@ def main():
         for k in rows[0]:
             out[prefix + k] = np.array([r[k] for r in rows])
     arr = {}
-    for rows, pre in ((seg_out, "seg_"), (par_out, "par_"), (int_out, "int_"), (vtx_out, "vtx_"), (fit_out, "fit_")):
+    for rows, pre in ((seg_out, "seg_"), (par_out, "par_"), (int_out, "int_"), (vtx_out, "vtx_"), (fit_out, "fit_"), (edge_out, "edge_")):
         to_npz(rows, pre, arr)
     np.savez_compressed(os.path.join(a.out, a.event + "_rlabels.npz"), **arr)
     json.dump(res, open(os.path.join(a.out, a.event + ".json"), "w"), indent=1, default=float)

@@ -1619,6 +1619,15 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
         // deterministically from cluster_t0.  fiducialutils MUST precede any
         // tagger (they silently no-op without it).
         local cm_by_name = {
+            // pr_ml doc 24 (R labels on light-less simulation, as dune10kt-1x2x6/pr.jsonnet): the whole
+            // event becomes one main + associated bundle, gid 0, cluster_t0 0.  MUST be first when named
+            // (switch_scope reads cluster_t0).  Not for data.  Absent from pipeline_names => absent from
+            // the compiled config.
+            bundle_no_light: {
+                type: 'ClusteringBundleNoLight',
+                name: 'pr',
+                data: { grouping: 'live', bundle_gid: 0, cluster_t0: 0.0 },
+            },
             switch_scope: cm_old.switch_scope(),
             // doc pdvd/125: replace the blobs of the beam bundle's clusters by the
             // deghosting cascade's cells (grouping 'deghost').  Same window keys
@@ -1730,6 +1739,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             // truth cloud (truth_point_label in the clustering job).  Name it after the last Steiner
             // stage.  Absent from pipeline_names => absent from the compiled config.
             steiner_truth: cm.steiner_truth(),
+            // pr_ml doc 24 (WP0.2 R labels, as sbnd/clus.jsonnet): the PR point assignment of every
+            // segment; after tagger_check_neutrino.  Absent from pipeline_names => absent from the
+            // compiled config.
+            pr_truth: cm.pr_truth(),
             steiner: cm.steiner(retiler=improve2, perf=true, require_beam_flash=false,
                                 beam_window_only=beam_gate,
                                 beam_window_low=beam_window[0],
