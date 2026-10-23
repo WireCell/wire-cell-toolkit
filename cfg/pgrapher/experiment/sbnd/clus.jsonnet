@@ -1123,6 +1123,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // compiled config byte-identical.  'charge_stepped' / 'stepped' (the
               // latter = the identity gate).
               resample_live_strategy=null,
+              // bundle_truth_iids (pr_ml doc 23 sec 11.9): truth_nu rows whose clusters form the
+              // bundle_no_light bundle (light-less simulation with CORSIKA cosmics: the "perfect Q/L"
+              // stand-in; needs the per-point truth cloud).  C++ default empty = every cluster.  Key
+              // omitted when empty => byte-identical compiled config.
+              bundle_truth_iids=[],
               // steiner_terminal_min_separation (doc sbnd_xin/pr/149 amendment 1; cm,
               // default 0): Grapher::Config::terminal_min_separation (doc pdvd/37
               // round 2) on BOTH CreateSteinerGraph instances (steiner,
@@ -2536,7 +2541,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             bundle_no_light: {
                 type: 'ClusteringBundleNoLight',
                 name: 'pr',
-                data: { grouping: 'live', bundle_gid: 0, cluster_t0: 0.0 },
+                data: { grouping: 'live', bundle_gid: 0, cluster_t0: 0.0,
+                        [if bundle_truth_iids != [] then 'truth_iids']: bundle_truth_iids },
             },
             // doc sbnd_xin/pr/149 round 2.  MUST be first when named: switch_scope
             // rebuilds x_t0cor and the in-volume split from the "3d" points.  One

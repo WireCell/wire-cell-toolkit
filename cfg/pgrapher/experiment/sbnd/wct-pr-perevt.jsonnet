@@ -905,6 +905,9 @@ function(
     // both CreateSteinerGraph instances (doc pdvd/37 round 2 lever; PDVD production
     // 0.5).  0 => key omitted => byte-identical.
     steiner_terminal_min_separation = 0,
+    // pr_ml doc 23 sec 11.9: truth_nu rows forming the bundle_no_light bundle (light-less
+    // simulation only; pipeline must name bundle_no_light).  [] = every cluster (C++ default).
+    bundle_truth_iids = [],
     // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs (docs pdvd/114-116),
     // forwarded to BOTH CreateSteinerGraph instances by sbnd/clus.jsonnet pr().
     // PDHD/PDVD production runs 'prefer3' / 0.5 / 'tree+path'; SBND does NOT
@@ -3795,6 +3798,7 @@ function(
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
                              resample_live_strategy=resample_live_strategy,   // doc sbnd_xin/pr/149 round 2
                              steiner_terminal_min_separation=steiner_terminal_min_separation,
+                             bundle_truth_iids=bundle_truth_iids,   // pr_ml doc 23 sec 11.9
                              steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc sbnd_xin/pr/150
                              steiner_blank_plane_radius=steiner_blank_plane_radius,
                              steiner_base_weight_blank_alpha=steiner_base_weight_blank_alpha,

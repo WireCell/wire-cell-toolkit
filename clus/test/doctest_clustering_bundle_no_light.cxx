@@ -6,7 +6,10 @@
 //  * flags, gid and t0 left by an upstream stage are overwritten;
 //  * flag_beam_flash is off by default and sets beam_flash when on;
 //  * an empty or missing grouping is skipped, not an error;
-//  * bundle_gid outside [0, 1000000) is refused at configure time.
+//  * bundle_gid outside [0, 1000000) is refused at configure time;
+//  * truth_iids (pr_ml docs/23 sec 11.9): only the clusters whose labelled
+//    points mostly belong to the listed interactions form the bundle, the rest
+//    are left unmatched (no flags, gid -1); none of them => no main at all.
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/ClusteringFuncs.h"
 #include "WireCellClus/IEnsembleVisitor.h"
@@ -58,6 +61,12 @@ namespace {
         return cl;
     }
 
+    // the per-point "truth" cloud of TruthPointLabeler, interaction rows only
+    void add_truth(Cluster& cl, const std::vector<int>& iids)
+    {
+        cl.children().at(0)->value().local_pcs()["truth"] = Dataset({{"iid", Array(iids)}});
+    }
+
     IEnsembleVisitor::pointer make_visitor(const std::string& name, Configuration over = Configuration())
     {
         PluginManager::instance().add("WireCellClus");
@@ -78,6 +87,52 @@ TEST_CASE("bundle no light: defaults")
     CHECK(cfg["bundle_gid"].asInt() == 0);
     CHECK(cfg["cluster_t0"].asDouble() == 0.0);
     CHECK(cfg["flag_beam_flash"].asBool() == false);
+    CHECK(cfg["truth_iids"].isArray());
+    CHECK(cfg["truth_iids"].size() == 0);
+    CHECK(cfg["truth_pc"].asString() == "truth");
+    CHECK(cfg["truth_min_frac"].asDouble() == 0.5);
+}
+
+TEST_CASE("bundle no light: truth_iids bundles only the listed interactions")
+{
+    Points::node_t root;
+    auto& ens = *root.value.facade<Ensemble>();
+    auto& live = ens.make_grouping("live");
+    Cluster& a = add_cluster(live, 1, 3);
+    Cluster& b = add_cluster(live, 2, 6);   // the most points, but a cosmic (iid 0)
+    Cluster& c = add_cluster(live, 3, 4);   // 2 of its 3 labelled points in iid 1
+    Cluster& d = add_cluster(live, 4, 5);   // no truth cloud
+    add_truth(a, {1, 1, 1});
+    add_truth(b, {0, 0, 0, 0, 0, 1});
+    add_truth(c, {1, 1, -1, 0});
+    b.set_flag(Flags::main_cluster, 1);   // left by an upstream stage
+
+    Configuration over;
+    over["truth_iids"] = Json::arrayValue;
+    over["truth_iids"].append(1);
+    make_visitor("bnl_truth", over)->visit(ens);
+
+    CHECK(c.get_flag(Flags::main_cluster) == 1);   // more points than a
+    CHECK(c.get_flag(Flags::associated_cluster) == 0);
+    CHECK(a.get_flag(Flags::main_cluster) == 0);
+    CHECK(a.get_flag(Flags::associated_cluster) == 1);
+    for (Cluster* cl : {&a, &c}) CHECK(cl->get_scalar<int>("matched_flash_gid", -99) == 0);
+    for (Cluster* cl : {&b, &d}) {
+        CHECK(cl->get_flag(Flags::main_cluster) == 0);
+        CHECK(cl->get_flag(Flags::associated_cluster) == 0);
+        CHECK(cl->get_scalar<int>("matched_flash_gid", -99) == -1);
+    }
+    for (Cluster* cl : {&a, &b, &c, &d}) CHECK(cl->get_cluster_t0() == 0.0);
+
+    // no cluster of the listed interaction: no main anywhere
+    Configuration none;
+    none["truth_iids"] = Json::arrayValue;
+    none["truth_iids"].append(5);
+    make_visitor("bnl_truth_none", none)->visit(ens);
+    for (Cluster* cl : {&a, &b, &c, &d}) {
+        CHECK(cl->get_flag(Flags::main_cluster) == 0);
+        CHECK(cl->get_scalar<int>("matched_flash_gid", -99) == -1);
+    }
 }
 
 TEST_CASE("bundle no light: one main, the rest associated, gid and t0 on all")
