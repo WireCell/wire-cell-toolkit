@@ -1173,6 +1173,9 @@ function(
     //
     // Set to 0 for the pre-flip arm: -S steiner_terminal_min_sep_cm=0.
     steiner_terminal_min_sep_cm = 0.5,
+    // pr_ml doc 24 sec 6 (decision 2A option (a)): truth_nu rows forming the bundle_no_light bundle (light-less
+    // simulation only; pipeline must name bundle_no_light).  [] = every cluster (C++ default; key omitted).
+    bundle_truth_iids = [],
     // Skip the Steiner build for clusters an earlier visitor already tagged
     // (doc pdvd/39).  PDVD passes ["TGM"] together with the reordered pipeline
     // that puts tagger_check_tgm AHEAD of 'steiner': a through-going muon can
@@ -4850,6 +4853,7 @@ function(
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                              steiner_terminal_min_separation=steiner_terminal_min_sep_cm * wc.cm,
+                             bundle_truth_iids=bundle_truth_iids,   // pr_ml doc 24 sec 6 (2A option (a))
                              steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
                              steiner_blank_plane_radius=(if steiner_blank_plane_radius_cm == null then null else steiner_blank_plane_radius_cm * wc.cm),
                              steiner_base_weight_blank_alpha=steiner_base_weight_blank_alpha,   // doc pdvd/115

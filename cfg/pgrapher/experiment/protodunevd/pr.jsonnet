@@ -841,6 +841,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
               // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
               steiner_terminal_min_separation=0,
+              // bundle_truth_iids (pr_ml doc 24 sec 6, decision 2A option (a); as sbnd/clus.jsonnet, doc 23
+              // sec 11.9): truth_nu rows whose clusters form the bundle_no_light bundle (light-less simulation:
+              // the truth-picked beam bundle as the perfect-Q/L stand-in of the -beam chain; needs the per-point
+              // truth cloud).  C++ default empty = every cluster.  Key omitted when empty => byte-identical
+              // compiled config.
+              bundle_truth_iids=[],
               // doc pdvd/114: blank-plane admission policy for the Steiner
               // terminal candidates ("prefer3" | "nearby" | "prefer3+nearby")
               // and the nearby radius (a LENGTH).  Threaded into BOTH steiner
@@ -1626,7 +1632,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             bundle_no_light: {
                 type: 'ClusteringBundleNoLight',
                 name: 'pr',
-                data: { grouping: 'live', bundle_gid: 0, cluster_t0: 0.0 },
+                data: { grouping: 'live', bundle_gid: 0, cluster_t0: 0.0,
+                        [if bundle_truth_iids != [] then 'truth_iids']: bundle_truth_iids },
             },
             switch_scope: cm_old.switch_scope(),
             // doc pdvd/125: replace the blobs of the beam bundle's clusters by the
