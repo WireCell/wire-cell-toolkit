@@ -366,3 +366,62 @@ TEST_CASE("blobdepolabel folds larg4's negative EM-daughter ids to the ancestor 
     auto cfg = label.default_configuration();
     CHECK(cfg["fold_negative_ids"].asBool() == false);
 }
+
+TEST_CASE("blobdepolabel gives a zero-extent depo to the blob holding it when asked")
+{
+    // A depo between the response plane and the wires is drifted backward
+    // without diffusion: zero longitudinal and transverse extent (pr_ml doc
+    // 24 sec 7).  The fixture's two depos, made zero-extent.
+    auto s = make_setup();
+    IDepo::vector dv;
+    for (const auto& d : *s.depos->depos()) {
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(d->time(), d->pos(), d->charge(), d->prior(),
+                                                       0.0, 0.0, d->id(), 0, 1.0));
+    }
+    Truth::DepoBlobAssocParams p;
+    p.speed = 1.6 * units::mm / units::us;
+    const auto& gr = s.cluster->graph();
+    auto totals = [&](const Truth::DepoBlobAssocResult& res) {
+        std::map<int, double> q;   // blob ident -> charge
+        for (const auto& [vd, e] : res.blobs) {
+            if (e.q_total > 0.0) q[std::get<IBlob::pointer>(gr[vd].ptr)->ident()] += e.q_total;
+        }
+        return q;
+    };
+
+    // off (BlobDepoFill's integration): the empty overlap interval drops both
+    auto res = Truth::depo_blob_assoc(s.cluster, dv, p);
+    CHECK(res.ndepos == 2);
+    CHECK(res.ndepos_window == 2);
+    CHECK(totals(res).empty());
+
+    // on: each depo's whole charge in the blob it sits in
+    p.point_zero_width = true;
+    auto q = totals(Truth::depo_blob_assoc(s.cluster, dv, p));
+    REQUIRE(q.size() == 2);
+    REQUIRE(q.count(s.ident_a) == 1);
+    REQUIRE(q.count(s.ident_b) == 1);
+    CHECK(q.at(s.ident_a) == doctest::Approx(std::abs(s.qa)));
+    CHECK(q.at(s.ident_b) == doctest::Approx(std::abs(s.qb)));
+
+    // on, with the fixture's finite-extent depos: the very same numbers as off
+    Truth::DepoBlobAssocParams p0;
+    p0.speed = p.speed;
+    auto ref = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), p0);
+    auto got = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), p);
+    REQUIRE(ref.blobs.size() == got.blobs.size());
+    for (const auto& [vd, e] : ref.blobs) {
+        CHECK(got.blobs.at(vd).q_total == e.q_total);   // bitwise
+    }
+
+    // the knob round-trips and is absent from the default configuration
+    auto cfg = Truth::assoc_default_configuration(Truth::DepoBlobAssocParams{});
+    CHECK(cfg["point_zero_width"].isNull());
+    Truth::DepoBlobAssocParams p2;
+    Configuration on;
+    on["speed"] = 1.6 * units::mm / units::us;   // required
+    on["point_zero_width"] = true;
+    Truth::assoc_configure(p2, on);
+    CHECK(p2.point_zero_width);
+    CHECK(Truth::assoc_default_configuration(p2)["point_zero_width"].asBool());
+}

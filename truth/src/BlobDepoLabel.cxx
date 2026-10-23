@@ -37,6 +37,11 @@ Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
     // shower daughter) to the ancestor.  Off = the key stays negative
     // (R1 behaviour); see DepoBlobAssocParams.
     cfg["fold_negative_ids"] = p.fold_negative_ids;
+    // Zero-extent depos (backward-drifted from between the response
+    // plane and the wires) as points; see DepoBlobAssocParams.  Written
+    // only when on: TruthPointLabeler records this configuration in its
+    // labels_meta, which keeps its bytes with the knob off.
+    if (p.point_zero_width) cfg["point_zero_width"] = true;
     // Truth file (truth/python/dump_truth_table.py) whose sed_ids map a
     // Stage A index-mode depo id to the G4 track id (and sed_energy to
     // the deposit energy).  "" = the depo ids are track ids already.
@@ -55,6 +60,7 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
     p.keep_depos = get(cfg, "keep_depos", p.keep_depos);
     p.fold_negative_ids = get(cfg, "fold_negative_ids", p.fold_negative_ids);
+    p.point_zero_width = get(cfg, "point_zero_width", p.point_zero_width);
     const std::string tfile = get<std::string>(cfg, "truth_table", "");
     if (!tfile.empty()) {
         auto tt = TruthTable::load(tfile);

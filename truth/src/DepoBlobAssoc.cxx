@@ -87,6 +87,15 @@ slice_and_dice_depos(const Binning& sbins,       // run over s nodes
         {
             const double tmean = idepo->time() + params.time_offset;
             const double tsigma = smeared(idepo->extent_long()/params.speed, params.extra_smear_long);
+            if (params.point_zero_width && !(tsigma > 0.0)) {
+                // a point in time: the slice holding it takes it all
+                // (the Gaussian of zero width is 0/0 on a bin edge)
+                const int ib = sbins.bin(tmean);
+                if (sbins.inbounds(ib)) {
+                    boost::add_edge(ib, ddesc, {1.0}, gr);
+                }
+            }
+            else {
             const double tmin = tmean - tsigma*params.nsigma;
             const double tmax = tmean + tsigma*params.nsigma;
             const Binning tbins = subset(sbins, tmin, tmax);
@@ -100,6 +109,7 @@ slice_and_dice_depos(const Binning& sbins,       // run over s nodes
                     boost::add_edge(sdesc, ddesc, {weights[it]}, gr);
                 }
             }
+            }
         }
 
         // then we dice
@@ -108,6 +118,15 @@ slice_and_dice_depos(const Binning& sbins,       // run over s nodes
             const auto wpos = pimpos.transform(idepo->pos());
             const double wmean = wpos[2]; // pitch
             const double wsigma = tran_sigma[depo_idx];
+
+            if (params.point_zero_width && !(wsigma > 0.0)) {
+                // a point across the wires: the wire region holding it
+                const int ib = pbins.bin(wmean);
+                if (pbins.inbounds(ib)) {
+                    boost::add_edge(ddesc, ib + nsbins + ndepos, {1.0}, gr);
+                }
+                continue;
+            }
 
             auto wbins = subset(pbins, wmean-wsigma*params.nsigma, wmean+wsigma*params.nsigma);
             const auto nwbins = wbins.nbins();
@@ -328,6 +347,29 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
                         continue;   // no blob of the slice on this wire
                     }
                     for (const auto& bw : bwit->second) {
+                        if (params.point_zero_width && !(depo_sigma > 0.0)) {
+                            // a point: in the blob's span along the wire or not
+                            if (!(bw.wlo <= depo_center && depo_center < bw.whi)) {
+                                continue;
+                            }
+                            const double dq = sd_weight * dw_weight * depo_q;
+                            bw.entry->q_total += dq;
+                            auto& bt = bw.entry->by_track[tid];
+                            bt.first += dq;
+                            if (depo_q > 0.0) {
+                                bt.second += energy * (dq / depo_q);
+                            }
+                            if (params.keep_depos) {
+                                auto& ds = bw.entry->depos;
+                                if (!ds.empty() && ds.back().depo == idepo.get()) {
+                                    ds.back().dq += dq;
+                                }
+                                else {
+                                    ds.push_back({idepo.get(), tid, dq});
+                                }
+                            }
+                            continue;
+                        }
                         const double w1 = std::max(bw.wlo, depo_min);
                         const double w2 = std::min(bw.whi, depo_max);
                         if (w1 >= w2) {

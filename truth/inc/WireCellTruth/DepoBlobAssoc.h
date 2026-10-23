@@ -71,6 +71,17 @@ namespace WireCell::Truth {
         /// sec 6.1).  On = the Pandora/SPINE rollup: the charge goes
         /// to the ancestor's row.
         bool fold_negative_ids{false};
+        /// Treat a depo whose (smeared) extent is zero as a point.  The
+        /// drifter moves a depo that lies between the response plane
+        /// and the wires backward to the response plane without
+        /// diffusion, so it arrives with zero longitudinal and
+        /// transverse extent; the blob overlap test then sees an empty
+        /// interval and the depo reaches no blob (pr_ml doc 24 sec 7:
+        /// 5 % of the SBND R3 charge, one gun event entirely).  On =
+        /// the whole charge goes to the slice / wire / blob span that
+        /// contains the depo's centre.  Off = BlobDepoFill's integration
+        /// (zero-extent depos dropped), bit-identical to before.
+        bool point_zero_width{false};
     };
 
     struct DepoBlobAssocResult {
