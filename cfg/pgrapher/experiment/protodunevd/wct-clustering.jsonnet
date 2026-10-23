@@ -449,6 +449,8 @@ function(
     // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
     truth_polyline_drift_volume_only = true,
     truth_polyline_per_particle = true,
+    // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
+    truth_point_zero_width = true,
 )
 
 local params_w = if wires_file == '' then params else params { files+: { wires: wires_file } };
@@ -482,7 +484,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         truth_point_label=truth_point_label, truth_depos=truth_depos,
                         truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
                         truth_fold_negative_ids=truth_fold_negative_ids,
-                        truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle);
+                        truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle,
+                        truth_point_zero_width=truth_point_zero_width);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final

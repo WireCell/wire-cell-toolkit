@@ -45,7 +45,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // doc 20 sec 6.1: fold larg4's negative EM-daughter track ids to the ancestor (C++ default false)
           truth_fold_negative_ids=false,
           // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
-          truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true)
+          truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true,
+          // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
+          truth_point_zero_width=true)
 
 local drift_speed = P.drift_speed;
 // pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
@@ -225,7 +227,8 @@ local clus_per_face (
                                           // doc 20 sec 6.1: larg4's negative EM-daughter ids folded to the ancestor; C++ default false => key omitted
                                           extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true,
                                                  [if truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
-                                                 [if truth_polyline_per_particle then 'polyline_per_particle']: true}),
+                                                 [if truth_polyline_per_particle then 'polyline_per_particle']: true,
+                                                 [if truth_point_zero_width then 'point_zero_width']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],
