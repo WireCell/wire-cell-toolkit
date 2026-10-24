@@ -1836,6 +1836,9 @@ function(
     // pr_ml doc 24 sec 6 (decision 2A (i)): ClusteringBeamDeghost fill_cluster_t0 (see pr.jsonnet).  C++
     // default false; key omitted when false => byte-identical compiled config.
     beam_deghost_fill_cluster_t0 = false,
+    // pr_ml doc 24 sec 6: ClusteringBeamDeghost strip_t0cor_leftover (see pr.jsonnet).  C++ default false; key omitted
+    // when false => byte-identical compiled config.
+    beam_deghost_strip_t0cor_leftover = false,
     // pr_ml doc 24 sec 6 (decision 2A (i)): the per-point truth cloud on the cascade cells (simulation only).
     // '' (default) => no labeler, compiled config byte-identical.  Set (the drifted sim-depos of Stage B) =>
     // deghost_tree puts a TruthPointLabeler on every cascade face with the clustering job's truth settings:
@@ -1893,6 +1896,11 @@ function(
     // stage, so every other compiled config is unchanged.  OWNER RULING
     // 2026-09-25: keep the 10 cm floor.
     beam_pr_knobs = { min_main_length_cm: 10.0 },
+    // pr_ml doc 24 sec 6 (decision 2A (i)): CheckBeamParticle fill_beam_scalars -- beam_particle_gid / _main are set
+    // on the bundle / main only, so serializing the grouping throws (PDVD R3 beam1: "missing keys in append:
+    // beam_particle_main") or silently drops them, depending on cluster order; true fills -1 / 0 into the other
+    // clusters.  C++ default false; merged into beam_pr_knobs only when true => byte-identical compiled config.
+    beam_fill_scalars = false,
     // nu_skip_cosmic / nu_skip_cosmic_bundle: TaggerCheckNeutrino refuses to run
     // neutrino PR on an in-window main already convicted as cosmic -- per-main
     // (TGM/STM/lm_flag) and, lifted to the whole flash bundle, per-bundle.
@@ -4780,7 +4788,8 @@ function(
                              beam_window_only=beam_window_only,
                              beam_deghost=(beam_deghost_dir != ''),   // doc pdvd/125
                              beam_deghost_fill_cluster_t0=beam_deghost_fill_cluster_t0,   // pr_ml doc 24 sec 6
-                             beam_pr_knobs=beam_pr_knobs,   // doc pdvd/120
+                             beam_deghost_strip_t0cor_leftover=beam_deghost_strip_t0cor_leftover,   // pr_ml doc 24 sec 6
+                             beam_pr_knobs=beam_pr_knobs + (if beam_fill_scalars then { fill_beam_scalars: true } else {}),   // doc pdvd/120; pr_ml doc 24 sec 6
                              beam_entry_point_cm=beam_entry_point_cm,
                              beam_dir=beam_dir,
                              beam_entry_max_dist_cm=beam_entry_max_dist_cm,

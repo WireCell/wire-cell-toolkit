@@ -314,6 +314,21 @@ namespace WireCell::Clus::Facade {
     // default off; pr_ml doc 24 sec 6).
     size_t fill_cluster_t0_before_serialize(Grouping& grouping);
 
+    // The same for an int scalar `key` (CheckBeamParticle: beam_particle_gid /
+    // beam_particle_main, set on the beam bundle / main only): when ANY
+    // cluster_scalar of the grouping has `key`, add key = value to every other
+    // cluster_scalar lacking it.  Returns the number of clusters filled.
+    // Defined in CheckBeamParticle.cxx (knob fill_beam_scalars, default off).
+    size_t fill_int_scalar_before_serialize(Grouping& grouping, const std::string& key, int value);
+
+    // Erase the arrays `names` from the `pcname` local PC of every blob of the
+    // cluster (absent arrays are skipped); invalidates the cluster cache when
+    // anything was erased.  Returns the number of arrays erased.  Defined in
+    // clustering_beam_deghost.cxx (knob strip_t0cor_leftover, default off: the
+    // T0-corrected arrays of the cascade cells the beam bundle did not take).
+    size_t erase_blob_arrays(Cluster& cluster, const std::vector<std::string>& names,
+                             const std::string& pcname = "3d");
+
 
 
     /**

@@ -687,6 +687,11 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // fills cluster_t0 = 0 (the value read for an absent key) into the other cascade clusters.
               // C++ default false; key omitted when false => byte-identical compiled config.
               beam_deghost_fill_cluster_t0=false,
+              // pr_ml doc 24 sec 6: ClusteringBeamDeghost strip_t0cor_leftover -- the T0-corrected arrays (x_t0cor) of
+              // the cascade cells the bundle does not take make the deghost grouping's 3d clouds heterogeneous
+              // (serialization throws, PDVD R3 beam10, or drops them); true erases them from those leftover cells.
+              // C++ default false; key omitted when false => byte-identical compiled config.
+              beam_deghost_strip_t0cor_leftover=false,
               // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
               // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
               // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
@@ -1658,6 +1663,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     beam_window_high: beam_window[1],
                     // pr_ml doc 24 sec 6: C++ default false.  Key omitted when off => byte-identical compiled config.
                     [if beam_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
+                    // pr_ml doc 24 sec 6: C++ default false.  Key omitted when off => byte-identical compiled config.
+                    [if beam_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                 },
             },
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the

@@ -85,6 +85,25 @@ size_t WireCell::Clus::Facade::fill_cluster_t0_before_serialize(Grouping& groupi
     return nfilled;
 }
 
+// Declared in ClusteringFuncs.h.
+size_t WireCell::Clus::Facade::erase_blob_arrays(Cluster& cluster, const std::vector<std::string>& names,
+                                                 const std::string& pcname)
+{
+    size_t nerased = 0;
+    for (Blob* blob : cluster.children()) {
+        auto& lpcs = blob->local_pcs();
+        auto it = lpcs.find(pcname);
+        if (it == lpcs.end()) continue;
+        for (const auto& name : names) {
+            if (!it->second.has(name)) continue;
+            it->second.erase(name);
+            ++nerased;
+        }
+    }
+    if (nerased) cluster.invalidate_cache();
+    return nerased;
+}
+
 static DeghostBox make_box(const Blob& b, int cluster_key)
 {
     DeghostBox x;
@@ -120,6 +139,12 @@ public:
         // true: fill cluster_t0 = 0 (the value get_cluster_t0() returns when
         // absent) into the other cascade clusters.  Default false = legacy.
         m_fill_cluster_t0 = get<bool>(config, "fill_cluster_t0", m_fill_cluster_t0);
+        // pr_ml doc 24 sec 6: the T0 correction adds its stored arrays (x_t0cor) to EVERY cell of a touched cascade
+        // cluster; the cells the bundle does not take stay behind with them while the untouched clusters' cells
+        // lack them, so serializing the deghost grouping throws ("missing keys in append: 1 missing: x_t0cor",
+        // PDVD R3 beam10) or drops them.  true: erase those arrays from the cells left in the touched clusters
+        // (nothing reads the deghost grouping after this stage).  Default false = legacy.
+        m_strip_t0cor_leftover = get<bool>(config, "strip_t0cor_leftover", m_strip_t0cor_leftover);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -131,6 +156,7 @@ public:
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["drop_empty"] = m_drop_empty;
         cfg["fill_cluster_t0"] = m_fill_cluster_t0;
+        cfg["strip_t0cor_leftover"] = m_strip_t0cor_leftover;
         return cfg;
     }
 
@@ -301,6 +327,14 @@ public:
                        " cascade cells connected to the bundle outside the production footprint: {} q {:.0f}",
                        pick.gid, bundle_keys.size(), n_dropped, n_kept_asis, tot_before, tot_after, totq_before, totq_after,
                        n_outside, q_outside);
+        if (m_strip_t0cor_leftover) {
+            const auto& pct = m_pcts->pc_transform(m_correction_name);
+            const auto names = pct->stored_array_names();
+            size_t nerased = 0;
+            for (int k : dgc_touched) nerased += erase_blob_arrays(*dclusters[k], names);
+            logger()->info("ClusteringBeamDeghost: strip_t0cor_leftover: {} array(s) erased from cells left in {} touched cascade cluster(s)",
+                           nerased, dgc_touched.size());
+        }
         if (m_fill_cluster_t0) {
             const size_t nfill = fill_cluster_t0_before_serialize(dg);
             logger()->info("ClusteringBeamDeghost: fill_cluster_t0: {} cascade cluster(s) filled", nfill);
@@ -315,4 +349,5 @@ private:
     double m_beam_window_high{0.0};
     bool m_drop_empty{true};
     bool m_fill_cluster_t0{false};
+    bool m_strip_t0cor_leftover{false};
 };

@@ -78,6 +78,32 @@ using namespace WireCell::Clus::PR;
 
 static auto s_log = WireCell::Log::logger("clus.CheckBeamParticle");
 
+// Declared in ClusteringFuncs.h (the fill_sep_family_before_serialize trap for
+// any int scalar).  Walks the grouping NODE's children -- the order as_tensors
+// appends in.
+size_t WireCell::Clus::Facade::fill_int_scalar_before_serialize(Grouping& grouping, const std::string& key, int value)
+{
+    auto* gnode = grouping.node();
+    if (!gnode) return 0;
+    bool any = false;
+    for (const auto* cnode : gnode->children()) {
+        const auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it != lpcs.end() && it->second.has(key)) { any = true; break; }
+    }
+    if (!any) return 0;
+    size_t nfilled = 0;
+    for (auto* cnode : gnode->children()) {
+        auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it == lpcs.end() || it->second.has(key)) continue;
+        // as Cluster::set_scalar<int>(key, value) on a PC lacking the key
+        it->second.add(key, PointCloud::Array({(int)value}));
+        ++nfilled;
+    }
+    return nfilled;
+}
+
 class CheckBeamParticle : public IConfigurable, public Clus::IEnsembleVisitor,
                           private Clus::NeedDV, private Clus::NeedPCTS,
                           private Clus::NeedRecombModel, private Clus::NeedParticleData,
@@ -131,6 +157,11 @@ public:
         m_entry_fail_fallback_geo = get<bool>(config, "entry_fail_fallback_geo", m_entry_fail_fallback_geo);
         m_entry_long_muon_absorb = get<bool>(config, "entry_long_muon_absorb", m_entry_long_muon_absorb);
         m_kine_charge_t0_frame = get<bool>(config, "kine_charge_t0_frame", m_kine_charge_t0_frame);
+        // pr_ml doc 24 sec 6: beam_particle_gid / beam_particle_main are set on the bundle / the main only, so
+        // serializing the grouping throws ("missing keys in append: 1 missing: beam_particle_main", PDVD R3 beam1)
+        // or silently drops them, depending on cluster order.  true: fill -1 / 0 into the other clusters'
+        // cluster_scalar (fill_int_scalar_before_serialize).  Default false = legacy.
+        m_fill_beam_scalars = get<bool>(config, "fill_beam_scalars", m_fill_beam_scalars);
         m_fv_tolerance.clear();
         if (config.isMember("fv_tolerance") && config["fv_tolerance"].isArray())
             for (const auto& t : config["fv_tolerance"]) m_fv_tolerance.push_back(t.asDouble());
@@ -190,6 +221,7 @@ public:
         cfg["entry_fail_fallback_geo"] = m_entry_fail_fallback_geo;
         cfg["entry_long_muon_absorb"] = m_entry_long_muon_absorb;
         cfg["kine_charge_t0_frame"] = m_kine_charge_t0_frame;
+        cfg["fill_beam_scalars"] = m_fill_beam_scalars;
         cfg["fit_blob_coverage"] = m_fit_blob_coverage;
         cfg["fit_blob_coverage_weight"] = m_fit_blob_coverage_weight;
         cfg["vertex_fit_max_move_cm"] = m_vertex_fit_max_move_cm;
@@ -235,6 +267,7 @@ private:
     // EM shower of the beam bundle has kine_charge = 0 and the Bee tree's
     // em_ke_min floor hides it.
     bool m_kine_charge_t0_frame{true};
+    bool m_fill_beam_scalars{false};   // pr_ml doc 24 sec 6
     std::vector<double> m_fv_tolerance;
     double m_fit_blob_coverage{-1.0};
     double m_fit_blob_coverage_weight{-1.0};   // doc pdvd/133: < 0 = ride the TrackFitting default (0.1)
@@ -1919,6 +1952,12 @@ void CheckBeamParticle::visit(Ensemble& ensemble) const
     }
     for (auto* c : bundle) c->set_scalar<int>("beam_particle_gid", pick.gid);
     main->set_scalar<int>("beam_particle_main", 1);
+    if (m_fill_beam_scalars) {
+        const size_t ng = fill_int_scalar_before_serialize(grouping, "beam_particle_gid", -1);
+        const size_t nm = fill_int_scalar_before_serialize(grouping, "beam_particle_main", 0);
+        SPDLOG_LOGGER_INFO(s_log, "{}CheckBeamParticle: fill_beam_scalars: beam_particle_gid -1 into {}, beam_particle_main 0 into {} cluster(s)",
+                           m_evt_tag, ng, nm);
+    }
 
     Record rec;
     rec.cluster_id = main->get_cluster_id();

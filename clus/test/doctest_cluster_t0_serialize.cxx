@@ -102,3 +102,43 @@ TEST_CASE("no cluster_t0 anywhere, or on every cluster: no-op, tensors identical
     CHECK(content(Aux::TensorDM::as_tensors(root_all, "pointtrees/0"))
           == content(Aux::TensorDM::as_tensors(root_all_ref, "pointtrees/0")));
 }
+
+TEST_CASE("int scalar on one cluster only (beam_particle_main): throws, then serializes after the fill")
+{
+    Points::node_t root;
+    Grouping* g = make_grouping(root, 3, {});
+    auto& cls = g->children();
+    cls[0]->set_scalar<int>("beam_particle_main", 1);
+    CHECK_THROWS(Aux::TensorDM::as_tensors(root, "pointtrees/0"));
+    CHECK(fill_int_scalar_before_serialize(*g, "beam_particle_main", 0) == 2);
+    CHECK(cls[0]->get_scalar<int>("beam_particle_main", -9) == 1);
+    CHECK(cls[1]->get_scalar<int>("beam_particle_main", -9) == 0);
+    CHECK(cls[2]->get_scalar<int>("beam_particle_main", -9) == 0);
+    CHECK_NOTHROW(Aux::TensorDM::as_tensors(root, "pointtrees/0"));
+    CHECK(fill_int_scalar_before_serialize(*g, "beam_particle_main", 0) == 0);
+    // absent everywhere: no-op
+    CHECK(fill_int_scalar_before_serialize(*g, "beam_particle_gid", -1) == 0);
+}
+
+TEST_CASE("blob array on one cluster's blobs only (x_t0cor): throws, then serializes after erase_blob_arrays")
+{
+    Points::node_t root;
+    Grouping* g = make_grouping(root, 3, {});
+    auto& cls = g->children();
+    for (auto* cl : cls) {
+        for (auto* b : cl->children()) {
+            Dataset ds;
+            ds.add("x", Array(std::vector<double>{1.0, 2.0}));
+            ds.add("y", Array(std::vector<double>{0.0, 0.0}));
+            ds.add("z", Array(std::vector<double>{0.0, 0.0}));
+            b->local_pcs()["3d"] = ds;
+        }
+    }
+    for (auto* b : cls[0]->children()) b->local_pcs()["3d"].add("x_t0cor", Array(std::vector<double>{1.5, 2.5}));
+    CHECK_THROWS(Aux::TensorDM::as_tensors(root, "pointtrees/0"));
+    CHECK(erase_blob_arrays(*cls[0], {"x_t0cor"}) == 1);
+    CHECK_FALSE(cls[0]->children()[0]->local_pcs().at("3d").has("x_t0cor"));
+    CHECK(cls[0]->children()[0]->local_pcs().at("3d").has("x"));
+    CHECK_NOTHROW(Aux::TensorDM::as_tensors(root, "pointtrees/0"));
+    CHECK(erase_blob_arrays(*cls[0], {"x_t0cor"}) == 0);
+}
