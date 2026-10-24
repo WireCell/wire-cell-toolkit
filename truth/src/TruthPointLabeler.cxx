@@ -11,6 +11,9 @@
 #include "WireCellIface/WirePlaneId.h"
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
+
+#include <algorithm>
+#include <limits>
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/String.h"
 
@@ -62,6 +65,8 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["heat_sigma"] = m_label.heat_sigma;
     cfg["shared_frac"] = m_label.shared_frac;
     cfg["shared_by_pf_node"] = m_label.shared_by_pf_node;
+    cfg["end_by_pf_node"] = m_label.end_by_pf_node;
+    cfg["end_radius"] = m_label.end_radius;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -107,6 +112,8 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.heat_sigma = get(cfg, "heat_sigma", m_label.heat_sigma);
     m_label.shared_frac = get(cfg, "shared_frac", m_label.shared_frac);
     m_label.shared_by_pf_node = get(cfg, "shared_by_pf_node", m_label.shared_by_pf_node);
+    m_label.end_by_pf_node = get(cfg, "end_by_pf_node", m_label.end_by_pf_node);
+    m_label.end_radius = get(cfg, "end_radius", m_label.end_radius);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
@@ -307,8 +314,63 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         }
         particles = build_particle_polylines(pl_depos, assoc, position, index_mode ? &orig_ids : nullptr);
     }
+    // pr_ml doc 25 sec 3.2: with end_by_pf_node, each PF node's start (its earliest depo by Geant4 time) and,
+    // for track / delta / Michel nodes, end (the latest depo of its root particle), in this face's frame; an
+    // end whose depo lies outside the face's drift volume is left out (a cut at the cathode or the face, not
+    // an end of the particle).
+    node_ends_t node_ends;
+    if (m_label.end_by_pf_node) {
+        const auto sens = face->sensitive();
+        const auto& bb = sens.bounds();
+        const double xlo = std::min(bb.first.x(), bb.second.x()), xhi = std::max(bb.first.x(), bb.second.x());
+        const Pimpos* pimpos = face->planes()[m_assoc.pindex]->pimpos();
+        const int dirx = face->dirx();
+        auto in_volume = [&](const IDepo& d) {
+            const double x = d.pos().x();
+            return x >= xlo && x <= xhi && dirx * pimpos->relative(d.pos())[0] >= -0.01 * units::mm;
+        };
+        const int c_orig = column_index(truth_pf_columns(), "orig_trackid");
+        std::map<int, int> root_part;   // PF node -> the particle id of its root (orig id in index mode)
+        for (const auto& n : pf.nodes) {
+            int part = n.trackid;
+            if (index_mode) {
+                const int row = tt.pf_row(n.trackid);
+                if (row >= 0) part = (int)tt.pf[row][c_orig];
+            }
+            root_part[n.index] = part;
+        }
+        struct Acc { double t0, t1; const IDepo* d0; const IDepo* d1; };
+        std::map<int, Acc> acc;
+        for (const auto& d : depos) {
+            if (!d) continue;
+            const IDepo* key = d.get();
+            if (assoc.id_from_prior && d->prior()) key = d->prior().get();
+            const int raw = key->id();
+            int tid = raw, part = raw;
+            if (assoc.id_map && tid >= 0 && (size_t)tid < assoc.id_map->size()) tid = (*assoc.id_map)[tid];
+            if (assoc.fold_negative_ids && tid < 0) tid = -tid;
+            if (index_mode && raw >= 0 && (size_t)raw < tt.sed_ids.size()) part = tt.sed_ids[raw].second;
+            const int pfn = pf.info(tid).pf_node;
+            if (pfn < 0) continue;
+            const double t = key->time();
+            auto it = acc.find(pfn);
+            if (it == acc.end()) it = acc.emplace(pfn, Acc{t, -std::numeric_limits<double>::infinity(), d.get(), nullptr}).first;
+            auto& a = it->second;
+            if (t < a.t0) { a.t0 = t; a.d0 = d.get(); }
+            if (part == root_part[pfn] && t > a.t1) { a.t1 = t; a.d1 = d.get(); }
+        }
+        for (const auto& [pfn, a] : acc) {
+            NodeEnds ne;
+            if (a.d0 && in_volume(*a.d0)) { ne.has_start = true; ne.start = position(*a.d0); }
+            const Cls c = pf.nodes[pfn].cls;
+            const bool tracklike = c == Cls::track || c == Cls::delta || c == Cls::michel;
+            if (tracklike && a.d1 && in_volume(*a.d1)) { ne.has_end = true; ne.end = position(*a.d1); }
+            node_ends[pfn] = ne;
+        }
+    }
     auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log,
-                               m_polyline_per_particle ? &particles : nullptr);
+                               m_polyline_per_particle ? &particles : nullptr,
+                               m_label.end_by_pf_node ? &node_ends : nullptr);
     if (m_polyline_drift_volume_only || m_polyline_per_particle) {
         size_t nparts = 0;
         for (const auto& [tid, v] : particles) nparts += v.size();

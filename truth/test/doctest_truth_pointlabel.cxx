@@ -675,3 +675,85 @@ TEST_CASE("truth point labels: shared_by_pf_node judges a blob by PF node, not b
     CHECK(lpon.meta()["shared_by_pf_node"].asBool());
     (void)split;
 }
+
+TEST_CASE("truth point labels: end_by_pf_node flags only points near their own node's start / end")
+{
+    auto s = make_setup();
+    Truth::DepoBlobAssocParams ap;
+    ap.speed = speed;
+    ap.keep_depos = true;
+    auto res = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), ap);
+    auto tt = make_table();
+    std::map<int, double> q_vis;
+    for (const auto& [vd, e] : res.blobs) {
+        for (const auto& [tid, qe] : e.by_track) q_vis[tid] += qe.first;
+    }
+    Truth::PFMergerParams pp;
+    pp.q_min = 100;
+    auto pf = Truth::PFMerger(pp).run(tt, q_vis);
+    Truth::depo_position_f position = [&](const IDepo& d) { return reco_position(s, d); };
+    auto polylines = Truth::build_polylines(*s.depos->depos(), ap, position);
+    REQUIRE(polylines.count(7) == 1);
+    const auto& pl7 = *polylines.at(7);
+    const double step = pl7.length() / 4;
+
+    // the muon's node: start / end at its polyline's ends; the proton's node has no ends known
+    Truth::node_ends_t ends;
+    auto& e7 = ends[pf.info(7).pf_node];
+    e7.has_start = e7.has_end = true;
+    e7.start = pl7.start();
+    e7.end = pl7.end();
+
+    // the radius: just above the muon points' nearest approach to either end (the fixture samples blob points,
+    // not the track, so the nearest point sits some way off the polyline's ends)
+    double r0 = 1e9, r1 = 1e9;
+    {
+        Truth::PointLabelParams off;
+        off.tick = tick;
+        auto t0 = make_tree(s);
+        Truth::label_live_tree(*t0, s.cluster, *s.depos->depos(), res, tt, pf, polylines, off, position);
+        for (auto* node : blob_nodes(*t0)) {
+            const auto& lpcs = node->value.local_pcs();
+            const auto tid = lpcs.at(Truth::truth_pc_name).get("tid")->elements<int>();
+            const auto& p3 = lpcs.at("3d");
+            const auto xs = p3.get("x")->elements<double>(), ys = p3.get("y")->elements<double>(), zs = p3.get("z")->elements<double>();
+            for (size_t i = 0; i < tid.size(); ++i) {
+                if (tid[i] != 7) continue;
+                const Point p(xs[i], ys[i], zs[i]);
+                r0 = std::min(r0, (p - pl7.start()).magnitude());
+                r1 = std::min(r1, (p - pl7.end()).magnitude());
+            }
+        }
+    }
+    REQUIRE(std::max(r0, r1) < 2 * step);   // both ends are near some muon point
+    Truth::PointLabelParams lp;
+    lp.tick = tick;
+    lp.end_by_pf_node = true;
+    lp.end_radius = std::max(r0, r1) + 0.1 * units::mm;
+    auto root = make_tree(s);
+    Truth::label_live_tree(*root, s.cluster, *s.depos->depos(), res, tt, pf, polylines, lp, position, nullptr, nullptr, &ends);
+    size_t n1 = 0, n2 = 0, n0 = 0;
+    for (auto* node : blob_nodes(*root)) {
+        const auto& lpcs = node->value.local_pcs();
+        const auto& tpc = lpcs.at(Truth::truth_pc_name);
+        const auto& p3 = lpcs.at("3d");
+        const auto tid = tpc.get("tid")->elements<int>();
+        const auto end = tpc.get("end")->elements<int>();
+        const auto xs = p3.get("x")->elements<double>();
+        const auto ys = p3.get("y")->elements<double>();
+        const auto zs = p3.get("z")->elements<double>();
+        for (size_t i = 0; i < tid.size(); ++i) {
+            if (tid[i] == 8) { CHECK(end[i] == 0); continue; }
+            if (tid[i] != 7) continue;
+            const Point p(xs[i], ys[i], zs[i]);
+            const int want = (p - e7.start).magnitude() <= lp.end_radius ? 1 : ((p - e7.end).magnitude() <= lp.end_radius ? 2 : 0);
+            CHECK(end[i] == want);
+            (want == 1 ? n1 : (want == 2 ? n2 : n0))++;
+        }
+    }
+    CHECK(n1 > 0);
+    CHECK(n2 > 0);
+    CHECK(n0 > 0);
+    CHECK_FALSE(Truth::PointLabelParams().meta().isMember("end_by_pf_node"));
+    CHECK(lp.meta()["end_by_pf_node"].asBool());
+}

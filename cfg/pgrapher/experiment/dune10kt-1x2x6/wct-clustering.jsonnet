@@ -54,6 +54,11 @@ function(
     // to each depo's longitudinal width (DepoBlobAssoc extra_smear_long; PDHD / PDVD / FD-HD Gaus_wide 0.12 MHz -> 1.326,
     // SBND 0.10 MHz -> 1.592).  C++ default 0; 0 => key omitted => byte-identical; unused unless truth_point_label.
     truth_extra_smear_long_us = 0,
+    // pr_ml doc 25 sec 3.2 (owner 2026-10-24): the end flag from the point's own PF node -- 1 / 2 within
+    // truth_end_radius_mm (3-D) of the node's start / end (track / delta / Michel: both; showers: start).
+    // C++ default false / 10 mm; false => keys omitted => byte-identical; unused unless truth_point_label.
+    truth_end_by_pf_node = false,
+    truth_end_radius_mm = 10,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -78,7 +83,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle,
                         truth_point_zero_width=truth_point_zero_width,
                         truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold,
-                        truth_extra_smear_long=truth_extra_smear_long_us * wc.us);
+                        truth_extra_smear_long=truth_extra_smear_long_us * wc.us,
+                        truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius_mm * wc.mm);
 
 local actives = [cluster_source("%s/clusters-apa-anode%d-ms-active.tar.gz"%[input, a.data.ident]) for a in anodes];
 local maskeds = [cluster_source("%s/clusters-apa-anode%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in anodes];

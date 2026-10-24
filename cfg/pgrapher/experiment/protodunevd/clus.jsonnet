@@ -74,7 +74,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           // pr_ml doc 25 sec 2.8: shared test per PF node / PFMerger em_fold (C++ default false => key omitted)
           truth_shared_by_pf_node=false, truth_em_fold=false,
           // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long (time, added in quadrature) = the SP charge time filter width
-          truth_extra_smear_long=0)
+          truth_extra_smear_long=0,
+          // pr_ml doc 25 sec 3.2: TruthPointLabeler end_by_pf_node / end_radius (C++ default false / 10 mm => keys omitted when false)
+          truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -369,7 +371,10 @@ local clus_per_face (
                                                  [if truth_shared_by_pf_node then 'shared_by_pf_node']: true,
                                                  [if truth_em_fold then 'pfmerger']: {em_fold: true},
                                                  // pr_ml doc 25 sec 4: the charge time filter's width (C++ default 0 => key omitted)
-                                                 [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long}),
+                                                 [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long,
+                                                 // pr_ml doc 25 sec 3.2: the end flag from the point's own PF node (C++ default false => keys omitted)
+                                                 [if truth_end_by_pf_node then 'end_by_pf_node']: true,
+                                                 [if truth_end_by_pf_node then 'end_radius']: truth_end_radius}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

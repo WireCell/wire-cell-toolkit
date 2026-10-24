@@ -157,7 +157,8 @@ Truth::label_live_tree(node_t& root,
                        const PointLabelParams& params,
                        const depo_position_f& position,
                        Log::logptr_t log,
-                       const particle_polylines_t* particles)
+                       const particle_polylines_t* particles,
+                       const node_ends_t* node_ends)
 {
     PointLabelSummary sum;
     sum.void_roots = pf.void_roots;
@@ -359,6 +360,16 @@ Truth::label_live_tree(node_t& root,
                         col.dedx[i] = hit.dedx * units::cm;
                         if (hit.s <= params.end_window) col.end[i] = 1;
                         else if (pl->length() - hit.s <= params.end_window) col.end[i] = 2;
+                    }
+                    if (params.end_by_pf_node && node_ends) {
+                        // the point's own PF node: start / end within end_radius in 3-D
+                        col.end[i] = 0;
+                        auto nit = pfn >= 0 ? node_ends->find(pfn) : node_ends->end();
+                        if (nit != node_ends->end()) {
+                            const auto& ne = nit->second;
+                            if (ne.has_start && (p - ne.start).magnitude() <= params.end_radius) col.end[i] = 1;
+                            else if (ne.has_end && (p - ne.end).magnitude() <= params.end_radius) col.end[i] = 2;
+                        }
                     }
                     const auto& kps = kps_of(tid);
                     col.v_end[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::end, params.heat_sigma);

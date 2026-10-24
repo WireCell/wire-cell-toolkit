@@ -72,6 +72,14 @@ namespace WireCell::Truth {
         /// shower the charge is split among many tracks of one node).
         /// Off = per G4 track, as before.  Recorded in meta() only when on.
         bool shared_by_pf_node{false};
+        /// The end flag from the point's own PF node (pr_ml doc 25 sec 3.2):
+        /// 1 / 2 when the point lies within end_radius (3-D) of the node's
+        /// start / end point (track, delta and Michel nodes: both; other
+        /// classes: start only).  Off = the legacy flag (arc position on the
+        /// nearest polyline of the key, no distance requirement).  Recorded
+        /// in meta() only when on.
+        bool end_by_pf_node{false};
+        double end_radius{10 * units::mm};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -86,6 +94,10 @@ namespace WireCell::Truth {
             m["heat_sigma_cm"] = heat_sigma / units::cm;
             m["shared_frac"] = shared_frac;
             if (shared_by_pf_node) m["shared_by_pf_node"] = true;
+            if (end_by_pf_node) {
+                m["end_by_pf_node"] = true;
+                m["end_radius_mm"] = end_radius / units::mm;
+            }
             return m;
         }
     };
@@ -97,6 +109,15 @@ namespace WireCell::Truth {
         size_t npolylines{0};
         std::set<int> void_roots;
     };
+
+    /// A PF node's start / end points in the reconstructed frame of one
+    /// face (end_by_pf_node); has_* false when the point is not in the
+    /// face's drift volume or the node has no such end.
+    struct NodeEnds {
+        bool has_start{false}, has_end{false};
+        Point start, end;
+    };
+    using node_ends_t = std::map<int, NodeEnds>;   // PF node index -> ends
 
     /// Reconstructed-frame position of a drifted depo (x from its
     /// arrival time, as PointTreeBuilding places blobs).
@@ -140,7 +161,8 @@ namespace WireCell::Truth {
                     const PointLabelParams& params,
                     const depo_position_f& position,
                     Log::logptr_t log = nullptr,
-                    const particle_polylines_t* particles = nullptr);
+                    const particle_polylines_t* particles = nullptr,
+                    const node_ends_t* node_ends = nullptr);
 }
 
 #endif
