@@ -364,7 +364,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                        // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long = the SP charge time filter width (C++ default 0 => key omitted)
                        truth_extra_smear_long=0,
                        // pr_ml doc 25 sec 3.2: TruthPointLabeler end_by_pf_node / end_radius (C++ default false / 10 mm => keys omitted when false)
-                       truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm) = {
+                       truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm,
+                       // pr_ml doc 25 sec 3.2: TruthPointLabeler end_distance (C++ default false => key omitted)
+                       truth_end_distance=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -414,7 +416,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                                                  [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long,
                                                  // pr_ml doc 25 sec 3.2: the end flag from the point's own PF node (C++ default false => keys omitted)
                                                  [if truth_end_by_pf_node then 'end_by_pf_node']: true,
-                                                 [if truth_end_by_pf_node then 'end_radius']: truth_end_radius}),
+                                                 [if truth_end_by_pf_node then 'end_radius']: truth_end_radius,
+                                                 // pr_ml doc 25 sec 3.2: d_node_start / d_node_end columns (C++ default false => key omitted)
+                                                 [if truth_end_distance then 'end_distance']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes=[truth_cfo, ptb],
         centernodes=[truth_depo_src],
@@ -965,7 +969,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
            // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long = the SP charge time filter width (C++ default 0 => key omitted)
            truth_extra_smear_long=0,
            // pr_ml doc 25 sec 3.2: TruthPointLabeler end_by_pf_node / end_radius (C++ default false / 10 mm => keys omitted when false)
-           truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm) {
+           truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm,
+           // pr_ml doc 25 sec 3.2: TruthPointLabeler end_distance (C++ default false => key omitted)
+           truth_end_distance=false) {
     // Output prefix for the per-event writers: output_dir/ normally, and
     // output_dir/<evt_subdir>/ when a group runs in one process (see the
     // evt_subdir doc above).
@@ -1006,7 +1012,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
                       truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
                       truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long,
-                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius),
+                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
@@ -1020,7 +1026,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
                       truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
                       truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long,
-                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius),
+                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,

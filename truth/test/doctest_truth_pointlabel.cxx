@@ -757,3 +757,73 @@ TEST_CASE("truth point labels: end_by_pf_node flags only points near their own n
     CHECK_FALSE(Truth::PointLabelParams().meta().isMember("end_by_pf_node"));
     CHECK(lp.meta()["end_by_pf_node"].asBool());
 }
+
+TEST_CASE("truth point labels: end_distance stores each point's distance to its own node's start / end")
+{
+    auto s = make_setup();
+    Truth::DepoBlobAssocParams ap;
+    ap.speed = speed;
+    ap.keep_depos = true;
+    auto res = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), ap);
+    auto tt = make_table();
+    std::map<int, double> q_vis;
+    for (const auto& [vd, e] : res.blobs) {
+        for (const auto& [tid, qe] : e.by_track) q_vis[tid] += qe.first;
+    }
+    Truth::PFMergerParams pp;
+    pp.q_min = 100;
+    auto pf = Truth::PFMerger(pp).run(tt, q_vis);
+    Truth::depo_position_f position = [&](const IDepo& d) { return reco_position(s, d); };
+    auto polylines = Truth::build_polylines(*s.depos->depos(), ap, position);
+    const auto& pl7 = *polylines.at(7);
+    Truth::node_ends_t ends;
+    auto& e7 = ends[pf.info(7).pf_node];
+    e7.has_start = e7.has_end = true;
+    e7.start = pl7.start();
+    e7.end = pl7.end();
+
+    SUBCASE("off: the fixed key set")
+    {
+        Truth::PointLabelParams lp;
+        lp.tick = tick;
+        auto root = make_tree(s);
+        Truth::label_live_tree(*root, s.cluster, *s.depos->depos(), res, tt, pf, polylines, lp, position, nullptr, nullptr, &ends);
+        for (auto* node : blob_nodes(*root)) {
+            const auto keys = node->value.local_pcs().at(Truth::truth_pc_name).keys();
+            CHECK(keys.size() == Truth::truth_pc_keys().size());
+        }
+    }
+    SUBCASE("on: d_node_start / d_node_end on every node, -1 for a node without ends")
+    {
+        Truth::PointLabelParams lp;
+        lp.tick = tick;
+        lp.end_distance = true;
+        auto root = make_tree(s);
+        Truth::label_live_tree(*root, s.cluster, *s.depos->depos(), res, tt, pf, polylines, lp, position, nullptr, nullptr, &ends);
+        size_t n7 = 0;
+        for (auto* node : blob_nodes(*root)) {
+            const auto& lpcs = node->value.local_pcs();
+            const auto& tpc = lpcs.at(Truth::truth_pc_name);
+            CHECK(tpc.keys().size() == Truth::truth_pc_keys().size() + 2);
+            const auto tid = tpc.get("tid")->elements<int>();
+            const auto ds = tpc.get("d_node_start")->elements<double>();
+            const auto de = tpc.get("d_node_end")->elements<double>();
+            const auto& p3 = lpcs.at("3d");
+            const auto xs = p3.get("x")->elements<double>(), ys = p3.get("y")->elements<double>(), zs = p3.get("z")->elements<double>();
+            for (size_t i = 0; i < tid.size(); ++i) {
+                if (tid[i] == 7) {
+                    const Point p(xs[i], ys[i], zs[i]);
+                    CHECK(ds[i] == doctest::Approx((p - e7.start).magnitude()));
+                    CHECK(de[i] == doctest::Approx((p - e7.end).magnitude()));
+                    ++n7;
+                }
+                else {
+                    CHECK(ds[i] == -1.0);
+                    CHECK(de[i] == -1.0);
+                }
+            }
+        }
+        CHECK(n7 > 0);
+        CHECK(lp.meta()["end_distance"].asBool());
+    }
+}

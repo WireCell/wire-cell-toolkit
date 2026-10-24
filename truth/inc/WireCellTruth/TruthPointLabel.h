@@ -80,6 +80,13 @@ namespace WireCell::Truth {
         /// in meta() only when on.
         bool end_by_pf_node{false};
         double end_radius{10 * units::mm};
+        /// Also store, per point, the 3-D distance to its own PF node's
+        /// start / end (truth keys d_node_start, d_node_end; -1 when the
+        /// node has no such end in this face or the point has no node), so
+        /// a training can choose its own radius (pr_ml doc 25 sec 3.2).
+        /// Off = the key set of truth_pc_keys().  Recorded in meta() only
+        /// when on.  Independent of end_by_pf_node (both use the node ends).
+        bool end_distance{false};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -98,6 +105,7 @@ namespace WireCell::Truth {
                 m["end_by_pf_node"] = true;
                 m["end_radius_mm"] = end_radius / units::mm;
             }
+            if (end_distance) m["end_distance"] = true;
             return m;
         }
     };

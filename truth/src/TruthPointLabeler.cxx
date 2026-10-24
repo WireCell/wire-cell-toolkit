@@ -67,6 +67,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["shared_by_pf_node"] = m_label.shared_by_pf_node;
     cfg["end_by_pf_node"] = m_label.end_by_pf_node;
     cfg["end_radius"] = m_label.end_radius;
+    cfg["end_distance"] = m_label.end_distance;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -114,6 +115,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.shared_by_pf_node = get(cfg, "shared_by_pf_node", m_label.shared_by_pf_node);
     m_label.end_by_pf_node = get(cfg, "end_by_pf_node", m_label.end_by_pf_node);
     m_label.end_radius = get(cfg, "end_radius", m_label.end_radius);
+    m_label.end_distance = get(cfg, "end_distance", m_label.end_distance);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
@@ -319,7 +321,8 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
     // end whose depo lies outside the face's drift volume is left out (a cut at the cathode or the face, not
     // an end of the particle).
     node_ends_t node_ends;
-    if (m_label.end_by_pf_node) {
+    const bool want_ends = m_label.end_by_pf_node || m_label.end_distance;
+    if (want_ends) {
         const auto sens = face->sensitive();
         const auto& bb = sens.bounds();
         const double xlo = std::min(bb.first.x(), bb.second.x()), xhi = std::max(bb.first.x(), bb.second.x());
@@ -370,7 +373,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
     }
     auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log,
                                m_polyline_per_particle ? &particles : nullptr,
-                               m_label.end_by_pf_node ? &node_ends : nullptr);
+                               want_ends ? &node_ends : nullptr);
     if (m_polyline_drift_volume_only || m_polyline_per_particle) {
         size_t nparts = 0;
         for (const auto& [tid, v] : particles) nparts += v.size();

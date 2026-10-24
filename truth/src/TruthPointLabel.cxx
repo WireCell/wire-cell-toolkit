@@ -111,8 +111,12 @@ namespace {
         std::vector<int> tid, orig_tid, instance_valid, pdg, cls, iid, pf_node, end;
         std::vector<double> pid_frac, true_q_frac, d_traj, dir_x, dir_y, dir_z, s_t,
             v_vtx, v_end, v_kink, v_conv, dedx;
+        // end_distance: the distance to the own node's start / end, -1 when there is none
+        bool with_end_distance{false};
+        std::vector<double> d_start, d_end;
         void resize(size_t n)
         {
+            if (with_end_distance) { d_start.assign(n, -1.0); d_end.assign(n, -1.0); }
             for (auto* v : {&tid, &orig_tid, &instance_valid, &pdg, &cls, &iid, &pf_node, &end}) v->assign(n, 0);
             for (auto* v : {&pid_frac, &true_q_frac, &d_traj, &dir_x, &dir_y, &dir_z, &s_t,
                             &v_vtx, &v_end, &v_kink, &v_conv, &dedx}) v->assign(n, 0.0);
@@ -141,6 +145,10 @@ namespace {
             ds.add("v_heat_conv", Array(v_conv));
             ds.add("end", Array(end));
             ds.add("dedx_true", Array(dedx));
+            if (with_end_distance) {
+                ds.add("d_node_start", Array(d_start));
+                ds.add("d_node_end", Array(d_end));
+            }
             return ds;
         }
     };
@@ -271,6 +279,7 @@ Truth::label_live_tree(node_t& root,
             if (shared) ++sum.nshared;
 
             Columns col;
+            col.with_end_distance = params.end_distance;
             col.resize(npts);
             for (size_t i = 0; i < npts; ++i) {
                 const Point p(xs[i], ys[i], zs[i]);
@@ -360,6 +369,13 @@ Truth::label_live_tree(node_t& root,
                         col.dedx[i] = hit.dedx * units::cm;
                         if (hit.s <= params.end_window) col.end[i] = 1;
                         else if (pl->length() - hit.s <= params.end_window) col.end[i] = 2;
+                    }
+                    if (params.end_distance && node_ends) {
+                        auto nit = pfn >= 0 ? node_ends->find(pfn) : node_ends->end();
+                        if (nit != node_ends->end()) {
+                            if (nit->second.has_start) col.d_start[i] = (p - nit->second.start).magnitude();
+                            if (nit->second.has_end) col.d_end[i] = (p - nit->second.end).magnitude();
+                        }
                     }
                     if (params.end_by_pf_node && node_ends) {
                         // the point's own PF node: start / end within end_radius in 3-D

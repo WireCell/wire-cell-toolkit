@@ -1865,6 +1865,8 @@ function(
     // false / 10 mm; false => keys omitted => byte-identical compiled config.
     beam_deghost_truth_end_by_pf_node = false,
     beam_deghost_truth_end_radius_mm = 10,
+    // pr_ml doc 25 sec 3.2: the labeler's d_node_start / d_node_end columns.  C++ default false => key omitted.
+    beam_deghost_truth_end_distance = false,
     // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
     // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
@@ -4953,6 +4955,7 @@ function(
                     [if beam_deghost_truth_em_fold then 'pfmerger']: {em_fold: true},
                     [if beam_deghost_truth_end_by_pf_node then 'end_by_pf_node']: true,
                     [if beam_deghost_truth_end_by_pf_node then 'end_radius']: beam_deghost_truth_end_radius_mm * wc.mm,
+                    [if beam_deghost_truth_end_distance then 'end_distance']: true,
                 },
             }));
     local dg_join = g.pnode({
