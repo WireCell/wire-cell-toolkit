@@ -98,6 +98,11 @@ namespace WireCell::Truth {
         /// nearest vertex / conversion point, -1 when none).  Off = the
         /// legacy key-polyline heat.  Recorded in meta() only when on.
         bool heat_by_pf_node{false};
+        /// With heat_by_pf_node: kinks only from track nodes whose root is
+        /// a muon or a charged hadron (not delta / Michel electrons, which
+        /// scatter, nor neutrons).  Off = every track-like node (track,
+        /// delta, Michel).  Recorded in meta() only when on.
+        bool kink_tracks_only{false};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -118,6 +123,7 @@ namespace WireCell::Truth {
             }
             if (end_distance) m["end_distance"] = true;
             if (heat_by_pf_node) m["heat_by_pf_node"] = true;
+            if (kink_tracks_only) m["kink_tracks_only"] = true;
             return m;
         }
     };
@@ -138,6 +144,17 @@ namespace WireCell::Truth {
         Point start, end;
     };
     using node_ends_t = std::map<int, NodeEnds>;   // PF node index -> ends
+
+    /// heat_by_pf_node: whether a PF node's root particle gives kink keypoints.
+    inline bool node_has_kinks(const PFNode& n, bool tracks_only)
+    {
+        if (!tracks_only) return n.cls == Cls::track || n.cls == Cls::delta || n.cls == Cls::michel;
+        if (n.cls != Cls::track) return false;
+        switch (std::abs(n.pdg)) {
+        case 13: case 211: case 321: case 2212: case 3222: case 3112: return true;   // muon, charged hadrons
+        default: return false;
+        }
+    }
 
     /// heat_by_pf_node keypoints in the reconstructed frame of one face.
     struct HeatKeys {

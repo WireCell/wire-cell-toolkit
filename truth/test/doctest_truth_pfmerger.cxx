@@ -6,6 +6,7 @@
  */
 
 #include "WireCellTruth/PFMerger.h"
+#include "WireCellTruth/TruthPointLabel.h"
 #include "WireCellTruth/Schema.h"
 #include "WireCellTruth/TruthTable.h"
 #include "WireCellUtil/Units.h"
@@ -220,4 +221,20 @@ TEST_CASE("pfmerger em_fold: the radiation of a delta and of a Michel stays with
         CHECK(res.info(1).pf_node != nd);
         CHECK(p.meta()["em_fold_delta_michel"].asBool());
     }
+}
+
+TEST_CASE("node_has_kinks: kink_tracks_only keeps muons and charged hadrons only")
+{
+    auto node = [](Cls c, int pdg) { PFNode n; n.cls = c; n.pdg = pdg; return n; };
+    // off: every track-like node
+    CHECK(node_has_kinks(node(Cls::track, 13), false));
+    CHECK(node_has_kinks(node(Cls::delta, 11), false));
+    CHECK(node_has_kinks(node(Cls::michel, -11), false));
+    CHECK_FALSE(node_has_kinks(node(Cls::shower, 22), false));
+    // on: muons and charged hadrons
+    for (int pdg : {13, -13, 211, -211, 321, -321, 2212, 3222, 3112}) CHECK(node_has_kinks(node(Cls::track, pdg), true));
+    CHECK_FALSE(node_has_kinks(node(Cls::track, 2112), true));   // neutron
+    CHECK_FALSE(node_has_kinks(node(Cls::delta, 11), true));
+    CHECK_FALSE(node_has_kinks(node(Cls::michel, 11), true));
+    CHECK_FALSE(node_has_kinks(node(Cls::shower, 11), true));
 }

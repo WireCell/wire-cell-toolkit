@@ -71,6 +71,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["end_radius"] = m_label.end_radius;
     cfg["end_distance"] = m_label.end_distance;
     cfg["heat_by_pf_node"] = m_label.heat_by_pf_node;
+    cfg["kink_tracks_only"] = m_label.kink_tracks_only;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -120,6 +121,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.end_radius = get(cfg, "end_radius", m_label.end_radius);
     m_label.end_distance = get(cfg, "end_distance", m_label.end_distance);
     m_label.heat_by_pf_node = get(cfg, "heat_by_pf_node", m_label.heat_by_pf_node);
+    m_label.kink_tracks_only = get(cfg, "kink_tracks_only", m_label.kink_tracks_only);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
@@ -429,8 +431,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
                 if (n.cls == Cls::shower && n.pdg == 22 && a.d0 && in_volume(*a.d0)) heat_keys.conversions.push_back(position(*a.d0));
             }
             for (const auto& [pfn, ds] : root_depos) {
-                const Cls c = pf.nodes[pfn].cls;
-                if (!(c == Cls::track || c == Cls::delta || c == Cls::michel) || ds.size() < 3) continue;
+                if (!node_has_kinks(pf.nodes[pfn], m_label.kink_tracks_only) || ds.size() < 3) continue;
                 DepoPolyline pl;
                 for (const auto* d : ds) {
                     const IDepo* key = (assoc.id_from_prior && d->prior()) ? d->prior().get() : d;

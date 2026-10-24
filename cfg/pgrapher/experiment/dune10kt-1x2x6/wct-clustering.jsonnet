@@ -65,6 +65,9 @@ function(
     // pr_ml doc 25 sec 4.2 (owner 2026-10-24): the heat targets from the PF nodes (own node end / root kinks, true
     // interaction vertices, photon conversion points) + d_vertex / d_conversion.  C++ default false; false => key omitted.
     truth_heat_by_pf_node = false,
+    // pr_ml doc 25 sec 4.2 (owner 2026-10-24): with truth_heat_by_pf_node, kinks only from muons and charged hadrons.
+    // C++ default false; false => key omitted => byte-identical.
+    truth_kink_tracks_only = false,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -91,7 +94,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold,
                         truth_extra_smear_long=truth_extra_smear_long_us * wc.us,
                         truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius_mm * wc.mm,
-                        truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node);
+                        truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node,
+                        truth_kink_tracks_only=truth_kink_tracks_only);
 
 local actives = [cluster_source("%s/clusters-apa-anode%d-ms-active.tar.gz"%[input, a.data.ident]) for a in anodes];
 local maskeds = [cluster_source("%s/clusters-apa-anode%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in anodes];

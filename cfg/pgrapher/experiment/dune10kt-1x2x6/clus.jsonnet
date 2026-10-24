@@ -57,7 +57,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // pr_ml doc 25 sec 3.2: TruthPointLabeler end_distance (C++ default false => key omitted)
           truth_end_distance=false,
           // pr_ml doc 25 sec 4.2: TruthPointLabeler heat_by_pf_node (C++ default false => key omitted)
-          truth_heat_by_pf_node=false)
+          truth_heat_by_pf_node=false,
+          // pr_ml doc 25 sec 4.2: TruthPointLabeler kink_tracks_only (C++ default false => key omitted)
+          truth_kink_tracks_only=false)
 
 local drift_speed = P.drift_speed;
 // pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
@@ -250,7 +252,9 @@ local clus_per_face (
                                                  // pr_ml doc 25 sec 3.2: d_node_start / d_node_end columns (C++ default false => key omitted)
                                                  [if truth_end_distance then 'end_distance']: true,
                                                  // pr_ml doc 25 sec 4.2: heat targets from the PF nodes (C++ default false => key omitted)
-                                                 [if truth_heat_by_pf_node then 'heat_by_pf_node']: true}),
+                                                 [if truth_heat_by_pf_node then 'heat_by_pf_node']: true,
+                                                 // pr_ml doc 25 sec 4.2: kinks from muons / charged hadrons only (C++ default false => key omitted)
+                                                 [if truth_kink_tracks_only then 'kink_tracks_only']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],
