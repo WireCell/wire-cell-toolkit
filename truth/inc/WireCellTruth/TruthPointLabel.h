@@ -67,6 +67,11 @@ namespace WireCell::Truth {
         double heat_sigma{1 * units::cm};
         /// Blob-level fraction below which the blob is "shared".
         double shared_frac{0.5};
+        /// Do the shared test on the blob's true charge summed per PF
+        /// node instead of per G4 track (pr_ml doc 25 sec 2.8: inside a
+        /// shower the charge is split among many tracks of one node).
+        /// Off = per G4 track, as before.  Recorded in meta() only when on.
+        bool shared_by_pf_node{false};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -80,6 +85,7 @@ namespace WireCell::Truth {
             m["kink_angle_deg"] = kink_angle / units::deg;
             m["heat_sigma_cm"] = heat_sigma / units::cm;
             m["shared_frac"] = shared_frac;
+            if (shared_by_pf_node) m["shared_by_pf_node"] = true;
             return m;
         }
     };

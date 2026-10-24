@@ -594,3 +594,84 @@ TEST_CASE("truth point labeler: polyline_drift_volume_only drops the other drift
     CHECK(!pl0.isMember("polyline_per_particle"));
     CHECK(!pl0.isMember("polyline_drift_volume_only"));
 }
+
+TEST_CASE("truth point labels: shared_by_pf_node judges a blob by PF node, not by G4 track")
+{
+    auto s = make_setup();
+    Truth::DepoBlobAssocParams ap;
+    ap.speed = speed;
+    ap.keep_depos = true;
+    auto res = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), ap);
+
+    // one muon blob: its true charge split 0.4 / 0.3 / 0.3 among the muon (7) and two short
+    // ionisation electrons of it (9, 10), which PFMerger rule 3 folds into the muon's node
+    cluster_vertex_t split{};
+    bool found = false;
+    for (auto& [vd, e] : res.blobs) {
+        if (e.q_total > 0 && e.by_track.size() == 1 && e.by_track.count(7)) {
+            const auto qe = e.by_track.at(7);
+            e.by_track.clear();
+            e.by_track[7] = {0.4 * qe.first, 0.4 * qe.second};
+            e.by_track[9] = {0.3 * qe.first, 0.3 * qe.second};
+            e.by_track[10] = {0.3 * qe.first, 0.3 * qe.second};
+            split = vd; found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
+    auto tt = make_table();
+    const auto& pfc = Truth::truth_pf_columns();
+    for (int tid : {9, 10}) {
+        std::vector<double> r(pfc.size(), 0.0);
+        r[Truth::column_index(pfc, "trackid")] = tid;
+        r[Truth::column_index(pfc, "mother_trackid")] = 7;
+        r[Truth::column_index(pfc, "orig_trackid")] = tid * 100;
+        r[Truth::column_index(pfc, "pdg")] = 11;
+        r[Truth::column_index(pfc, "process")] = Truth::process_code("muIoni");
+        r[Truth::column_index(pfc, "KE")] = 0.001;
+        r[Truth::column_index(pfc, "start_z")] = 10;
+        r[Truth::column_index(pfc, "end_z")] = 10.3;  // 3 mm: a short delta
+        r[Truth::column_index(pfc, "nu_row")] = 0;
+        tt.pf.push_back(r);
+    }
+    std::map<int, double> q_vis;
+    for (const auto& [vd, e] : res.blobs) {
+        for (const auto& [tid, qe] : e.by_track) q_vis[tid] += qe.first;
+    }
+    Truth::PFMergerParams pp;
+    pp.q_min = 100;
+    auto pf = Truth::PFMerger(pp).run(tt, q_vis);
+    REQUIRE(pf.info(9).pf_node == pf.info(7).pf_node);
+    REQUIRE(pf.info(10).pf_node == pf.info(7).pf_node);
+
+    Truth::depo_position_f position = [&](const IDepo& d) { return reco_position(s, d); };
+    auto polylines = Truth::build_polylines(*s.depos->depos(), ap, position);
+    auto run = [&](bool by_node) {
+        auto root = make_tree(s);
+        Truth::PointLabelParams lp;
+        lp.tick = tick;
+        lp.shared_by_pf_node = by_node;
+        auto sum = Truth::label_live_tree(*root, s.cluster, *s.depos->depos(), res, tt, pf, polylines, lp, position);
+        size_t ninvalid = 0;
+        for (auto* node : blob_nodes(*root)) {
+            const auto& tpc = node->value.local_pcs().at(Truth::truth_pc_name);
+            const auto tid = tpc.get("tid")->elements<int>();
+            const auto valid = tpc.get("instance_valid")->elements<int>();
+            for (size_t i = 0; i < tid.size(); ++i) {
+                if (tid[i] >= 0 && valid[i] == 0) ++ninvalid;
+            }
+        }
+        return std::make_pair(sum.nshared, ninvalid);
+    };
+    const auto off = run(false);
+    CHECK(off.first == 1);          // top G4 track holds 0.4 < 0.5: shared
+    CHECK(off.second == 3);         // its three points are not instance-valid
+    const auto on = run(true);
+    CHECK(on.first == 0);           // one PF node holds all of it
+    CHECK(on.second == 0);
+    CHECK_FALSE(Truth::PointLabelParams().meta().isMember("shared_by_pf_node"));
+    Truth::PointLabelParams lpon;
+    lpon.shared_by_pf_node = true;
+    CHECK(lpon.meta()["shared_by_pf_node"].asBool());
+    (void)split;
+}

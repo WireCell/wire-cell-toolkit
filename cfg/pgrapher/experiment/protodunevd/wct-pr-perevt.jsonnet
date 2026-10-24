@@ -1852,6 +1852,15 @@ function(
     beam_deghost_truth_polyline_drift_volume_only = true,
     beam_deghost_truth_polyline_per_particle = true,
     beam_deghost_truth_point_zero_width = true,
+    // pr_ml doc 25 sec 4 (the option (b) smear relabel test): the labeler's DepoBlobAssoc extra_smear_long (time,
+    // added in quadrature to each depo's longitudinal width) and extra_smear_tran (distance, to the transverse width).
+    // C++ default 0 for both.  0 => key omitted => byte-identical compiled config.
+    beam_deghost_truth_extra_smear_long_us = 0,
+    beam_deghost_truth_extra_smear_tran_mm = 0,
+    // pr_ml doc 25 sec 2.8: the labeler's shared test per PF node / PFMerger em_fold (EM daughters of a delta or
+    // Michel node merge into it).  C++ default false; false => key omitted => byte-identical compiled config.
+    beam_deghost_truth_shared_by_pf_node = false,
+    beam_deghost_truth_em_fold = false,
     // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
     // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
@@ -4934,6 +4943,10 @@ function(
                     [if beam_deghost_truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
                     [if beam_deghost_truth_polyline_per_particle then 'polyline_per_particle']: true,
                     [if beam_deghost_truth_point_zero_width then 'point_zero_width']: true,
+                    [if beam_deghost_truth_extra_smear_long_us != 0 then 'extra_smear_long']: beam_deghost_truth_extra_smear_long_us * wc.us,
+                    [if beam_deghost_truth_extra_smear_tran_mm != 0 then 'extra_smear_tran']: beam_deghost_truth_extra_smear_tran_mm * wc.mm,
+                    [if beam_deghost_truth_shared_by_pf_node then 'shared_by_pf_node']: true,
+                    [if beam_deghost_truth_em_fold then 'pfmerger']: {em_fold: true},
                 },
             }));
     local dg_join = g.pnode({

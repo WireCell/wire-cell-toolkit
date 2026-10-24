@@ -178,3 +178,46 @@ TEST_CASE("pfmerger weak nodes merge into the parent and an NC without a primary
     IDepo::vector depos;
     (void)depos;
 }
+
+TEST_CASE("pfmerger em_fold: the radiation of a delta and of a Michel stays with them only when on")
+{
+    const Point vtx(0, 0, 0);
+    Builder b(vtx);
+    b.add(1, 0, 13, "primary", 0.5, vtx, Point(0, 0, 100), 9e6);                       // muon, 100 cm
+    b.add(2, 1, 11, "muIoni", 0.05, Point(0, 0, 40), Point(0, 6, 44), 8e5);           // long delta (7.2 cm)
+    b.add(3, 2, 22, "eBrem", 0.02, Point(0, 3, 42), Point(0, 13, 52), 0);             // its brem photon
+    b.add(4, 3, 11, "conv", 0.012, Point(0, 13, 52), Point(0, 16, 58), 5e5);          // the photon converts
+    b.add(5, 3, -11, "conv", 0.008, Point(0, 13, 52), Point(0, 15, 56), 4e5);
+    b.add(6, 4, 11, "eIoni", 0.003, Point(0, 14, 54), Point(0, 16, 55), 6e4);          // ionisation inside that shower
+    b.add(7, 1, 11, "Decay", 0.03, Point(0, 0, 100), Point(0, 4, 105), 6e5);          // Michel
+    b.add(8, 7, 22, "eBrem", 0.015, Point(0, 2, 102), Point(0, 2, 120), 0);           // the Michel's brem photon
+    b.add(9, 8, 11, "compt", 0.01, Point(0, 2, 120), Point(0, 2, 128), 3e5);          // its Compton electron (8 cm)
+
+    SUBCASE("off: each radiated photon is a shower root of its own")
+    {
+        PFMerger merger;
+        auto res = merger.run(b.tt);
+        CHECK(node_of(res, 2).cls == Cls::delta);
+        CHECK(node_of(res, 7).cls == Cls::michel);
+        CHECK(res.info(4).pf_node != res.info(2).pf_node);
+        CHECK(res.info(4).pf_node == res.info(5).pf_node);
+        CHECK(res.info(6).pf_node == res.info(4).pf_node);
+        CHECK(res.info(9).pf_node != res.info(7).pf_node);
+        CHECK_FALSE(PFMergerParams().meta().isMember("em_fold_delta_michel"));
+    }
+    SUBCASE("on: the delta and the Michel keep their whole cascade, classes unchanged")
+    {
+        PFMergerParams p;
+        p.em_fold = true;
+        PFMerger merger(p);
+        auto res = merger.run(b.tt);
+        const int nd = res.info(2).pf_node, nm = res.info(7).pf_node;
+        for (int t : {3, 4, 5, 6}) CHECK(res.info(t).pf_node == nd);
+        for (int t : {8, 9}) CHECK(res.info(t).pf_node == nm);
+        CHECK(node_of(res, 2).cls == Cls::delta);
+        CHECK(node_of(res, 7).cls == Cls::michel);
+        CHECK(node_of(res, 1).cls == Cls::track);
+        CHECK(res.info(1).pf_node != nd);
+        CHECK(p.meta()["em_fold_delta_michel"].asBool());
+    }
+}

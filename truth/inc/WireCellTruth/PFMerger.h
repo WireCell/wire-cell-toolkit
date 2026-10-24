@@ -29,6 +29,10 @@
        inside a shower (Supera merge order).
     5. A Decay or muMinusCaptureAtRest electron of a muon is a Michel,
        its own node (pynuml), when michel_own.
+       With em_fold (default off) rule 4 also takes the EM daughters of
+       a delta or Michel node: an electron's radiation stays with it
+       (pr_ml doc 25 sec 2.8; off = a photon radiated by a delta or
+       Michel electron is a shower root of its own).
     6. A shower node with visible charge below compton_q is class LE
        with instance_valid 0 (SPINE: semantics kept, instance -1).
     7. A node survives when its visible charge >= q_min and its
@@ -73,6 +77,9 @@ namespace WireCell::Truth {
         bool michel_own{true};
         double photon_prop{2.5 * units::cm};  // recorded; used by the matching of showers (WP0.2)
         double void_radius{1 * units::cm};
+        /// Rule 4 also merges EM daughters into a delta or Michel node.
+        /// Recorded in meta() only when on (labels_meta.json unchanged when off).
+        bool em_fold{false};
 
         Configuration meta() const
         {
@@ -89,6 +96,7 @@ namespace WireCell::Truth {
             m["visible_pdgs"] = "11 13 211 321 3222 3112 2212 22 2112 (Pandora IsVisible)";
             m["invisible_parents"] = "111 113 221 331 3212 (SPINE)";
             m["shape_precedence"] = "track > michel > shower > delta > le (SPINE)";
+            if (em_fold) m["em_fold_delta_michel"] = true;
             return m;
         }
         void configure(const Configuration& cfg)
@@ -101,6 +109,7 @@ namespace WireCell::Truth {
             michel_own = get(cfg, "michel_own", michel_own);
             photon_prop = get(cfg, "photon_prop", photon_prop);
             void_radius = get(cfg, "void_radius", void_radius);
+            em_fold = get(cfg, "em_fold", em_fold);
         }
     };
 
@@ -258,6 +267,15 @@ namespace WireCell::Truth {
                                                     (p->node < 0 && p->target != p->tid &&
                                                      rows.at(p->target).node >= 0 &&
                                                      res.nodes[rows.at(p->target).node].cls == Cls::shower));
+                // em_fold: a delta or Michel node (or an id merged into one) also takes EM daughters
+                auto parent_in_cls = [&](Cls c) {
+                    if (!p) return false;
+                    if (p->node >= 0) return res.nodes[p->node].cls == c;
+                    return p->target != p->tid && rows.at(p->target).node >= 0 &&
+                        res.nodes[rows.at(p->target).node].cls == c;
+                };
+                const bool parent_in_em = parent_in_shower ||
+                    (m_p.em_fold && (parent_in_cls(Cls::delta) || parent_in_cls(Cls::michel)));
                 if (!is_visible(r.pdg)) {
                     // rule 1: map to the parent's target (or to nothing)
                     r.target = p ? p->target : r.tid;
@@ -270,7 +288,7 @@ namespace WireCell::Truth {
                     return;
                 }
                 if (std::abs(r.pdg) == 11 && is_ionisation(r.proc) && p) {
-                    if (parent_in_shower) {
+                    if (parent_in_em) {
                         r.target = p->target;        // rule 4: ionisation inside a shower
                         ++res.nmerged_shower;
                         return;
@@ -283,7 +301,7 @@ namespace WireCell::Truth {
                     make_node(r, Cls::delta);
                     return;
                 }
-                if (is_em(r.pdg) && p && parent_in_shower && (is_shower_process(r.proc) || is_ionisation(r.proc) || r.proc == "Decay")) {
+                if (is_em(r.pdg) && p && parent_in_em && (is_shower_process(r.proc) || is_ionisation(r.proc) || r.proc == "Decay")) {
                     r.target = p->target;            // rule 4
                     ++res.nmerged_shower;
                     return;

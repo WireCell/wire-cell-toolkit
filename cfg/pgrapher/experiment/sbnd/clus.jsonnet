@@ -358,7 +358,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                        // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
                        truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true,
                        // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
-                       truth_point_zero_width=true) = {
+                       truth_point_zero_width=true,
+                       // pr_ml doc 25 sec 2.8: shared test per PF node / PFMerger em_fold (C++ default false => key omitted)
+                       truth_shared_by_pf_node=false, truth_em_fold=false,
+                       // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long = the SP charge time filter width (C++ default 0 => key omitted)
+                       truth_extra_smear_long=0) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -400,7 +404,12 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                                           extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true,
                                                  [if truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
                                                  [if truth_polyline_per_particle then 'polyline_per_particle']: true,
-                                                 [if truth_point_zero_width then 'point_zero_width']: true}),
+                                                 [if truth_point_zero_width then 'point_zero_width']: true,
+                                                 // pr_ml doc 25 sec 2.8: C++ default false => key omitted
+                                                 [if truth_shared_by_pf_node then 'shared_by_pf_node']: true,
+                                                 [if truth_em_fold then 'pfmerger']: {em_fold: true},
+                                                 // pr_ml doc 25 sec 4: the charge time filter's width (C++ default 0 => key omitted)
+                                                 [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes=[truth_cfo, ptb],
         centernodes=[truth_depo_src],
@@ -945,7 +954,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
            // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
            truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true,
            // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
-           truth_point_zero_width=true) {
+           truth_point_zero_width=true,
+           // pr_ml doc 25 sec 2.8: shared test per PF node / PFMerger em_fold (C++ default false => key omitted)
+           truth_shared_by_pf_node=false, truth_em_fold=false,
+           // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long = the SP charge time filter width (C++ default 0 => key omitted)
+           truth_extra_smear_long=0) {
     // Output prefix for the per-event writers: output_dir/ normally, and
     // output_dir/<evt_subdir>/ when a group runs in one process (see the
     // evt_subdir doc above).
@@ -984,7 +997,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       output_dir=output_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo,
                       bee_sink=bee_sink, pre_mabc=pre_mabc, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
-                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width),
+                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
+                      truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
@@ -996,7 +1010,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       nu_iso_band_guard=nu_iso_band_guard, iso_cathode_guard=iso_cathode_guard,
                       nu_band_veto=nu_band_veto, eb_fast=eb_fast, po_fast=po_fast, dg_fast=dg_fast, dg_length_cut=dg_length_cut,
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
-                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width),
+                      truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
+                      truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,

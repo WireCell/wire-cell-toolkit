@@ -56,7 +56,11 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
           truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true,
           // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
-          truth_point_zero_width=true)
+          truth_point_zero_width=true,
+          // pr_ml doc 25 sec 2.8: shared test per PF node / PFMerger em_fold (C++ default false => key omitted)
+          truth_shared_by_pf_node=false, truth_em_fold=false,
+          // pr_ml doc 25 sec 4: DepoBlobAssoc extra_smear_long (time, added in quadrature) = the SP charge time filter width
+          truth_extra_smear_long=0)
 
 // Calibrated from PDHD data.  1.565 = anode->cathode crossing-track x-span midpoint
 // [~1.55 over-merge, ~1.57 truncation]; 1.585 = first cathode-end pass on two evt-983
@@ -332,7 +336,12 @@ local clus_per_face (
                                           extra={[if truth_fold_negative_ids then 'fold_negative_ids']: true,
                                                  [if truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
                                                  [if truth_polyline_per_particle then 'polyline_per_particle']: true,
-                                                 [if truth_point_zero_width then 'point_zero_width']: true}),
+                                                 [if truth_point_zero_width then 'point_zero_width']: true,
+                                                 // pr_ml doc 25 sec 2.8: C++ default false => key omitted
+                                                 [if truth_shared_by_pf_node then 'shared_by_pf_node']: true,
+                                                 [if truth_em_fold then 'pfmerger']: {em_fold: true},
+                                                 // pr_ml doc 25 sec 4: the charge time filter's width (C++ default 0 => key omitted)
+                                                 [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

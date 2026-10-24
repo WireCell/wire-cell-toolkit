@@ -8,6 +8,8 @@
 #include "WireCellUtil/String.h"
 
 #include <algorithm>
+#include <map>
+#include <utility>
 #include <cmath>
 #include <limits>
 
@@ -249,7 +251,19 @@ Truth::label_live_tree(node_t& root,
             }
             const bool ghost = e.q_total <= 0.0 || tid_top == tid_ghost;
             const double frac_top = ghost ? 0.0 : q_top / e.q_total;
-            const bool shared = !ghost && frac_top < params.shared_frac;
+            double frac_shared_test = frac_top;
+            if (params.shared_by_pf_node && !ghost) {
+                // the blob's true charge per PF node; a track without a node is its own key
+                std::map<std::pair<int, int>, double> bynode;
+                for (const auto& [tid, qe] : e.by_track) {
+                    const int pfn = pf.info(tid).pf_node;
+                    bynode[pfn >= 0 ? std::make_pair(0, pfn) : std::make_pair(1, tid)] += qe.first;
+                }
+                double q_node_top = 0.0;
+                for (const auto& [key, q] : bynode) q_node_top = std::max(q_node_top, q);
+                frac_shared_test = q_node_top / e.q_total;
+            }
+            const bool shared = !ghost && frac_shared_test < params.shared_frac;
             const double solved = iblob->value();
             const double true_q_frac = solved > 0.0 ? e.q_total / solved : 0.0;
             if (ghost) ++sum.nghost;

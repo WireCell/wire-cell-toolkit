@@ -53,6 +53,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["pfmerger"]["michel_own"] = m_pfparams.michel_own;
     cfg["pfmerger"]["photon_prop"] = m_pfparams.photon_prop;
     cfg["pfmerger"]["void_radius"] = m_pfparams.void_radius;
+    cfg["pfmerger"]["em_fold"] = m_pfparams.em_fold;
     cfg["refine_by_nearest_depo"] = m_label.refine;
     cfg["d_cap"] = m_label.d_cap;
     cfg["end_window"] = m_label.end_window;
@@ -60,6 +61,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["kink_angle"] = m_label.kink_angle;
     cfg["heat_sigma"] = m_label.heat_sigma;
     cfg["shared_frac"] = m_label.shared_frac;
+    cfg["shared_by_pf_node"] = m_label.shared_by_pf_node;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -104,6 +106,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.kink_angle = get(cfg, "kink_angle", m_label.kink_angle);
     m_label.heat_sigma = get(cfg, "heat_sigma", m_label.heat_sigma);
     m_label.shared_frac = get(cfg, "shared_frac", m_label.shared_frac);
+    m_label.shared_by_pf_node = get(cfg, "shared_by_pf_node", m_label.shared_by_pf_node);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);

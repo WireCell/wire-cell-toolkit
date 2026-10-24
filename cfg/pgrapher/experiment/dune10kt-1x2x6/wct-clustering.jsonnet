@@ -45,6 +45,15 @@ function(
     truth_polyline_per_particle = true,
     // pr_ml doc 24 sec 7: TruthPointLabeler / DepoBlobAssoc point_zero_width -- a depo drifted backward from between the response plane and the wires has zero extent and reached no blob (real charge labelled ghost); ON by default for truth-label jobs (owner 2026-10-23, decision 1A; C++ default false; false => key omitted => the pre-fix labels; unused unless truth_point_label)
     truth_point_zero_width = true,
+    // pr_ml doc 25 sec 2.8 (owner 2026-10-24): TruthPointLabeler shared test per PF node (shared_by_pf_node) and
+    // PFMerger em_fold (EM daughters of a delta / Michel node merge into it).  C++ default false for both;
+    // false => key omitted => byte-identical compiled config; unused unless truth_point_label.
+    truth_shared_by_pf_node = false,
+    truth_em_fold = false,
+    // pr_ml doc 25 sec 4 (owner 2026-10-24): the truth window adds the SP charge time filter width, in us, in quadrature
+    // to each depo's longitudinal width (DepoBlobAssoc extra_smear_long; PDHD / PDVD / FD-HD Gaus_wide 0.12 MHz -> 1.326,
+    // SBND 0.10 MHz -> 1.592).  C++ default 0; 0 => key omitted => byte-identical; unused unless truth_point_label.
+    truth_extra_smear_long_us = 0,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -67,7 +76,9 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
                         truth_fold_negative_ids=truth_fold_negative_ids,
                         truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle,
-                        truth_point_zero_width=truth_point_zero_width);
+                        truth_point_zero_width=truth_point_zero_width,
+                        truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold,
+                        truth_extra_smear_long=truth_extra_smear_long_us * wc.us);
 
 local actives = [cluster_source("%s/clusters-apa-anode%d-ms-active.tar.gz"%[input, a.data.ident]) for a in anodes];
 local maskeds = [cluster_source("%s/clusters-apa-anode%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in anodes];
