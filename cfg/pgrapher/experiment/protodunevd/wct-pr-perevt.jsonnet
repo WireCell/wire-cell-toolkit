@@ -1871,6 +1871,8 @@ function(
     beam_deghost_truth_heat_by_pf_node = false,
     // pr_ml doc 25 sec 4.2: kinks from muons / charged hadrons only.  C++ default false => key omitted.
     beam_deghost_truth_kink_tracks_only = false,
+    // pr_ml doc 25 sec 4.2: equal-time depos ordered along the track.  C++ default false => key omitted.
+    beam_deghost_truth_time_tie_order = false,
     // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
     // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
@@ -4962,6 +4964,7 @@ function(
                     [if beam_deghost_truth_end_distance then 'end_distance']: true,
                     [if beam_deghost_truth_heat_by_pf_node then 'heat_by_pf_node']: true,
                     [if beam_deghost_truth_kink_tracks_only then 'kink_tracks_only']: true,
+                    [if beam_deghost_truth_time_tie_order then 'time_tie_order']: true,
                 },
             }));
     local dg_join = g.pnode({

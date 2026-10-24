@@ -36,6 +36,50 @@
 
 namespace WireCell::Truth {
 
+    /// pr_ml doc 25 sec 4.2: order items of equal time along the local direction.  `v` must already be sorted by time
+    /// (stable).  Each run of equal times is sorted by its projection on centroid(next run) - centroid(previous run) (its own
+    /// centroid stands in at either end); a lone run uses the direction from its first item to its farthest item.  A
+    /// relativistic particle's Geant4 depos share few distinct times (one PDHD muon: 162 times for 20,110 depos), and in file
+    /// order a run zigzags along the track.
+    template <class T, class TimeF, class PosF>
+    void order_time_ties(std::vector<T>& v, TimeF tof, PosF pof)
+    {
+        const size_t n = v.size();
+        if (n < 2) return;
+        std::vector<size_t> beg{0};
+        for (size_t i = 1; i < n; ++i) {
+            if (tof(v[i]) != tof(v[i - 1])) beg.push_back(i);
+        }
+        beg.push_back(n);
+        const size_t nr = beg.size() - 1;
+        if (nr == n) return;   // no ties
+        std::vector<Point> cen(nr);
+        for (size_t r = 0; r < nr; ++r) {
+            Point c(0, 0, 0);
+            for (size_t i = beg[r]; i < beg[r + 1]; ++i) c = c + pof(v[i]);
+            cen[r] = c / double(beg[r + 1] - beg[r]);
+        }
+        for (size_t r = 0; r < nr; ++r) {
+            const size_t a = beg[r], b = beg[r + 1];
+            if (b - a < 2) continue;
+            Vector d = (r + 1 < nr ? cen[r + 1] : cen[r]) - (r > 0 ? cen[r - 1] : cen[r]);
+            if (!(d.magnitude() > 0)) {
+                size_t far = a;
+                double best = -1;
+                for (size_t i = a; i < b; ++i) {
+                    const double m = (pof(v[i]) - pof(v[a])).magnitude();
+                    if (m > best) { best = m; far = i; }
+                }
+                d = pof(v[far]) - pof(v[a]);
+            }
+            const Point c = cen[r];
+            std::stable_sort(v.begin() + a, v.begin() + b, [&](const T& x, const T& y) {
+                return (pof(x) - c).dot(d) < (pof(y) - c).dot(d);
+            });
+        }
+    }
+
+
     class DepoPolyline {
       public:
         struct Vertex {
@@ -77,11 +121,18 @@ namespace WireCell::Truth {
 
         /// Order by time (stable), drop zero-length steps, compute arc
         /// lengths, tangents and the midpoint tree.  Idempotent.
+        /// Order equal-time vertices along the local direction in build()
+        /// (order_time_ties); off = time order with ties in insertion order.
+        void set_tie_by_direction(bool on) { m_tie_by_direction = on; m_built = false; }
+
         void build()
         {
             if (m_built) return;
             std::stable_sort(m_verts.begin(), m_verts.end(),
                              [](const Vertex& a, const Vertex& b) { return a.t < b.t; });
+            if (m_tie_by_direction) {
+                order_time_ties(m_verts, [](const Vertex& v) { return v.t; }, [](const Vertex& v) { return v.pos; });
+            }
             // merge coincident consecutive vertices, keeping their energy
             std::vector<Vertex> kept;
             for (const auto& v : m_verts) {
@@ -220,6 +271,7 @@ namespace WireCell::Truth {
         std::vector<Vector> m_tan;
         std::unique_ptr<NFKDVec::Tree<double, NFKDVec::IndexStatic>> m_tree;
         bool m_built{false};
+        bool m_tie_by_direction{false};
     };
 }
 

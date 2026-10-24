@@ -82,7 +82,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           // pr_ml doc 25 sec 4.2: TruthPointLabeler heat_by_pf_node (C++ default false => key omitted)
           truth_heat_by_pf_node=false,
           // pr_ml doc 25 sec 4.2: TruthPointLabeler kink_tracks_only (C++ default false => key omitted)
-          truth_kink_tracks_only=false)
+          truth_kink_tracks_only=false,
+          // pr_ml doc 25 sec 4.2: TruthPointLabeler time_tie_order (C++ default false => key omitted)
+          truth_time_tie_order=false)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -386,7 +388,9 @@ local clus_per_face (
                                                  // pr_ml doc 25 sec 4.2: heat targets from the PF nodes (C++ default false => key omitted)
                                                  [if truth_heat_by_pf_node then 'heat_by_pf_node']: true,
                                                  // pr_ml doc 25 sec 4.2: kinks from muons / charged hadrons only (C++ default false => key omitted)
-                                                 [if truth_kink_tracks_only then 'kink_tracks_only']: true}),
+                                                 [if truth_kink_tracks_only then 'kink_tracks_only']: true,
+                                                 // pr_ml doc 25 sec 4.2: equal-time depos ordered along the track (C++ default false => key omitted)
+                                                 [if truth_time_tie_order then 'time_tie_order']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

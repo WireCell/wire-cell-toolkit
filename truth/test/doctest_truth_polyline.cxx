@@ -123,3 +123,28 @@ TEST_CASE("polyline degenerate inputs")
     CHECK(dup.nvertices() == 2);
     CHECK(dup.nearest(Point(0, 0, 1)).dedx == doctest::Approx(0.5));   // (2.0 + 0.0) / 2 per 2 mm
 }
+
+TEST_CASE("depo polyline: equal times ordered along the track (pr_ml doc 25 sec 4.2)")
+{
+    // a straight 60 mm track along z whose 61 vertices carry only 4 distinct times, inserted in a scrambled order
+    std::vector<int> order;
+    for (int i = 0; i <= 60; ++i) order.push_back((i * 37) % 61);
+    auto make = [&](bool tie) {
+        Truth::DepoPolyline pl;
+        pl.set_tie_by_direction(tie);
+        for (int i : order) pl.add(Point(0, 0, i * units::mm), double(i / 16), 1.0);
+        pl.build();
+        return pl;
+    };
+    auto plain = make(false);
+    auto fixed = make(true);
+    CHECK(plain.length() > 2 * 60 * units::mm);   // the ties zigzag
+    CHECK(fixed.length() == doctest::Approx(60 * units::mm));
+    CHECK(fixed.start().z() == doctest::Approx(0.0));
+    CHECK(fixed.end().z() == doctest::Approx(60 * units::mm));
+    size_t nk_plain = 0, nk_fixed = 0;
+    for (const auto& k : plain.keypoints(10 * units::mm, 15 * units::deg)) nk_plain += k.kind == Truth::DepoPolyline::KeyKind::kink;
+    for (const auto& k : fixed.keypoints(10 * units::mm, 15 * units::deg)) nk_fixed += k.kind == Truth::DepoPolyline::KeyKind::kink;
+    CHECK(nk_plain > 0);
+    CHECK(nk_fixed == 0);
+}

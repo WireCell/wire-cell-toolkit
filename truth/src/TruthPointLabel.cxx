@@ -20,7 +20,7 @@ using node_t = WireCell::PointCloud::Tree::Points::node_t;
 
 std::map<int, std::shared_ptr<Truth::DepoPolyline>>
 Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
-                       const depo_position_f& position)
+                       const depo_position_f& position, bool tie_by_direction)
 {
     std::map<int, std::shared_ptr<DepoPolyline>> out;
     for (const auto& d : depos) {
@@ -36,13 +36,17 @@ Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& as
         if (!pl) pl = std::make_shared<DepoPolyline>();
         pl->add(position(*d), key->time(), energy);
     }
-    for (auto& [tid, pl] : out) pl->build();
+    for (auto& [tid, pl] : out) {
+        if (tie_by_direction) pl->set_tie_by_direction(true);
+        pl->build();
+    }
     return out;
 }
 
 Truth::particle_polylines_t
 Truth::build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
-                                const depo_position_f& position, const std::vector<int>* orig_ids)
+                                const depo_position_f& position, const std::vector<int>* orig_ids,
+                                bool tie_by_direction)
 {
     // key -> particle -> polyline; the keys as build_polylines makes them
     std::map<int, std::map<int, std::shared_ptr<DepoPolyline>>> byp;
@@ -66,6 +70,7 @@ Truth::build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocP
     for (auto& [tid, parts] : byp) {
         auto& v = out[tid];
         for (auto& [part, pl] : parts) {
+            if (tie_by_direction) pl->set_tie_by_direction(true);
             pl->build();
             v.push_back(pl);
         }

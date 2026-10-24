@@ -103,6 +103,13 @@ namespace WireCell::Truth {
         /// scatter, nor neutrons).  Off = every track-like node (track,
         /// delta, Michel).  Recorded in meta() only when on.
         bool kink_tracks_only{false};
+        /// Order a particle's depos of equal Geant4 time along the local
+        /// direction (order_time_ties) in every polyline and when picking a
+        /// PF node's start / end (pr_ml doc 25 sec 4.2: on PDHD / PDVD / SBND
+        /// a particle's depos tie in time, and the time-ordered polylines
+        /// zigzag 2-4x their length).  Off = time order, ties in file order.
+        /// Recorded in meta() only when on.
+        bool time_tie_order{false};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -124,6 +131,7 @@ namespace WireCell::Truth {
             if (end_distance) m["end_distance"] = true;
             if (heat_by_pf_node) m["heat_by_pf_node"] = true;
             if (kink_tracks_only) m["kink_tracks_only"] = true;
+            if (time_tie_order) m["time_tie_order"] = true;
             return m;
         }
     };
@@ -172,7 +180,7 @@ namespace WireCell::Truth {
     /// id_from_prior / id_map.
     std::map<int, std::shared_ptr<DepoPolyline>>
     build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
-                    const depo_position_f& position);
+                    const depo_position_f& position, bool tie_by_direction = false);
 
     /// Per-particle polylines of every track key (pr_ml doc 23 sec 7.4):
     /// the depos of a key grouped by their Geant4 particle -- orig_ids[depo
@@ -185,7 +193,8 @@ namespace WireCell::Truth {
     particle_polylines_t
     build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
                              const depo_position_f& position,
-                             const std::vector<int>* orig_ids = nullptr);
+                             const std::vector<int>* orig_ids = nullptr,
+                             bool tie_by_direction = false);
 
     /// Label the tree in place.  Throws ValueError when a node has no
     /// matching blob.  With particles, the per-point trajectory fields

@@ -77,6 +77,9 @@ function(
     // pr_ml doc 25 sec 4.2 (owner 2026-10-24): with truth_heat_by_pf_node, kinks only from muons and charged hadrons.
     // C++ default false; false => key omitted => byte-identical.
     truth_kink_tracks_only = false,
+    // pr_ml doc 25 sec 4.2 (owner 2026-10-24): order a particle's equal-time depos along the track in every truth polyline
+    // and for the PF node ends.  C++ default false; false => key omitted => byte-identical.
+    truth_time_tie_order = false,
     // '' keeps the all-APA stage's default sink; a path writes the post-clustering
     // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
     save_tensors = '',
@@ -125,7 +128,7 @@ function(
                         truth_extra_smear_long=truth_extra_smear_long_us * wc.us,
                         truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius_mm * wc.mm,
                         truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node,
-                        truth_kink_tracks_only=truth_kink_tracks_only);
+                        truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false)
                         for n in std.range(0, nanodes - 1)];
 

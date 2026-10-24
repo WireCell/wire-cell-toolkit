@@ -72,6 +72,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["end_distance"] = m_label.end_distance;
     cfg["heat_by_pf_node"] = m_label.heat_by_pf_node;
     cfg["kink_tracks_only"] = m_label.kink_tracks_only;
+    cfg["time_tie_order"] = m_label.time_tie_order;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -122,6 +123,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.end_distance = get(cfg, "end_distance", m_label.end_distance);
     m_label.heat_by_pf_node = get(cfg, "heat_by_pf_node", m_label.heat_by_pf_node);
     m_label.kink_tracks_only = get(cfg, "kink_tracks_only", m_label.kink_tracks_only);
+    m_label.time_tie_order = get(cfg, "time_tie_order", m_label.time_tie_order);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
@@ -312,7 +314,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         }
     }
     const IDepo::vector& pl_depos = m_polyline_drift_volume_only ? face_depos : depos;
-    auto polylines = build_polylines(pl_depos, assoc, position);
+    auto polylines = build_polylines(pl_depos, assoc, position, m_label.time_tie_order);
     particle_polylines_t particles;
     if (m_polyline_per_particle) {
         std::vector<int> orig_ids;
@@ -320,7 +322,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             orig_ids.reserve(tt.sed_ids.size());
             for (const auto& [tid, orig] : tt.sed_ids) orig_ids.push_back(orig);
         }
-        particles = build_particle_polylines(pl_depos, assoc, position, index_mode ? &orig_ids : nullptr);
+        particles = build_particle_polylines(pl_depos, assoc, position, index_mode ? &orig_ids : nullptr, m_label.time_tie_order);
     }
     // pr_ml doc 25 sec 3.2: with end_by_pf_node, each PF node's start (its earliest depo by Geant4 time) and,
     // for track / delta / Michel nodes, end (the latest depo of its root particle), in this face's frame; an
@@ -352,6 +354,9 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         struct Acc { double t0, t1; const IDepo* d0; const IDepo* d1; const IDepo* k0; const IDepo* k1; };
         std::map<int, Acc> acc;
         std::map<int, std::vector<const IDepo*>> root_depos;   // heat_by_pf_node: the root particle's depos read by this face
+        // time_tie_order: every depo of a node / of its root particle, to pick the ends with the ties ordered along the track
+        struct Item { double t; const IDepo* d; const IDepo* k; };
+        std::map<int, std::vector<Item>> node_items, root_items;
         for (const auto& d : depos) {
             if (!d) continue;
             const IDepo* key = d.get();
@@ -370,6 +375,29 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             if (t < a.t0) { a.t0 = t; a.d0 = d.get(); a.k0 = key; }
             if (part == root_part[pfn] && t > a.t1) { a.t1 = t; a.d1 = d.get(); a.k1 = key; }
             if (m_label.heat_by_pf_node && part == root_part[pfn] && in_volume(*d)) root_depos[pfn].push_back(d.get());
+            if (m_label.time_tie_order) {
+                node_items[pfn].push_back({t, d.get(), key});
+                if (part == root_part[pfn]) root_items[pfn].push_back({t, d.get(), key});
+            }
+        }
+        if (m_label.time_tie_order) {
+            // the start / end with the equal-time depos ordered along the track (true positions)
+            auto ordered = [](std::vector<Item>& v) {
+                std::stable_sort(v.begin(), v.end(), [](const Item& x, const Item& y) { return x.t < y.t; });
+                order_time_ties(v, [](const Item& i) { return i.t; }, [](const Item& i) { return i.k->pos(); });
+            };
+            for (auto& [pfn, a] : acc) {
+                auto nit = node_items.find(pfn);
+                if (nit != node_items.end() && !nit->second.empty()) {
+                    ordered(nit->second);
+                    a.d0 = nit->second.front().d; a.k0 = nit->second.front().k; a.t0 = nit->second.front().t;
+                }
+                auto rit = root_items.find(pfn);
+                if (rit != root_items.end() && !rit->second.empty()) {
+                    ordered(rit->second);
+                    a.d1 = rit->second.back().d; a.k1 = rit->second.back().k; a.t1 = rit->second.back().t;
+                }
+            }
         }
         for (const auto& [pfn, a] : acc) {
             NodeEnds ne;
@@ -433,6 +461,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             for (const auto& [pfn, ds] : root_depos) {
                 if (!node_has_kinks(pf.nodes[pfn], m_label.kink_tracks_only) || ds.size() < 3) continue;
                 DepoPolyline pl;
+                pl.set_tie_by_direction(m_label.time_tie_order);
                 for (const auto* d : ds) {
                     const IDepo* key = (assoc.id_from_prior && d->prior()) ? d->prior().get() : d;
                     pl.add(position(*d), key->time(), 0.0);
