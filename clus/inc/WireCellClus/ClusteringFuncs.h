@@ -302,6 +302,18 @@ namespace WireCell::Clus::Facade {
     // (wcp-porting-img wcfm/docs/13).
     size_t fill_sep_family_before_serialize(Grouping& grouping);
 
+    // The same trap for "cluster_t0": ClusteringBeamDeghost sets it only on
+    // the cascade clusters the beam bundle touches, so serializing the
+    // deghost grouping throws (first cluster has it) or drops it (a later one
+    // has it).  When ANY cluster_scalar of the grouping has cluster_t0, this
+    // fills cluster_t0 = 0 (what Cluster::get_cluster_t0() returns for an
+    // absent key, so no reader sees a change) into every other cluster_scalar
+    // lacking it; clusters without a cluster_scalar PC are left alone.
+    // Returns the number of clusters filled.  Defined in
+    // clustering_beam_deghost.cxx, its only caller (knob fill_cluster_t0,
+    // default off; pr_ml doc 24 sec 6).
+    size_t fill_cluster_t0_before_serialize(Grouping& grouping);
+
 
 
     /**

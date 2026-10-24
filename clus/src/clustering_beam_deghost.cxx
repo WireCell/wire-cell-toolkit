@@ -59,6 +59,32 @@ static Log::logptr_t logger() {
     return l;
 }
 
+// Declared in ClusteringFuncs.h (next to fill_sep_family_before_serialize,
+// the same trap).  Walks the grouping NODE's children -- the order as_tensors
+// appends in.
+size_t WireCell::Clus::Facade::fill_cluster_t0_before_serialize(Grouping& grouping)
+{
+    auto* gnode = grouping.node();
+    if (!gnode) return 0;
+    bool any = false;
+    for (const auto* cnode : gnode->children()) {
+        const auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it != lpcs.end() && it->second.has("cluster_t0")) { any = true; break; }
+    }
+    if (!any) return 0;
+    size_t nfilled = 0;
+    for (auto* cnode : gnode->children()) {
+        auto& lpcs = cnode->value.local_pcs();
+        auto it = lpcs.find("cluster_scalar");
+        if (it == lpcs.end() || it->second.has("cluster_t0")) continue;
+        // as Cluster::set_cluster_t0(0) on a PC lacking the key
+        it->second.add("cluster_t0", PointCloud::Array({(double)0}));
+        ++nfilled;
+    }
+    return nfilled;
+}
+
 static DeghostBox make_box(const Blob& b, int cluster_key)
 {
     DeghostBox x;
@@ -88,6 +114,12 @@ public:
         // A bundle cluster with no overlapping cell is what the cascade removed
         // completely.  true: the cluster is destroyed.  false: it is left as is.
         m_drop_empty = get<bool>(config, "drop_empty", m_drop_empty);
+        // pr_ml doc 24 sec 6: cluster_t0 is set only on the cascade clusters
+        // the bundle touches, so serializing the deghost grouping throws or
+        // drops the key depending on cluster order (fill_cluster_t0_before_serialize).
+        // true: fill cluster_t0 = 0 (the value get_cluster_t0() returns when
+        // absent) into the other cascade clusters.  Default false = legacy.
+        m_fill_cluster_t0 = get<bool>(config, "fill_cluster_t0", m_fill_cluster_t0);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -98,6 +130,7 @@ public:
         cfg["beam_window_low"] = m_beam_window_low;
         cfg["beam_window_high"] = m_beam_window_high;
         cfg["drop_empty"] = m_drop_empty;
+        cfg["fill_cluster_t0"] = m_fill_cluster_t0;
         return cfg;
     }
 
@@ -268,6 +301,10 @@ public:
                        " cascade cells connected to the bundle outside the production footprint: {} q {:.0f}",
                        pick.gid, bundle_keys.size(), n_dropped, n_kept_asis, tot_before, tot_after, totq_before, totq_after,
                        n_outside, q_outside);
+        if (m_fill_cluster_t0) {
+            const size_t nfill = fill_cluster_t0_before_serialize(dg);
+            logger()->info("ClusteringBeamDeghost: fill_cluster_t0: {} cascade cluster(s) filled", nfill);
+        }
     }
 
 private:
@@ -277,4 +314,5 @@ private:
     double m_beam_window_low{0.0};
     double m_beam_window_high{0.0};
     bool m_drop_empty{true};
+    bool m_fill_cluster_t0{false};
 };

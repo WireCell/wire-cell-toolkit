@@ -681,6 +681,12 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // 'beam_deghost' stage (ClusteringBeamDeghost) moves into the
               // clusters of the beam bundle.
               beam_deghost=false,
+              // pr_ml doc 24 sec 6 (decision 2A (i)): ClusteringBeamDeghost fill_cluster_t0 -- cluster_t0 is
+              // set only on the cascade clusters the bundle touches, so serializing the deghost grouping
+              // throws (PDVD R3 beam0) or silently drops the key (data), depending on cluster order; true
+              // fills cluster_t0 = 0 (the value read for an absent key) into the other cascade clusters.
+              // C++ default false; key omitted when false => byte-identical compiled config.
+              beam_deghost_fill_cluster_t0=false,
               // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
               // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
               // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
@@ -1650,6 +1656,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     pc_transforms: wc.tn(pcts),
                     beam_window_low: beam_window[0],
                     beam_window_high: beam_window[1],
+                    // pr_ml doc 24 sec 6: C++ default false.  Key omitted when off => byte-identical compiled config.
+                    [if beam_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
                 },
             },
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the
@@ -2763,7 +2771,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
     // Sampler and volume nodes carry their own names ('dg-...') so they cannot
     // collide with the retile samplers of the same anode face.  Hidden method:
     // nothing here reaches a compiled config unless the caller builds it.
-    deghost_tree(anodes, dir)::
+    // truth (pr_ml doc 24 sec 6, decision 2A (i)): null (default) => the tree
+    // above, unchanged.  An object {depos, time_offset, speed, truth_table,
+    // extra} => per face, a TruthPointLabeler on the cascade tree, wired as
+    // clus.jsonnet wires the live tree (ClusterFanout -> PointTreeBuilding ->
+    // TruthPointLabeler, plus a DepoFileSource): the cascade cells carry the
+    // per-point "truth" cloud the clustering job puts on the live blobs, so
+    // the cells beam_deghost moves into the bundle keep their labels.  Pass
+    // the clustering job's values (speed: its truth association speed, the
+    // imaging drift speed, not the PR drift speed).
+    deghost_tree(anodes, dir, truth=null)::
+        local truthlib = import 'pgrapher/common/truth.jsonnet';
         local n = std.length(anodes);
         local srcs = [g.pnode({
             type: 'ClusterFileSource',
@@ -2799,7 +2817,34 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     detector_volumes: wc.tn(dvf),
                 },
             }, nin=1, nout=1, uses=[bs, dvf]);
-            g.pipeline([csf, ptb], 'dg-face-%s-%d' % [a.name, f]);
+            if truth == null then g.pipeline([csf, ptb], 'dg-face-%s-%d' % [a.name, f])
+            else
+                local cfo = g.pnode({
+                    type: 'ClusterFanout',
+                    name: 'dg-truth-cfo-%s-%d' % [a.name, f],
+                    data: { multiplicity: 2 },
+                }, nin=1, nout=2);
+                local dsrc = g.pnode({
+                    type: 'DepoFileSource',
+                    name: 'dg-truth-depos-%s-%d' % [a.name, f],
+                    data: { inname: truth.depos, scale: 1 },
+                }, nin=0, nout=1);
+                local tpl = truthlib.point_labeler('dg-%s-%d' % [a.name, f], a, f, dvf,
+                                                   speed=truth.speed, time_offset=truth.time_offset,
+                                                   inpath='pointtrees/%d/dg/live', truth_table=truth.truth_table,   // PointTreeBuilding writes datapath + '/live'
+                                                   extra=truth.extra);
+                g.intern(
+                    innodes=[csf],
+                    centernodes=[cfo, ptb, dsrc],
+                    outnodes=[tpl],
+                    edges=[
+                        g.edge(csf, cfo, 0, 0),
+                        g.edge(cfo, ptb, 0, 0),
+                        g.edge(ptb, tpl, 0, 0),
+                        g.edge(cfo, tpl, 1, 1),
+                        g.edge(dsrc, tpl, 0, 2),
+                    ],
+                    name='dg-face-%s-%d' % [a.name, f]);
         local faces = [[face(a, 0), face(a, 1)] for a in anodes];
         local merge = g.pnode({
             type: 'PointTreeMerging',

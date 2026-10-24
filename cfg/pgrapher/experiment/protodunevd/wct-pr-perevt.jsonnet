@@ -1833,6 +1833,27 @@ function(
     // Anode idents that have a cascade archive in beam_deghost_dir; null => all
     // of anode_indices.  (Run 39305 has the top drift only: [4,5,6,7].)
     beam_deghost_anodes = null,
+    // pr_ml doc 24 sec 6 (decision 2A (i)): ClusteringBeamDeghost fill_cluster_t0 (see pr.jsonnet).  C++
+    // default false; key omitted when false => byte-identical compiled config.
+    beam_deghost_fill_cluster_t0 = false,
+    // pr_ml doc 24 sec 6 (decision 2A (i)): the per-point truth cloud on the cascade cells (simulation only).
+    // '' (default) => no labeler, compiled config byte-identical.  Set (the drifted sim-depos of Stage B) =>
+    // deghost_tree puts a TruthPointLabeler on every cascade face with the clustering job's truth settings:
+    // pass the values the event's clustering used (PDVD R3: time offset 372 us, speed 1.568 mm/us = the
+    // imaging drift speed, the Stage A truth.npz, fold_negative_ids true, polyline keys and point_zero_width on).
+    beam_deghost_truth_depos = '',
+    beam_deghost_truth_time_offset_us = 0,
+    beam_deghost_truth_speed_mmus = null,
+    beam_deghost_truth_table = '',
+    beam_deghost_truth_fold_negative_ids = false,
+    beam_deghost_truth_polyline_drift_volume_only = true,
+    beam_deghost_truth_polyline_per_particle = true,
+    beam_deghost_truth_point_zero_width = true,
+    // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
+    // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
+    // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
+    // bundle's blobs after beam_deghost and the rebuilt blobs carry no truth cloud.
+    beam_deghost_truth_dump = '',
     // doc pdvd/120: the beam-particle PR stage (pipeline name
     // 'check_beam_particle'; runner mode run_pr_evt.sh -beam).  The per-event
     // beam window is derived HERE from the light stage's trigger metadata --
@@ -4758,6 +4779,7 @@ function(
                              beam_window=[t * wc.us for t in beam_window_eff_us],   // doc pdvd/120: == beam_window_us unless a beam trigger is given
                              beam_window_only=beam_window_only,
                              beam_deghost=(beam_deghost_dir != ''),   // doc pdvd/125
+                             beam_deghost_fill_cluster_t0=beam_deghost_fill_cluster_t0,   // pr_ml doc 24 sec 6
                              beam_pr_knobs=beam_pr_knobs,   // doc pdvd/120
                              beam_entry_point_cm=beam_entry_point_cm,
                              beam_dir=beam_dir,
@@ -4890,13 +4912,35 @@ function(
     local dg_tree = clus_maker.deghost_tree(
         if beam_deghost_anodes == null then anodes
         else [a for a in anodes if std.member(beam_deghost_anodes, a.data.ident)],
-        beam_deghost_dir);
+        beam_deghost_dir,
+        truth=if beam_deghost_truth_depos == '' then null else (
+            assert beam_deghost_truth_speed_mmus != null : 'beam_deghost_truth_depos needs beam_deghost_truth_speed_mmus';
+            {
+                depos: beam_deghost_truth_depos,
+                time_offset: beam_deghost_truth_time_offset_us * wc.us,
+                speed: beam_deghost_truth_speed_mmus * wc.mm / wc.us,
+                truth_table: beam_deghost_truth_table,
+                extra: {
+                    [if beam_deghost_truth_fold_negative_ids then 'fold_negative_ids']: true,
+                    [if beam_deghost_truth_polyline_drift_volume_only then 'polyline_drift_volume_only']: true,
+                    [if beam_deghost_truth_polyline_per_particle then 'polyline_per_particle']: true,
+                    [if beam_deghost_truth_point_zero_width then 'point_zero_width']: true,
+                },
+            }));
     local dg_join = g.pnode({
         type: 'PointTreeConcat',
         name: 'pr_deghost',
         data: { multiplicity: 2 },
     }, nin=2, nout=1);
-    local graph = if beam_deghost_dir == '' then g.intern(
+    local dg_dump = g.pnode({
+        type: 'TensorFileSink',
+        name: 'dg_truth_dump',
+        data: { outname: beam_deghost_truth_dump, prefix: 'dg_', dump_mode: false },
+    }, nin=1, nout=0);
+    local graph = if beam_deghost_truth_dump != '' then (
+        assert beam_deghost_dir != '' : 'beam_deghost_truth_dump needs beam_deghost_dir';
+        g.intern(innodes=[dg_tree], outnodes=[dg_dump], edges=[g.edge(dg_tree, dg_dump, 0, 0)])
+    ) else if beam_deghost_dir == '' then g.intern(
         innodes=[source],
         outnodes=[pr],
         edges=[g.edge(source, pr, 0, 0)],
@@ -4935,6 +4979,8 @@ function(
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
                      + (if needs_root then ['WireCellRoot'] else [])
+                     // pr_ml doc 24 sec 6: the cascade-tree TruthPointLabeler (beam_deghost_truth_depos); '' => not loaded
+                     + (if beam_deghost_truth_depos != '' then ['WireCellTruth'] else [])
                      + (if retile_deghost then ['WireCellPytorch'] else []),   // doc pdvd/130 phase 3
             apps: ['Pgrapher'],
         },

@@ -56,8 +56,18 @@ chain wrote them, plus the distance to the matched key's trajectory (d_true, mm,
 and the true dE/dx (MeV/cm) of the nearest associated point of that key.  dQ/dx (e/cm) and dE/dx are exported side by
 side; no recombination model is applied here.
 
+Truth donor (doc 24 sec 6, PDVD -beam): the gapfill retile rebuilds the beam bundle's blobs after beam_deghost and
+the rebuilt blobs carry no truth cloud.  --truth-donor <tree> (the cascade tree labelled by TruthPointLabeler with the
+clustering job's settings: wct-pr-perevt.jsonnet beam_deghost_truth_dump) fills ONLY live blob nodes without a truth
+cloud, from the donor blob with the same node_matches_blob keys (wpid, slice_index_min, u / v / w wire index
+min / max): the donor rows as they are when the 3d points are identical, else the row of the nearest donor point of
+that blob.  Nodes with no donor blob (the retile's gap-fill blobs) stay unlabelled (-3).  The retile write-back also
+stores no blob charge (it lives in the Steiner graph), so a filled node with charge <= 0 takes the donor blob's charge
+as its weight (the same cell's solved charge).  Counts in "truth_donor".
+Without --truth-donor the outputs are those of the version before it.
+
   pr_truth.py --pctree <pr dump> --calib <calib-pr-evt*.json> --depos <sim-depos.tar.bz2> --truth <truth.npz>
-              --wires <wires> --depo-toff-us T --reco-toff-us R --speed-mmus V --event NAME --out DIR
+              --wires <wires> --depo-toff-us T --reco-toff-us R --speed-mmus V --event NAME --out DIR [--truth-donor TREE]
 """
 import argparse, json, os, sys
 import numpy as np
@@ -76,9 +86,68 @@ SCORED = ("nu", "gun")       # interaction kinds whose vertex is scored
 
 
 # ---------------------------------------------------------------------------- inputs
-def event_points(tree):
-    """every live point of the dump in cluster / node order: raw xyz, truth columns, charge; cluster offsets."""
+BLOB_KEYS = ("wpid", "slice_index_min", "u_wire_index_min", "u_wire_index_max", "v_wire_index_min", "v_wire_index_max",
+             "w_wire_index_min", "w_wire_index_max")   # TruthPointLabel.cxx node_matches_blob
+
+
+def donor_truth(tree, donor_fn):
+    """truth clouds for the live blob nodes of `tree` that have none, from the donor tree (see the module doc)."""
+    def keyed(t):
+        S, P = per_node(t, "scalar"), per_node(t, "3d")
+        out = {}
+        for nd, sc in S.items():
+            if nd in P and all(k in sc for k in BLOB_KEYS):
+                out.setdefault(tuple(int(sc[k][0]) for k in BLOB_KEYS), []).append(nd)
+        return out, S, P
+    dt = load_tree(donor_fn)
+    DT = per_node(dt, "truth")
+    dkey, DS, DP = keyed(dt)
+    _, S, P = keyed(tree)
+    TR = per_node(tree, "truth")
+    st = {k: 0 for k in ("nodes", "points", "q", "exact_nodes", "exact_points", "exact_q", "nearest_nodes", "nearest_points",
+                         "nearest_q", "none_nodes", "none_points", "none_q", "ambiguous_nodes", "q_from_donor_nodes",
+                         "q_from_donor")}
+    fill = {}
+    for nd, sc in S.items():
+        if nd in TR or nd not in P or not all(k in sc for k in BLOB_KEYS):
+            continue
+        X = np.column_stack([P[nd]["x"], P[nd]["y"], P[nd]["z"]]).astype(float)
+        q = float(sc["charge"][0]) if "charge" in sc else 0.0
+        st["nodes"] += 1; st["points"] += len(X); st["q"] += q
+        cand = [d for d in dkey.get(tuple(int(sc[k][0]) for k in BLOB_KEYS), []) if d in DT]
+        if not cand:
+            st["none_nodes"] += 1; st["none_points"] += len(X); st["none_q"] += q
+            continue
+        if len(cand) > 1:
+            st["ambiguous_nodes"] += 1
+        best = None
+        for d in cand:
+            Y = np.column_stack([DP[d]["x"], DP[d]["y"], DP[d]["z"]]).astype(float)
+            if len(Y) == len(X) and np.array_equal(Y, X):
+                best = (d, None); break
+            if best is None:
+                best = (d, cKDTree(Y).query(X)[1])
+        d, idx = best
+        dq = float(DS[d]["charge"][0]) if "charge" in DS[d] else 0.0
+        if not q > 0:
+            st["q_from_donor_nodes"] += 1; st["q_from_donor"] += dq; q = dq
+        if idx is None:
+            fill[nd] = {k: np.asarray(v) for k, v in DT[d].items()}
+            fill[nd]["_q_blob"] = q
+            st["exact_nodes"] += 1; st["exact_points"] += len(X); st["exact_q"] += q
+        else:
+            fill[nd] = {k: np.asarray(v)[idx] for k, v in DT[d].items()}
+            fill[nd]["_q_blob"] = q
+            st["nearest_nodes"] += 1; st["nearest_points"] += len(X); st["nearest_q"] += q
+    return fill, st
+
+
+def event_points(tree, donor=None):
+    """every live point of the dump in cluster / node order: raw xyz, truth columns, charge; cluster offsets.
+    donor: extra truth clouds for nodes without one (donor_truth)."""
     P3, TR, SC = per_node(tree, "3d"), per_node(tree, "truth"), per_node(tree, "scalar")
+    if donor:
+        TR = {**TR, **{nd: v for nd, v in donor.items() if nd not in TR}}
     co = tree["cluster_of"]
     nodes = sorted(P3)
     cols = {k: [] for k in ("x", "y", "z", "tid", "pf", "cls", "iid", "pdg", "dx", "dy", "dz", "dedx", "q", "cl")}
@@ -93,6 +162,8 @@ def event_points(tree):
         g = (lambda k, dflt: np.asarray(tr[k]) if tr is not None else np.full(m, dflt))
         sc = SC.get(nd)
         qb = float(sc["charge"][0]) / max(int(sc["npoints"][0]), 1) if sc is not None else 0.0
+        if tr is not None and "_q_blob" in tr and not qb > 0:   # --truth-donor: the donor blob's charge
+            qb = float(tr["_q_blob"]) / max(int(sc["npoints"][0]) if sc is not None else m, 1)
         for k, v in (("x", p["x"]), ("y", p["y"]), ("z", p["z"]), ("tid", g("tid", -3)), ("pf", g("pf_node", -1)),
                      ("cls", g("cls", -1)), ("iid", g("iid", -1)), ("pdg", g("pdg", 0)), ("dx", g("dir_x", 0.0)),
                      ("dy", g("dir_y", 0.0)), ("dz", g("dir_z", 0.0)), ("dedx", g("dedx_true", 0.0)),
@@ -341,13 +412,17 @@ def main():
     ap.add_argument("--min-points", type=int, default=10)
     ap.add_argument("--event", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--truth-donor", default="", help="labelled cascade tree for blobs without a truth cloud (doc 24 sec 6)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     truth = a.truth or None
-    res = {"event": a.event, "inputs": vars(a)}
+    res = {"event": a.event, "inputs": {k: v for k, v in vars(a).items() if k != "truth_donor" or v}}
 
     tree = load_tree(a.pctree)
-    ev = event_points(tree)
+    donor = None
+    if a.truth_donor:
+        donor, res["truth_donor"] = donor_truth(tree, a.truth_donor)
+    ev = event_points(tree, donor)
     seg_rows, chk = segment_rows(tree, ev)
     res["join"] = chk
     blocks = calib_blocks(a.calib)
