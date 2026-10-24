@@ -13,7 +13,9 @@
 #include "WireCellUtil/NamedFactory.h"
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
+#include <set>
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/String.h"
 
@@ -68,6 +70,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["end_by_pf_node"] = m_label.end_by_pf_node;
     cfg["end_radius"] = m_label.end_radius;
     cfg["end_distance"] = m_label.end_distance;
+    cfg["heat_by_pf_node"] = m_label.heat_by_pf_node;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -116,6 +119,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.end_by_pf_node = get(cfg, "end_by_pf_node", m_label.end_by_pf_node);
     m_label.end_radius = get(cfg, "end_radius", m_label.end_radius);
     m_label.end_distance = get(cfg, "end_distance", m_label.end_distance);
+    m_label.heat_by_pf_node = get(cfg, "heat_by_pf_node", m_label.heat_by_pf_node);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);
@@ -321,7 +325,8 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
     // end whose depo lies outside the face's drift volume is left out (a cut at the cathode or the face, not
     // an end of the particle).
     node_ends_t node_ends;
-    const bool want_ends = m_label.end_by_pf_node || m_label.end_distance;
+    const bool want_ends = m_label.end_by_pf_node || m_label.end_distance || m_label.heat_by_pf_node;
+    HeatKeys heat_keys;
     if (want_ends) {
         const auto sens = face->sensitive();
         const auto& bb = sens.bounds();
@@ -342,8 +347,9 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             }
             root_part[n.index] = part;
         }
-        struct Acc { double t0, t1; const IDepo* d0; const IDepo* d1; };
+        struct Acc { double t0, t1; const IDepo* d0; const IDepo* d1; const IDepo* k0; const IDepo* k1; };
         std::map<int, Acc> acc;
+        std::map<int, std::vector<const IDepo*>> root_depos;   // heat_by_pf_node: the root particle's depos read by this face
         for (const auto& d : depos) {
             if (!d) continue;
             const IDepo* key = d.get();
@@ -357,10 +363,11 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             if (pfn < 0) continue;
             const double t = key->time();
             auto it = acc.find(pfn);
-            if (it == acc.end()) it = acc.emplace(pfn, Acc{t, -std::numeric_limits<double>::infinity(), d.get(), nullptr}).first;
+            if (it == acc.end()) it = acc.emplace(pfn, Acc{t, -std::numeric_limits<double>::infinity(), d.get(), nullptr, key, nullptr}).first;
             auto& a = it->second;
-            if (t < a.t0) { a.t0 = t; a.d0 = d.get(); }
-            if (part == root_part[pfn] && t > a.t1) { a.t1 = t; a.d1 = d.get(); }
+            if (t < a.t0) { a.t0 = t; a.d0 = d.get(); a.k0 = key; }
+            if (part == root_part[pfn] && t > a.t1) { a.t1 = t; a.d1 = d.get(); a.k1 = key; }
+            if (m_label.heat_by_pf_node && part == root_part[pfn] && in_volume(*d)) root_depos[pfn].push_back(d.get());
         }
         for (const auto& [pfn, a] : acc) {
             NodeEnds ne;
@@ -370,10 +377,76 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             if (tracklike && a.d1 && in_volume(*a.d1)) { ne.has_end = true; ne.end = position(*a.d1); }
             node_ends[pfn] = ne;
         }
+        if (m_label.heat_by_pf_node) {
+            // pr_ml doc 25 sec 4.2: the kind of each interaction (truth_nu row) -- neutrino by the row's pdg, cosmic /
+            // radiological by the generator labels of its particles (as truth/python/pr_truth.py), else beam / gun
+            const auto& nuc = truth_nu_columns();
+            const auto& pfc = truth_pf_columns();
+            const int c_nupdg = column_index(nuc, "pdg"), c_nurow = column_index(pfc, "nu_row"), c_gen = column_index(pfc, "gen_label");
+            static const std::set<std::string> cosmic = {"corsika", "cosmicgenerator"};
+            static const std::set<std::string> radio = {"ar39", "ar42", "kr85", "k42fromar42", "rn222", "po210", "k40",
+                                                        "co60", "u238", "th232", "ar42fromk42"};
+            std::map<int, std::set<std::string>> names;
+            for (const auto& row : tt.pf) {
+                const int g = (int)row[c_gen];
+                std::string nm = (g >= 0 && (size_t)g < tt.gen_labels.size()) ? tt.gen_labels[g] : "";
+                std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
+                names[(int)row[c_nurow]].insert(nm);
+            }
+            auto kind_of = [&](int r) -> int {   // 0 none (cosmic / radiological / unknown), 1 neutrino, 2 beam / gun
+                if (r < 0 || (size_t)r >= tt.nu.size()) return 0;
+                const int pdg = std::abs((int)tt.nu[r][c_nupdg]);
+                if (pdg == 12 || pdg == 14 || pdg == 16) return 1;
+                const auto& ns = names[r];
+                if (ns.empty()) return 0;
+                bool all_cos = true, all_rad = true;
+                for (const auto& n : ns) {
+                    if (!cosmic.count(n)) all_cos = false;
+                    if (!radio.count(n)) all_rad = false;
+                }
+                return (all_cos || all_rad) ? 0 : 2;
+            };
+            // the face's sensitive box, on the true (undrifted) position
+            const auto sb = face->sensitive().bounds();
+            auto in_box = [&](const IDepo* k) {
+                const Point& q = k->pos();
+                return q.x() >= std::min(sb.first.x(), sb.second.x()) && q.x() <= std::max(sb.first.x(), sb.second.x()) &&
+                    q.y() >= std::min(sb.first.y(), sb.second.y()) && q.y() <= std::max(sb.first.y(), sb.second.y()) &&
+                    q.z() >= std::min(sb.first.z(), sb.second.z()) && q.z() <= std::max(sb.first.z(), sb.second.z());
+            };
+            for (const auto& [pfn, a] : acc) {
+                const auto& n = pf.nodes[pfn];
+                if (n.primary && n.survived) {
+                    const int k = kind_of(n.nu_row);
+                    if (k == 1 && a.d0 && a.k0 && in_box(a.k0) && in_volume(*a.d0)) heat_keys.vertices.push_back(position(*a.d0));
+                    else if (k == 2) {
+                        if (a.d0 && a.k0 && in_box(a.k0)) {
+                            if (in_volume(*a.d0)) heat_keys.vertices.push_back(position(*a.d0));
+                        }
+                        else if (a.d1 && a.k1 && in_box(a.k1) && in_volume(*a.d1)) heat_keys.vertices.push_back(position(*a.d1));
+                    }
+                }
+                if (n.cls == Cls::shower && n.pdg == 22 && a.d0 && in_volume(*a.d0)) heat_keys.conversions.push_back(position(*a.d0));
+            }
+            for (const auto& [pfn, ds] : root_depos) {
+                const Cls c = pf.nodes[pfn].cls;
+                if (!(c == Cls::track || c == Cls::delta || c == Cls::michel) || ds.size() < 3) continue;
+                DepoPolyline pl;
+                for (const auto* d : ds) {
+                    const IDepo* key = (assoc.id_from_prior && d->prior()) ? d->prior().get() : d;
+                    pl.add(position(*d), key->time(), 0.0);
+                }
+                pl.build();
+                for (const auto& kp : pl.keypoints(m_label.kink_window, m_label.kink_angle)) {
+                    if (kp.kind == DepoPolyline::KeyKind::kink) heat_keys.kinks[pfn].push_back(kp.pos);
+                }
+            }
+        }
     }
     auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log,
                                m_polyline_per_particle ? &particles : nullptr,
-                               want_ends ? &node_ends : nullptr);
+                               want_ends ? &node_ends : nullptr,
+                               m_label.heat_by_pf_node ? &heat_keys : nullptr);
     if (m_polyline_drift_volume_only || m_polyline_per_particle) {
         size_t nparts = 0;
         for (const auto& [tid, v] : particles) nparts += v.size();

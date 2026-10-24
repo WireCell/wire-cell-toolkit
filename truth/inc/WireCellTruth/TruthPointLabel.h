@@ -87,6 +87,17 @@ namespace WireCell::Truth {
         /// Off = the key set of truth_pc_keys().  Recorded in meta() only
         /// when on.  Independent of end_by_pf_node (both use the node ends).
         bool end_distance{false};
+        /// The heat targets from the PF nodes (pr_ml doc 25 sec 4.2):
+        /// v_heat_end from the point's own node end; v_heat_kink from the
+        /// kinks of its own track-like node's root particle; v_heat_vtx
+        /// from true interaction vertices only (neutrino: the primaries'
+        /// start; beam / gun: the primary's start inside the face's
+        /// sensitive box, else its end; cosmic and radiological: none);
+        /// v_heat_conv from the starts of photon-rooted shower nodes.
+        /// Adds the truth keys d_vertex / d_conversion (distance to the
+        /// nearest vertex / conversion point, -1 when none).  Off = the
+        /// legacy key-polyline heat.  Recorded in meta() only when on.
+        bool heat_by_pf_node{false};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -106,6 +117,7 @@ namespace WireCell::Truth {
                 m["end_radius_mm"] = end_radius / units::mm;
             }
             if (end_distance) m["end_distance"] = true;
+            if (heat_by_pf_node) m["heat_by_pf_node"] = true;
             return m;
         }
     };
@@ -126,6 +138,12 @@ namespace WireCell::Truth {
         Point start, end;
     };
     using node_ends_t = std::map<int, NodeEnds>;   // PF node index -> ends
+
+    /// heat_by_pf_node keypoints in the reconstructed frame of one face.
+    struct HeatKeys {
+        std::vector<Point> vertices, conversions;
+        std::map<int, std::vector<Point>> kinks;   // PF node index -> kinks of its root particle
+    };
 
     /// Reconstructed-frame position of a drifted depo (x from its
     /// arrival time, as PointTreeBuilding places blobs).
@@ -170,7 +188,8 @@ namespace WireCell::Truth {
                     const depo_position_f& position,
                     Log::logptr_t log = nullptr,
                     const particle_polylines_t* particles = nullptr,
-                    const node_ends_t* node_ends = nullptr);
+                    const node_ends_t* node_ends = nullptr,
+                    const HeatKeys* heat_keys = nullptr);
 }
 
 #endif

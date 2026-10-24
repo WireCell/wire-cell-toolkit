@@ -827,3 +827,72 @@ TEST_CASE("truth point labels: end_distance stores each point's distance to its 
         CHECK(lp.meta()["end_distance"].asBool());
     }
 }
+
+TEST_CASE("truth point labels: heat_by_pf_node -- heat from own node end, true vertices, conversion points")
+{
+    auto s = make_setup();
+    Truth::DepoBlobAssocParams ap;
+    ap.speed = speed;
+    ap.keep_depos = true;
+    auto res = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), ap);
+    auto tt = make_table();
+    std::map<int, double> q_vis;
+    for (const auto& [vd, e] : res.blobs) {
+        for (const auto& [tid, qe] : e.by_track) q_vis[tid] += qe.first;
+    }
+    Truth::PFMergerParams pp;
+    pp.q_min = 100;
+    auto pf = Truth::PFMerger(pp).run(tt, q_vis);
+    Truth::depo_position_f position = [&](const IDepo& d) { return reco_position(s, d); };
+    auto polylines = Truth::build_polylines(*s.depos->depos(), ap, position);
+    const auto& pl7 = *polylines.at(7);
+    Truth::node_ends_t ends;
+    auto& e7 = ends[pf.info(7).pf_node];
+    e7.has_start = e7.has_end = true;
+    e7.start = pl7.start();
+    e7.end = pl7.end();
+    Truth::HeatKeys hk;
+    hk.vertices.push_back(pl7.start());   // the muon's start as the event vertex; no conversion point
+
+    Truth::PointLabelParams lp;
+    lp.tick = tick;
+    lp.heat_by_pf_node = true;
+    auto root = make_tree(s);
+    Truth::label_live_tree(*root, s.cluster, *s.depos->depos(), res, tt, pf, polylines, lp, position, nullptr, nullptr, &ends, &hk);
+    const double s2 = lp.heat_sigma * lp.heat_sigma;
+    size_t n = 0;
+    for (auto* node : blob_nodes(*root)) {
+        const auto& lpcs = node->value.local_pcs();
+        const auto& tpc = lpcs.at(Truth::truth_pc_name);
+        CHECK(tpc.keys().size() == Truth::truth_pc_keys().size() + 2);
+        const auto tid = tpc.get("tid")->elements<int>();
+        const auto ve = tpc.get("v_heat_end")->elements<double>();
+        const auto vk = tpc.get("v_heat_kink")->elements<double>();
+        const auto vv = tpc.get("v_heat_vtx")->elements<double>();
+        const auto vc = tpc.get("v_heat_conv")->elements<double>();
+        const auto dv = tpc.get("d_vertex")->elements<double>();
+        const auto dc = tpc.get("d_conversion")->elements<double>();
+        const auto& p3 = lpcs.at("3d");
+        const auto xs = p3.get("x")->elements<double>(), ys = p3.get("y")->elements<double>(), zs = p3.get("z")->elements<double>();
+        for (size_t i = 0; i < tid.size(); ++i) {
+            const Point p(xs[i], ys[i], zs[i]);
+            const double d = (p - pl7.start()).magnitude();
+            CHECK(dv[i] == doctest::Approx(d));
+            CHECK(vv[i] == doctest::Approx(std::exp(-0.5 * d * d / s2)));
+            CHECK(dc[i] == -1.0);
+            CHECK(vc[i] == 0.0);
+            CHECK(vk[i] == 0.0);   // no kinks supplied
+            if (tid[i] == 7) {
+                const double de = (p - pl7.end()).magnitude();
+                CHECK(ve[i] == doctest::Approx(std::exp(-0.5 * de * de / s2)));
+                ++n;
+            }
+            else {
+                CHECK(ve[i] == 0.0);   // the proton's node has no end known
+            }
+        }
+    }
+    CHECK(n > 0);
+    CHECK_FALSE(Truth::PointLabelParams().meta().isMember("heat_by_pf_node"));
+    CHECK(lp.meta()["heat_by_pf_node"].asBool());
+}

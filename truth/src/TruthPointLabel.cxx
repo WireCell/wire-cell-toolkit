@@ -114,9 +114,13 @@ namespace {
         // end_distance: the distance to the own node's start / end, -1 when there is none
         bool with_end_distance{false};
         std::vector<double> d_start, d_end;
+        // heat_by_pf_node: the distance to the nearest true vertex / conversion point, -1 when there is none
+        bool with_node_heat{false};
+        std::vector<double> d_vtx, d_conv;
         void resize(size_t n)
         {
             if (with_end_distance) { d_start.assign(n, -1.0); d_end.assign(n, -1.0); }
+            if (with_node_heat) { d_vtx.assign(n, -1.0); d_conv.assign(n, -1.0); }
             for (auto* v : {&tid, &orig_tid, &instance_valid, &pdg, &cls, &iid, &pf_node, &end}) v->assign(n, 0);
             for (auto* v : {&pid_frac, &true_q_frac, &d_traj, &dir_x, &dir_y, &dir_z, &s_t,
                             &v_vtx, &v_end, &v_kink, &v_conv, &dedx}) v->assign(n, 0.0);
@@ -149,6 +153,10 @@ namespace {
                 ds.add("d_node_start", Array(d_start));
                 ds.add("d_node_end", Array(d_end));
             }
+            if (with_node_heat) {
+                ds.add("d_vertex", Array(d_vtx));
+                ds.add("d_conversion", Array(d_conv));
+            }
             return ds;
         }
     };
@@ -166,7 +174,8 @@ Truth::label_live_tree(node_t& root,
                        const depo_position_f& position,
                        Log::logptr_t log,
                        const particle_polylines_t* particles,
-                       const node_ends_t* node_ends)
+                       const node_ends_t* node_ends,
+                       const HeatKeys* heat_keys)
 {
     PointLabelSummary sum;
     sum.void_roots = pf.void_roots;
@@ -280,6 +289,7 @@ Truth::label_live_tree(node_t& root,
 
             Columns col;
             col.with_end_distance = params.end_distance;
+            col.with_node_heat = params.heat_by_pf_node && heat_keys;
             col.resize(npts);
             for (size_t i = 0; i < npts; ++i) {
                 const Point p(xs[i], ys[i], zs[i]);
@@ -387,13 +397,53 @@ Truth::label_live_tree(node_t& root,
                             else if (ne.has_end && (p - ne.end).magnitude() <= params.end_radius) col.end[i] = 2;
                         }
                     }
-                    const auto& kps = kps_of(tid);
-                    col.v_end[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::end, params.heat_sigma);
-                    col.v_kink[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::kink, params.heat_sigma);
+                    if (params.heat_by_pf_node && heat_keys) {
+                        // the point's own PF node: its end, the kinks of its root particle
+                        col.v_end[i] = 0.0;
+                        col.v_kink[i] = 0.0;
+                        if (pfn >= 0 && node_ends) {
+                            auto nit = node_ends->find(pfn);
+                            if (nit != node_ends->end() && nit->second.has_end) {
+                                const double d2 = (p - nit->second.end).magnitude2();
+                                col.v_end[i] = std::exp(-0.5 * d2 / (params.heat_sigma * params.heat_sigma));
+                            }
+                        }
+                        auto kit = pfn >= 0 ? heat_keys->kinks.find(pfn) : heat_keys->kinks.end();
+                        if (kit != heat_keys->kinks.end()) {
+                            for (const auto& k : kit->second) {
+                                const double d2 = (p - k).magnitude2();
+                                col.v_kink[i] = std::max(col.v_kink[i], std::exp(-0.5 * d2 / (params.heat_sigma * params.heat_sigma)));
+                            }
+                        }
+                    }
+                    else {
+                        const auto& kps = kps_of(tid);
+                        col.v_end[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::end, params.heat_sigma);
+                        col.v_kink[i] = DepoPolyline::heat(p, kps, DepoPolyline::KeyKind::kink, params.heat_sigma);
+                    }
                 }
                 col.d_traj[i] = dtraj;
-                col.v_vtx[i] = DepoPolyline::heat(p, vtx_kps, DepoPolyline::KeyKind::start, params.heat_sigma);
-                col.v_conv[i] = DepoPolyline::heat(p, conv_kps, DepoPolyline::KeyKind::start, params.heat_sigma);
+                if (params.heat_by_pf_node && heat_keys) {
+                    // true interaction vertices and photon conversion points, every point
+                    auto nearest = [&](const std::vector<Point>& keys) {
+                        double best = -1.0;
+                        for (const auto& k : keys) {
+                            const double d = (p - k).magnitude();
+                            if (best < 0 || d < best) best = d;
+                        }
+                        return best;
+                    };
+                    const double dv = nearest(heat_keys->vertices), dc = nearest(heat_keys->conversions);
+                    const double s2 = params.heat_sigma * params.heat_sigma;
+                    col.v_vtx[i] = dv < 0 ? 0.0 : std::exp(-0.5 * dv * dv / s2);
+                    col.v_conv[i] = dc < 0 ? 0.0 : std::exp(-0.5 * dc * dc / s2);
+                    col.d_vtx[i] = dv;
+                    col.d_conv[i] = dc;
+                }
+                else {
+                    col.v_vtx[i] = DepoPolyline::heat(p, vtx_kps, DepoPolyline::KeyKind::start, params.heat_sigma);
+                    col.v_conv[i] = DepoPolyline::heat(p, conv_kps, DepoPolyline::KeyKind::start, params.heat_sigma);
+                }
             }
             lpcs[truth_pc_name] = col.dataset();
             ++sum.nnodes;

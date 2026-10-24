@@ -55,7 +55,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // pr_ml doc 25 sec 3.2: TruthPointLabeler end_by_pf_node / end_radius (C++ default false / 10 mm => keys omitted when false)
           truth_end_by_pf_node=false, truth_end_radius=10 * wc.mm,
           // pr_ml doc 25 sec 3.2: TruthPointLabeler end_distance (C++ default false => key omitted)
-          truth_end_distance=false)
+          truth_end_distance=false,
+          // pr_ml doc 25 sec 4.2: TruthPointLabeler heat_by_pf_node (C++ default false => key omitted)
+          truth_heat_by_pf_node=false)
 
 local drift_speed = P.drift_speed;
 // pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
@@ -246,7 +248,9 @@ local clus_per_face (
                                                  [if truth_end_by_pf_node then 'end_by_pf_node']: true,
                                                  [if truth_end_by_pf_node then 'end_radius']: truth_end_radius,
                                                  // pr_ml doc 25 sec 3.2: d_node_start / d_node_end columns (C++ default false => key omitted)
-                                                 [if truth_end_distance then 'end_distance']: true}),
+                                                 [if truth_end_distance then 'end_distance']: true,
+                                                 // pr_ml doc 25 sec 4.2: heat targets from the PF nodes (C++ default false => key omitted)
+                                                 [if truth_heat_by_pf_node then 'heat_by_pf_node']: true}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],
