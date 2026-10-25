@@ -76,6 +76,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["heat_by_pf_node"] = m_label.heat_by_pf_node;
     cfg["kink_tracks_only"] = m_label.kink_tracks_only;
     cfg["time_tie_order"] = m_label.time_tie_order;
+    cfg["refine_min_frac"] = m_label.refine_min_frac;
     cfg["labels_meta"] = m_labels_meta;
     cfg["label_dead"] = m_label_dead;
     cfg["polyline_drift_volume_only"] = m_polyline_drift_volume_only;
@@ -127,6 +128,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     m_label.heat_by_pf_node = get(cfg, "heat_by_pf_node", m_label.heat_by_pf_node);
     m_label.kink_tracks_only = get(cfg, "kink_tracks_only", m_label.kink_tracks_only);
     m_label.time_tie_order = get(cfg, "time_tie_order", m_label.time_tie_order);
+    m_label.refine_min_frac = get(cfg, "refine_min_frac", m_label.refine_min_frac);
     m_labels_meta = get(cfg, "labels_meta", m_labels_meta);
     m_label_dead = get(cfg, "label_dead", m_label_dead);
     m_polyline_drift_volume_only = get(cfg, "polyline_drift_volume_only", m_polyline_drift_volume_only);

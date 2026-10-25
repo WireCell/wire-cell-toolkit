@@ -296,6 +296,13 @@ Truth::label_live_tree(node_t& root,
             col.with_end_distance = params.end_distance;
             col.with_node_heat = params.heat_by_pf_node && heat_keys;
             col.resize(npts);
+            // refine_min_frac: the keys refinement may give (pr_ml doc 25 sec 7.4); off = every depo
+            const bool refine_restricted = params.refine && params.refine_min_frac > 0 && !ghost && !e.depos.empty();
+            std::set<int> refine_ok;
+            if (refine_restricted) {
+                refine_ok = refine_eligible_tids(e.by_track, e.q_total, [&](int t) { return pf.info(t).pf_node; },
+                                                 params.refine_min_frac);
+            }
             for (size_t i = 0; i < npts; ++i) {
                 const Point p(xs[i], ys[i], zs[i]);
                 int tid = ghost ? tid_ghost : (shared ? tid_shared : tid_top);
@@ -304,6 +311,7 @@ Truth::label_live_tree(node_t& root,
                     double best = std::numeric_limits<double>::max();
                     const DepoBlobAssocResult::BlobEntry::DepoShare* bd = nullptr;
                     for (const auto& ds : e.depos) {
+                        if (refine_restricted && !refine_ok.count(ds.tid)) continue;
                         const double d2 = (position(*ds.depo) - p).magnitude2();
                         if (d2 < best) { best = d2; bd = &ds; }
                     }

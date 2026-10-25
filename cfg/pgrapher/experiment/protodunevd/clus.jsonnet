@@ -89,7 +89,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback
           truth_michel_capture_ke_min=0, truth_michel_stopped_only=false,
           // pr_ml doc 25 sec 7: TruthPointLabeler real_assoc, the per-plane widths for the blobs the time-width run leaves empty
           // (C++ default absent; 0 / 0 => key omitted => byte-identical)
-          truth_real_tran_collection=0, truth_real_tran_induction=0)
+          truth_real_tran_collection=0, truth_real_tran_induction=0,
+          // pr_ml doc 25 sec 7.4: refinement only among PF nodes holding >= this share of the blob (C++ default 0 => key omitted)
+          truth_refine_min_frac=0)
 
 // Calibrated from PDVD data (anode->cathode crossing tracks: reconstructed drift
 // x-span vs the collection-plane->cathode-surface distance 338.55 cm; cathode
@@ -402,7 +404,9 @@ local clus_per_face (
                                                  [if truth_time_tie_order then 'time_tie_order']: true,
                                                  // pr_ml doc 25 sec 7: real_assoc (key omitted when both widths are 0)
                                                  [if truth_real_tran_collection != 0 || truth_real_tran_induction != 0 then 'real_assoc']: {
-                                                     extra_smear_tran_collection: truth_real_tran_collection, extra_smear_tran_induction: truth_real_tran_induction}}),
+                                                     extra_smear_tran_collection: truth_real_tran_collection, extra_smear_tran_induction: truth_real_tran_induction},
+                                                 // pr_ml doc 25 sec 7.4: refine_min_frac (key omitted when 0 => byte-identical)
+                                                 [if truth_refine_min_frac != 0 then 'refine_min_frac']: truth_refine_min_frac}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

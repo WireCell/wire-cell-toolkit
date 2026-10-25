@@ -90,6 +90,9 @@ function(
     // flow and every blob with time-width charge stay as they are.  0 / 0 => key omitted => byte-identical.
     truth_real_tran_collection_mm = 0,
     truth_real_tran_induction_mm = 0,
+    // pr_ml doc 25 sec 7.4 (owner 2026-10-25): nearest-depo refinement only among PF nodes holding at least this share of the
+    // blob's true charge (keV Compton depos no longer hand points their node / class).  0 => key omitted => byte-identical.
+    truth_refine_min_frac = 0,
     // '' keeps the all-APA stage's default sink; a path writes the post-clustering
     // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
     save_tensors = '',
@@ -140,7 +143,8 @@ function(
                         truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node,
                         truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order,
                         truth_michel_capture_ke_min=truth_michel_capture_ke_min_mev * wc.MeV, truth_michel_stopped_only=truth_michel_stopped_only,
-                        truth_real_tran_collection=truth_real_tran_collection_mm * wc.mm, truth_real_tran_induction=truth_real_tran_induction_mm * wc.mm);
+                        truth_real_tran_collection=truth_real_tran_collection_mm * wc.mm, truth_real_tran_induction=truth_real_tran_induction_mm * wc.mm,
+                        truth_refine_min_frac=truth_refine_min_frac);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false)
                         for n in std.range(0, nanodes - 1)];
 

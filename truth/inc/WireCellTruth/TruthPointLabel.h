@@ -53,6 +53,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace WireCell::Truth {
@@ -110,6 +111,17 @@ namespace WireCell::Truth {
         /// zigzag 2-4x their length).  Off = time order, ties in file order.
         /// Recorded in meta() only when on.
         bool time_tie_order{false};
+        /// With refine: a point may take only a track key whose PF node
+        /// (a key without a node counts as its own node) holds at least
+        /// this fraction of the blob's true charge; the nearest such depo
+        /// gives the point its tid, and when no key qualifies the point
+        /// keeps the unrefined label (the blob's top key, or tid_shared).
+        /// pr_ml doc 25 sec 7.4: the nearest depo of a keV Compton electron
+        /// holding 0.1 % of a blob handed its points that electron's node
+        /// and class (2-6 % of ProtoDUNE points, 18 % of an FD-HD nue
+        /// event's).  0 = every key (legacy).  Recorded in meta() only when
+        /// on.
+        double refine_min_frac{0.0};
         /// The tick used by the sampler for slice_index_min (cross-check).
         double tick{0.5 * units::us};
 
@@ -132,6 +144,7 @@ namespace WireCell::Truth {
             if (heat_by_pf_node) m["heat_by_pf_node"] = true;
             if (kink_tracks_only) m["kink_tracks_only"] = true;
             if (time_tie_order) m["time_tie_order"] = true;
+            if (refine_min_frac > 0) m["refine_min_frac"] = refine_min_frac;
             return m;
         }
     };
@@ -162,6 +175,29 @@ namespace WireCell::Truth {
         case 13: case 211: case 321: case 2212: case 3222: case 3112: return true;   // muon, charged hadrons
         default: return false;
         }
+    }
+
+    /// refine_min_frac: the track keys of a blob (by_track: key -> (true
+    /// charge, energy)) that nearest-depo refinement may give a point --
+    /// those whose PF node holds at least min_frac of the blob's true
+    /// charge q_total; node_of(key) is the key's PF node, < 0 for none (the
+    /// key is then its own node, as in the shared_by_pf_node test).
+    /// min_frac <= 0: every key.
+    template <class NodeOf>
+    std::set<int> refine_eligible_tids(const std::map<int, std::pair<double, double>>& by_track, double q_total,
+                                       NodeOf node_of, double min_frac)
+    {
+        std::set<int> out;
+        auto key_of = [&](int tid) {
+            const int pfn = node_of(tid);
+            return pfn >= 0 ? std::make_pair(0, pfn) : std::make_pair(1, tid);
+        };
+        std::map<std::pair<int, int>, double> bynode;
+        for (const auto& [tid, qe] : by_track) bynode[key_of(tid)] += qe.first;
+        for (const auto& [tid, qe] : by_track) {
+            if (min_frac <= 0 || (q_total > 0 && bynode[key_of(tid)] >= min_frac * q_total)) out.insert(tid);
+        }
+        return out;
     }
 
     /// heat_by_pf_node keypoints in the reconstructed frame of one face.

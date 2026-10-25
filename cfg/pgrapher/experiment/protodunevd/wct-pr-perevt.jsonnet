@@ -1880,6 +1880,8 @@ function(
     // pr_ml doc 25 sec 7: the donor labeler's real_assoc (per-plane widths in mm; 0 / 0 => key omitted => byte-identical).
     beam_deghost_truth_real_tran_collection_mm = 0,
     beam_deghost_truth_real_tran_induction_mm = 0,
+    // pr_ml doc 25 sec 7.4: the donor labeler's refine_min_frac (0 => key omitted => byte-identical).
+    beam_deghost_truth_refine_min_frac = 0,
     // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
     // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
@@ -4978,6 +4980,7 @@ function(
                     [if beam_deghost_truth_real_tran_collection_mm != 0 || beam_deghost_truth_real_tran_induction_mm != 0 then 'real_assoc']: {
                         extra_smear_tran_collection: beam_deghost_truth_real_tran_collection_mm * wc.mm,
                         extra_smear_tran_induction: beam_deghost_truth_real_tran_induction_mm * wc.mm},
+                    [if beam_deghost_truth_refine_min_frac != 0 then 'refine_min_frac']: beam_deghost_truth_refine_min_frac,
                 },
             }));
     local dg_join = g.pnode({

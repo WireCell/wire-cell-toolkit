@@ -896,3 +896,24 @@ TEST_CASE("truth point labels: heat_by_pf_node -- heat from own node end, true v
     CHECK_FALSE(Truth::PointLabelParams().meta().isMember("heat_by_pf_node"));
     CHECK(lp.meta()["heat_by_pf_node"].asBool());
 }
+
+TEST_CASE("truth point labels: refine_min_frac -- refinement only among PF nodes holding enough of the blob's true charge")
+{
+    // pr_ml doc 25 sec 7.4: a keV Compton depo nearest to a point must not hand the point its PF node / class when its
+    // node holds a negligible share of the blob; a particle inside the blob's dominant node stays eligible.
+    using BT = std::map<int, std::pair<double, double>>;
+    const BT bt{{7, {99.0, 0.0}}, {9, {1.0, 0.0}}};
+    auto two_nodes = [](int t) { return t == 7 ? 0 : 1; };
+    auto one_node = [](int) { return 0; };
+    auto no_node_for_9 = [](int t) { return t == 7 ? 0 : -1; };
+
+    CHECK(Truth::refine_eligible_tids(bt, 100.0, two_nodes, 0.0) == std::set<int>{7, 9});    // legacy: every key
+    CHECK(Truth::refine_eligible_tids(bt, 100.0, two_nodes, 0.05) == std::set<int>{7});      // 1 % node dropped
+    CHECK(Truth::refine_eligible_tids(bt, 100.0, one_node, 0.05) == std::set<int>{7, 9});    // same node: kept
+    CHECK(Truth::refine_eligible_tids(bt, 100.0, no_node_for_9, 0.05) == std::set<int>{7});  // no node = own key
+
+    BT split;   // 25 particles in 25 nodes, 4 % each: nothing reaches 5 % -> the caller keeps the unrefined label
+    for (int t = 0; t < 25; ++t) split[t] = {4.0, 0.0};
+    CHECK(Truth::refine_eligible_tids(split, 100.0, [](int t) { return t; }, 0.05).empty());
+    CHECK(Truth::refine_eligible_tids(split, 100.0, [](int t) { return t; }, 0.04).size() == 25);
+}

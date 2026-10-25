@@ -16,6 +16,8 @@
       the DepoBlobAssoc knobs of BlobDepoLabel: time_offset, nsigma,
         speed (required), pindex, id_from_prior, extra_smear_long,
         extra_smear_tran, extra_smear_tran_collection / _induction
+      refine_min_frac nearest-depo refinement only among keys whose PF node holds
+                      at least this share of the blob's true charge (default 0 = all)
       real_assoc      {extra_smear_tran_collection, extra_smear_tran_induction}: a
                       second association; only blobs the primary leaves empty
                       take its labels (default absent = off)
