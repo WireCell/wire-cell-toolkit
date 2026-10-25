@@ -80,6 +80,11 @@ function(
     // pr_ml doc 25 sec 4.2 (owner 2026-10-24): order a particle's equal-time depos along the track in every truth polyline
     // and for the PF node ends.  C++ default false; false => key omitted => byte-identical.
     truth_time_tie_order = false,
+    // pr_ml doc 25 sec 6 (owner 2026-10-24): PFMerger Michel knobs -- a muMinusCaptureAtRest electron below this KE (MeV) is not a
+    // Michel (0 = off); stopped muons only (a mu- Decay never, a mu+ Decay when the decay waited >= 20 ns).
+    // C++ default 0 / false; off => keys omitted => byte-identical; unused unless truth_point_label.
+    truth_michel_capture_ke_min_mev = 0,
+    truth_michel_stopped_only = false,
     // '' keeps the all-APA stage's default sink; a path writes the post-clustering
     // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
     save_tensors = '',
@@ -128,7 +133,8 @@ function(
                         truth_extra_smear_long=truth_extra_smear_long_us * wc.us,
                         truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius_mm * wc.mm,
                         truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node,
-                        truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order);
+                        truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order,
+                        truth_michel_capture_ke_min=truth_michel_capture_ke_min_mev * wc.MeV, truth_michel_stopped_only=truth_michel_stopped_only);
     local clus_pipes = [clus_maker.per_apa(anodes[n], dump=false)
                         for n in std.range(0, nanodes - 1)];
 

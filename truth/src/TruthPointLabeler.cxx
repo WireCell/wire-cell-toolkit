@@ -59,6 +59,9 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["pfmerger"]["photon_prop"] = m_pfparams.photon_prop;
     cfg["pfmerger"]["void_radius"] = m_pfparams.void_radius;
     cfg["pfmerger"]["em_fold"] = m_pfparams.em_fold;
+    cfg["pfmerger"]["michel_capture_ke_min"] = m_pfparams.michel_capture_ke_min;
+    cfg["pfmerger"]["michel_stopped_only"] = m_pfparams.michel_stopped_only;
+    cfg["pfmerger"]["michel_wait_min"] = m_pfparams.michel_wait_min;
     cfg["refine_by_nearest_depo"] = m_label.refine;
     cfg["d_cap"] = m_label.d_cap;
     cfg["end_window"] = m_label.end_window;

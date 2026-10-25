@@ -1873,6 +1873,10 @@ function(
     beam_deghost_truth_kink_tracks_only = false,
     // pr_ml doc 25 sec 4.2: equal-time depos ordered along the track.  C++ default false => key omitted.
     beam_deghost_truth_time_tie_order = false,
+    // pr_ml doc 25 sec 6: the labeler's PFMerger Michel knobs (capture-electron KE floor in MeV, 0 = off; stopped muons only).
+    // C++ default 0 / false => keys omitted => byte-identical compiled config.
+    beam_deghost_truth_michel_capture_ke_min_mev = 0,
+    beam_deghost_truth_michel_stopped_only = false,
     // pr_ml doc 24 sec 6: '' (default) => the PR job.  A path => the job ONLY writes the cascade tree (with the
     // labeler above when beam_deghost_truth_depos is set) to this TensorFileSink archive (prefix 'dg_'), no PR:
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
@@ -4958,7 +4962,10 @@ function(
                     [if beam_deghost_truth_extra_smear_long_us != 0 then 'extra_smear_long']: beam_deghost_truth_extra_smear_long_us * wc.us,
                     [if beam_deghost_truth_extra_smear_tran_mm != 0 then 'extra_smear_tran']: beam_deghost_truth_extra_smear_tran_mm * wc.mm,
                     [if beam_deghost_truth_shared_by_pf_node then 'shared_by_pf_node']: true,
-                    [if beam_deghost_truth_em_fold then 'pfmerger']: {em_fold: true},
+                    [if beam_deghost_truth_em_fold || beam_deghost_truth_michel_capture_ke_min_mev != 0 || beam_deghost_truth_michel_stopped_only then 'pfmerger']: {
+                        [if beam_deghost_truth_em_fold then 'em_fold']: true,
+                        [if beam_deghost_truth_michel_capture_ke_min_mev != 0 then 'michel_capture_ke_min']: beam_deghost_truth_michel_capture_ke_min_mev * wc.MeV,
+                        [if beam_deghost_truth_michel_stopped_only then 'michel_stopped_only']: true},
                     [if beam_deghost_truth_end_by_pf_node then 'end_by_pf_node']: true,
                     [if beam_deghost_truth_end_by_pf_node then 'end_radius']: beam_deghost_truth_end_radius_mm * wc.mm,
                     [if beam_deghost_truth_end_distance then 'end_distance']: true,

@@ -238,3 +238,60 @@ TEST_CASE("node_has_kinks: kink_tracks_only keeps muons and charged hadrons only
     CHECK_FALSE(node_has_kinks(node(Cls::michel, 11), true));
     CHECK_FALSE(node_has_kinks(node(Cls::shower, 11), true));
 }
+
+TEST_CASE("pfmerger michel knobs: capture-electron KE floor and stopped muons only")
+{
+    // pr_ml doc 25 sec 6 (owner 2026-10-24).  Times in ns (the table's unit).
+    Builder b(Point(0, 0, 0));
+    const auto& c = truth_pf_columns();
+    auto at = [&](double t) { b.tt.pf.back()[column_index(c, "start_t")] = t; };
+    // a mu+ that stops (100 cm, ~3.3 ns of flight) and decays 2 us later
+    b.add(1, 0, -13, "primary", 0.3, Point(0, 0, 0), Point(0, 0, 100), 9e6); at(0);
+    b.add(2, 1, -11, "Decay", 0.03, Point(0, 0, 100), Point(0, 4, 105), 6e5); at(2000);
+    // a mu+ that decays in flight: the electron starts after the flight time only
+    b.add(3, 0, -13, "primary", 0.3, Point(50, 0, 0), Point(50, 0, 100), 9e6); at(0);
+    b.add(4, 3, -11, "Decay", 0.1, Point(50, 0, 100), Point(50, 4, 120), 2e6); at(3.4);
+    // a mu- Decay electron: in flight whatever its time
+    b.add(5, 0, 13, "primary", 0.3, Point(100, 0, 0), Point(100, 0, 100), 9e6); at(0);
+    b.add(6, 5, 11, "Decay", 0.1, Point(100, 0, 100), Point(100, 4, 120), 2e6); at(900);
+    // a captured mu-: an atomic electron (3 MeV) and the decay-in-orbit electron (40 MeV)
+    b.add(7, 0, 13, "primary", 0.3, Point(150, 0, 0), Point(150, 0, 100), 9e6); at(0);
+    b.add(8, 7, 11, "muMinusCaptureAtRest", 0.003, Point(150, 0, 100), Point(150, 0.5, 100.5), 5e4); at(3.4);
+    b.add(9, 7, 11, "muMinusCaptureAtRest", 0.04, Point(150, 0, 100), Point(150, 4, 110), 8e5); at(800);
+
+    SUBCASE("off: every Decay / capture electron of a muon is a Michel")
+    {
+        PFMergerParams p;
+        auto res = PFMerger(p).run(b.tt);
+        for (int t : {2, 4, 6, 8, 9}) CHECK(node_of(res, t).cls == Cls::michel);
+        CHECK_FALSE(p.meta().isMember("michel_capture_ke_min_MeV"));
+        CHECK_FALSE(p.meta().isMember("michel_stopped_only_wait_min_ns"));
+    }
+    SUBCASE("on: only the stopped mu+ decay and the decay-in-orbit electron")
+    {
+        PFMergerParams p;
+        Configuration cfg;
+        cfg["michel_capture_ke_min"] = 5 * units::MeV;
+        cfg["michel_stopped_only"] = true;
+        p.configure(cfg);
+        auto res = PFMerger(p).run(b.tt);
+        CHECK(node_of(res, 2).cls == Cls::michel);
+        CHECK(node_of(res, 9).cls == Cls::michel);
+        for (int t : {4, 6, 8}) CHECK(node_of(res, t).cls != Cls::michel);
+        CHECK(p.meta()["michel_capture_ke_min_MeV"].asDouble() == doctest::Approx(5.0));
+        CHECK(p.meta()["michel_stopped_only_wait_min_ns"].asDouble() == doctest::Approx(20.0));
+    }
+    SUBCASE("each knob alone")
+    {
+        PFMergerParams pk;
+        pk.michel_capture_ke_min = 5 * units::MeV;
+        auto rk = PFMerger(pk).run(b.tt);
+        for (int t : {2, 4, 6, 9}) CHECK(node_of(rk, t).cls == Cls::michel);
+        CHECK(node_of(rk, 8).cls != Cls::michel);
+        PFMergerParams ps;
+        ps.michel_stopped_only = true;
+        auto rs = PFMerger(ps).run(b.tt);
+        for (int t : {2, 8, 9}) CHECK(node_of(rs, t).cls == Cls::michel);
+        for (int t : {4, 6}) CHECK(node_of(rs, t).cls != Cls::michel);
+    }
+}

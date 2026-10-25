@@ -372,7 +372,9 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                        // pr_ml doc 25 sec 4.2: TruthPointLabeler kink_tracks_only (C++ default false => key omitted)
                        truth_kink_tracks_only=false,
                        // pr_ml doc 25 sec 4.2: TruthPointLabeler time_tie_order (C++ default false => key omitted)
-                       truth_time_tie_order=false) = {
+                       truth_time_tie_order=false,
+                       // pr_ml doc 25 sec 6: PFMerger michel_capture_ke_min / michel_stopped_only (C++ default 0 / false => keys omitted)
+                       truth_michel_capture_ke_min=0, truth_michel_stopped_only=false) = {
     local dv = detector_volumes([anode], face, pos_offset_on),
     local pcts = pctransforms(dv),
     local bsl = bs_live_face(anode.name, face),
@@ -417,7 +419,11 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
                                                  [if truth_point_zero_width then 'point_zero_width']: true,
                                                  // pr_ml doc 25 sec 2.8: C++ default false => key omitted
                                                  [if truth_shared_by_pf_node then 'shared_by_pf_node']: true,
-                                                 [if truth_em_fold then 'pfmerger']: {em_fold: true},
+                                                 [if truth_em_fold || truth_michel_capture_ke_min != 0 || truth_michel_stopped_only then 'pfmerger']: {
+                                                     [if truth_em_fold then 'em_fold']: true,
+                                                     // pr_ml doc 25 sec 6: Michel knobs (C++ default 0 / false => keys omitted; pfmerger omitted when all off)
+                                                     [if truth_michel_capture_ke_min != 0 then 'michel_capture_ke_min']: truth_michel_capture_ke_min,
+                                                     [if truth_michel_stopped_only then 'michel_stopped_only']: true},
                                                  // pr_ml doc 25 sec 4: the charge time filter's width (C++ default 0 => key omitted)
                                                  [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long,
                                                  // pr_ml doc 25 sec 3.2: the end flag from the point's own PF node (C++ default false => keys omitted)
@@ -989,7 +995,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
            // pr_ml doc 25 sec 4.2: TruthPointLabeler kink_tracks_only (C++ default false => key omitted)
            truth_kink_tracks_only=false,
            // pr_ml doc 25 sec 4.2: TruthPointLabeler time_tie_order (C++ default false => key omitted)
-           truth_time_tie_order=false) {
+           truth_time_tie_order=false,
+           // pr_ml doc 25 sec 6: PFMerger michel_capture_ke_min / michel_stopped_only (C++ default 0 / false => keys omitted)
+           truth_michel_capture_ke_min=0, truth_michel_stopped_only=false) {
     // Output prefix for the per-event writers: output_dir/ normally, and
     // output_dir/<evt_subdir>/ when a group runs in one process (see the
     // evt_subdir doc above).
@@ -1030,7 +1038,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
                       truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
                       truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long,
-                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node, truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order),
+                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node, truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order, truth_michel_capture_ke_min=truth_michel_capture_ke_min, truth_michel_stopped_only=truth_michel_stopped_only),
     // trace_bee (default false): per-step Bee layers for merge attribution; see
     // trace_sets above.  Diagnostic only, off => byte-identical compiled config.
     per_apa(anode, dump=true, per_face_bee=true, bee_sink=null, pre_mabc=null, trace_bee=false, save_assoc_id=false, sep_vertex_veto=true, sep_track_recarve=false, sep_fv_point=true, nu_iso_band_guard=true, iso_cathode_guard=false, nu_band_veto=true, eb_fast=false, po_fast=false, dg_fast=false, dg_length_cut=0)::
@@ -1044,7 +1052,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                       truth_point_label=truth_point_label, truth_depos=truth_depos, truth_time_offset=truth_time_offset, truth_table=truth_table, truth_fold_negative_ids=truth_fold_negative_ids,
                       truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle, truth_point_zero_width=truth_point_zero_width,
                       truth_shared_by_pf_node=truth_shared_by_pf_node, truth_em_fold=truth_em_fold, truth_extra_smear_long=truth_extra_smear_long,
-                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node, truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order),
+                      truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius, truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node, truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order, truth_michel_capture_ke_min=truth_michel_capture_ke_min, truth_michel_stopped_only=truth_michel_stopped_only),
     // Production (LArSoft) entry point used by wcls-img-clus.jsonnet.
     per_volume(anode, face=0, dump=true, bee_sink=null)::
         clus_per_face(anode, face=face, dump=dump, evt_subdir=evt_subdir,

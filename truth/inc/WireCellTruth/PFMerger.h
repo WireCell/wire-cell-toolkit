@@ -33,6 +33,16 @@
        a delta or Michel node: an electron's radiation stays with it
        (pr_ml doc 25 sec 2.8; off = a photon radiated by a delta or
        Michel electron is a shower root of its own).
+       With michel_capture_ke_min > 0 (default 0 = off) a
+       muMinusCaptureAtRest electron below that KE is not a Michel
+       (the capture's atomic electrons); with michel_stopped_only
+       (default off) a Decay electron is a Michel only when its muon
+       stopped: never for a mu- (at rest a mu- decays under
+       muMinusCaptureAtRest), and for a mu+ only when the decay waited
+       at least michel_wait_min beyond the fastest possible flight
+       (electron start_t - muon start_t - |muon end - start| / c).
+       Both: pr_ml doc 25 sec 6 (owner 2026-10-24).  A rejected
+       electron falls through to the rules below (shower root).
     6. A shower node with visible charge below compton_q is class LE
        with instance_valid 0 (SPINE: semantics kept, instance -1).
     7. A node survives when its visible charge >= q_min and its
@@ -80,6 +90,14 @@ namespace WireCell::Truth {
         /// Rule 4 also merges EM daughters into a delta or Michel node.
         /// Recorded in meta() only when on (labels_meta.json unchanged when off).
         bool em_fold{false};
+        /// Rule 5: KE floor for muMinusCaptureAtRest electrons (0 = off).
+        /// Recorded in meta() only when on.
+        double michel_capture_ke_min{0.0};
+        /// Rule 5: Decay electrons are Michels only for a stopped muon
+        /// (mu- never; mu+ when the decay waited >= michel_wait_min).
+        /// Recorded in meta() only when on.
+        bool michel_stopped_only{false};
+        double michel_wait_min{20 * units::ns};
 
         Configuration meta() const
         {
@@ -97,6 +115,8 @@ namespace WireCell::Truth {
             m["invisible_parents"] = "111 113 221 331 3212 (SPINE)";
             m["shape_precedence"] = "track > michel > shower > delta > le (SPINE)";
             if (em_fold) m["em_fold_delta_michel"] = true;
+            if (michel_capture_ke_min > 0) m["michel_capture_ke_min_MeV"] = michel_capture_ke_min / units::MeV;
+            if (michel_stopped_only) m["michel_stopped_only_wait_min_ns"] = michel_wait_min / units::ns;
             return m;
         }
         void configure(const Configuration& cfg)
@@ -110,6 +130,9 @@ namespace WireCell::Truth {
             photon_prop = get(cfg, "photon_prop", photon_prop);
             void_radius = get(cfg, "void_radius", void_radius);
             em_fold = get(cfg, "em_fold", em_fold);
+            michel_capture_ke_min = get(cfg, "michel_capture_ke_min", michel_capture_ke_min);
+            michel_stopped_only = get(cfg, "michel_stopped_only", michel_stopped_only);
+            michel_wait_min = get(cfg, "michel_wait_min", michel_wait_min);
         }
     };
 
@@ -192,12 +215,14 @@ namespace WireCell::Truth {
                 c_pdg = column_index(pfc, "pdg"), c_proc = column_index(pfc, "process"),
                 c_ke = column_index(pfc, "KE"), c_nvis = column_index(pfc, "nvis_q"), c_nu = column_index(pfc, "nu_row"),
                 c_sx = column_index(pfc, "start_x"), c_sy = column_index(pfc, "start_y"), c_sz = column_index(pfc, "start_z"),
-                c_ex = column_index(pfc, "end_x"), c_ey = column_index(pfc, "end_y"), c_ez = column_index(pfc, "end_z");
+                c_ex = column_index(pfc, "end_x"), c_ey = column_index(pfc, "end_y"), c_ez = column_index(pfc, "end_z"),
+                c_st = column_index(pfc, "start_t");
 
             struct Row {
                 int tid, mother, pdg, nu_row;
                 std::string proc;
                 double ke, len, q;
+                double t0;          // start time (michel_stopped_only)
                 Point start;
                 // results
                 int node{-1};       // own node index or -1
@@ -218,6 +243,7 @@ namespace WireCell::Truth {
                 const Point e(r[c_ex] * units::cm, r[c_ey] * units::cm, r[c_ez] * units::cm);
                 row.len = (e - s).magnitude();
                 row.start = s;
+                row.t0 = r[c_st] * units::ns;
                 auto qit = q_vis.find(row.tid);
                 row.q = q_vis.empty() ? r[c_nvis] : (qit == q_vis.end() ? 0.0 : qit->second);
                 row.target = row.tid;
@@ -284,8 +310,24 @@ namespace WireCell::Truth {
                 }
                 if (std::abs(r.pdg) == 11 && m_p.michel_own && std::abs(ppdg) == 13 &&
                     (r.proc == "Decay" || r.proc == "muMinusCaptureAtRest")) {
-                    make_node(r, Cls::michel);      // rule 5
-                    return;
+                    bool michel = true;
+                    if (m_p.michel_capture_ke_min > 0 && r.proc == "muMinusCaptureAtRest" &&
+                        r.ke < m_p.michel_capture_ke_min) {
+                        michel = false;             // a capture's atomic electron
+                    }
+                    if (m_p.michel_stopped_only && r.proc == "Decay") {
+                        if (ppdg == 13) {
+                            michel = false;         // mu- Decay: in flight
+                        }
+                        else {
+                            const double wait = r.t0 - p->t0 - p->len / units::clight;
+                            if (wait < m_p.michel_wait_min) michel = false;   // mu+ decay in flight
+                        }
+                    }
+                    if (michel) {
+                        make_node(r, Cls::michel);  // rule 5
+                        return;
+                    }
                 }
                 if (std::abs(r.pdg) == 11 && is_ionisation(r.proc) && p) {
                     if (parent_in_em) {

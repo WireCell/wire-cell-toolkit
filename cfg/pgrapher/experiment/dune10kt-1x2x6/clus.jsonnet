@@ -61,7 +61,9 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // pr_ml doc 25 sec 4.2: TruthPointLabeler kink_tracks_only (C++ default false => key omitted)
           truth_kink_tracks_only=false,
           // pr_ml doc 25 sec 4.2: TruthPointLabeler time_tie_order (C++ default false => key omitted)
-          truth_time_tie_order=false)
+          truth_time_tie_order=false,
+          // pr_ml doc 25 sec 6: PFMerger michel_capture_ke_min / michel_stopped_only (C++ default 0 / false => keys omitted)
+          truth_michel_capture_ke_min=0, truth_michel_stopped_only=false)
 
 local drift_speed = P.drift_speed;
 // pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
@@ -245,7 +247,11 @@ local clus_per_face (
                                                  [if truth_point_zero_width then 'point_zero_width']: true,
                                                  // pr_ml doc 25 sec 2.8: C++ default false => key omitted
                                                  [if truth_shared_by_pf_node then 'shared_by_pf_node']: true,
-                                                 [if truth_em_fold then 'pfmerger']: {em_fold: true},
+                                                 [if truth_em_fold || truth_michel_capture_ke_min != 0 || truth_michel_stopped_only then 'pfmerger']: {
+                                                     [if truth_em_fold then 'em_fold']: true,
+                                                     // pr_ml doc 25 sec 6: Michel knobs (C++ default 0 / false => keys omitted; pfmerger omitted when all off)
+                                                     [if truth_michel_capture_ke_min != 0 then 'michel_capture_ke_min']: truth_michel_capture_ke_min,
+                                                     [if truth_michel_stopped_only then 'michel_stopped_only']: true},
                                                  // pr_ml doc 25 sec 4: the charge time filter's width (C++ default 0 => key omitted)
                                                  [if truth_extra_smear_long != 0 then 'extra_smear_long']: truth_extra_smear_long,
                                                  // pr_ml doc 25 sec 3.2: the end flag from the point's own PF node (C++ default false => keys omitted)
