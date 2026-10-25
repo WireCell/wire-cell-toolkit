@@ -35,8 +35,11 @@ function(
     ql_po_fast = false,
     ql_dg_fast = false,
     // pr_ml doc 25 sec 7.5 (owner 2026-10-25): empty_view_unique on the per-APA Deghost (see clus.jsonnet clus_per_apa).
-    // false => key omitted => byte-identical.
-    apa_deghost_empty_view_unique = false,
+    // C++ default false; false => key omitted => the pre-fix config.
+    // PDVD PRODUCTION ON, owner flip 2026-10-25 (doc 25 sec 7.5: b15 Q/L beam
+    // metric 97/101 both ways, 52 / 123 events recover a face, Bee d25dg).
+    // -S apa_deghost_empty_view_unique=false => pre-flip config.
+    apa_deghost_empty_view_unique = true,
     // doc 31 round 3: resolve induction charge by channel IDENT on a wrapped
     // strip's continuation (PDVD 1568 U/V wires).  false => key omitted =>
     // byte-identical.  See pdvd/docs/nf_sp_img_clus/31_*.md.
