@@ -135,6 +135,15 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
         log->warn("label_dead is reserved: dead nodes are not labelled in this version");
     }
     m_assoc.keep_depos = m_label.refine;
+    if (cfg.isMember("real_assoc")) {
+        const auto& ra = cfg["real_assoc"];
+        m_real_tran_collection = get(ra, "extra_smear_tran_collection", 0.0);
+        m_real_tran_induction = get(ra, "extra_smear_tran_induction", 0.0);
+        m_real_assoc = m_real_tran_collection > 0.0 || m_real_tran_induction > 0.0;
+        if (m_real_assoc && m_assoc.extra_smear_tran > 0.0) {
+            THROW(ValueError() << errmsg{"TruthPointLabeler: real_assoc needs the primary's extra_smear_tran = 0"});
+        }
+    }
 }
 
 Configuration Truth::TruthPointLabeler::labels_meta(const TruthTable& tt, const PFResult& pf, const PointLabelSummary& sum) const
@@ -149,6 +158,10 @@ Configuration Truth::TruthPointLabeler::labels_meta(const TruthTable& tt, const 
     if (m_polyline_drift_volume_only) m["point_label"]["polyline_drift_volume_only"] = true;
     if (m_polyline_per_particle) m["point_label"]["polyline_per_particle"] = true;
     m["assoc"] = assoc_default_configuration(m_assoc);
+    if (m_real_assoc) {   // recorded only when on
+        m["real_assoc"]["extra_smear_tran_collection"] = m_real_tran_collection;
+        m["real_assoc"]["extra_smear_tran_induction"] = m_real_tran_induction;
+    }
     m["id_mode"] = m_id_mode;
     m["reco_time_offset"] = m_reco_time_offset;
     m["drift_speed"] = m_drift_speed;
@@ -231,6 +244,21 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
 
     // 2. the association (blob labels identical to BlobDepoLabel)
     auto res = depo_blob_assoc(icluster, depos, assoc, log);
+    // real_assoc: the per-plane widths decide only the blobs the primary
+    // leaves empty; `lab` feeds the point labels and the blobtruth tensor,
+    // `res` (primary) the particle flow below.
+    DepoBlobAssocResult lab_res;
+    const DepoBlobAssocResult* lab = &res;
+    if (m_real_assoc) {
+        DepoBlobAssocParams assoc2 = assoc;
+        assoc2.extra_smear_tran_collection = m_real_tran_collection;
+        assoc2.extra_smear_tran_induction = m_real_tran_induction;
+        auto res2 = depo_blob_assoc(icluster, depos, assoc2, log);
+        size_t nreal = 0;
+        lab_res = hybrid_assoc(res, res2, &nreal);
+        lab = &lab_res;
+        log->debug("call={} real_assoc: {} of {} blobs without primary charge take the per-plane labels", m_count, nreal, res.blobs.size());
+    }
 
     // 3. the particle flow with the measured visible charge per track
     std::map<int, double> q_vis;
@@ -476,7 +504,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
             }
         }
     }
-    auto sum = label_live_tree(*root, icluster, depos, res, tt, pf, polylines, m_label, position, log,
+    auto sum = label_live_tree(*root, icluster, depos, *lab, tt, pf, polylines, m_label, position, log,
                                m_polyline_per_particle ? &particles : nullptr,
                                want_ends ? &node_ends : nullptr,
                                m_label.heat_by_pf_node ? &heat_keys : nullptr);
@@ -498,7 +526,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
     tv->insert(tv->end(), tree_tens.begin(), tree_tens.end());
     const std::string bpath = m_blobtruth_path.find('%') == std::string::npos ? m_blobtruth_path
         : String::format(m_blobtruth_path, icluster->ident());
-    auto btens = blobtruth_tensors(icluster, res, bpath);
+    auto btens = blobtruth_tensors(icluster, *lab, bpath);
     tv->insert(tv->end(), btens.begin(), btens.end());
     const std::string tprefix = m_truth_prefix.find('%') == std::string::npos ? m_truth_prefix
         : String::format(m_truth_prefix, ident);

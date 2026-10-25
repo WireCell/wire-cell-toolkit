@@ -506,3 +506,46 @@ TEST_CASE("blobdepolabel per-plane transverse widths")
     Truth::DepoBlobAssocParams p3;
     CHECK_THROWS(Truth::assoc_configure(p3, on));
 }
+
+TEST_CASE("blobdepolabel hybrid_assoc: the second association fills only the blobs the primary leaves empty")
+{
+    // pr_ml doc 25 sec 7 (owner 2026-10-25): the point labels' real_assoc.  Primary = the zero-extent depos without
+    // point_zero_width (no blob gets charge); second = the same with point_zero_width (each depo fills its blob).
+    auto s = make_setup();
+    IDepo::vector dv;
+    for (const auto& d : *s.depos->depos()) {
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(d->time(), d->pos(), d->charge(), d->prior(),
+                                                       0.0, 0.0, d->id(), 0, 1.0));
+    }
+    Truth::DepoBlobAssocParams p;
+    p.speed = 1.6 * units::mm / units::us;
+    auto empty = Truth::depo_blob_assoc(s.cluster, dv, p);
+    auto p2 = p;
+    p2.point_zero_width = true;
+    auto full = Truth::depo_blob_assoc(s.cluster, dv, p2);
+    size_t n = 0;
+    auto h = Truth::hybrid_assoc(empty, full, &n);
+    size_t nfull = 0;
+    for (const auto& [vd, e] : full.blobs) if (e.q_total > 0.0) ++nfull;
+    CHECK(n == nfull);
+    CHECK(n > 0);
+    for (const auto& [vd, e] : h.blobs) {
+        CHECK(e.q_total == full.blobs.at(vd).q_total);
+        CHECK(e.by_track.size() == full.blobs.at(vd).by_track.size());
+    }
+    // a primary with charge keeps every one of its entries (bitwise), whatever the second run says
+    auto h2 = Truth::hybrid_assoc(full, empty, &n);
+    CHECK(n == 0);
+    for (const auto& [vd, e] : h2.blobs) CHECK(e.q_total == full.blobs.at(vd).q_total);
+    // and a primary with charge against a wider second run: blobs with primary charge identical, the rest from the second
+    auto pw = p2;
+    pw.extra_smear_tran_collection = 2.0 * units::mm;
+    pw.extra_smear_tran_induction = 6.0 * units::mm;
+    auto wide = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), pw);
+    auto base = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), p2);
+    auto h3 = Truth::hybrid_assoc(base, wide, &n);
+    for (const auto& [vd, e] : h3.blobs) {
+        if (base.blobs.at(vd).q_total > 0.0) CHECK(e.q_total == base.blobs.at(vd).q_total);
+        else CHECK(e.q_total == wide.blobs.at(vd).q_total);
+    }
+}

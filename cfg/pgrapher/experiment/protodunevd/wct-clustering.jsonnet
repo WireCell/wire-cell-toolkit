@@ -486,6 +486,11 @@ function(
     // C++ default 0 / false; off => keys omitted => byte-identical; unused unless truth_point_label.
     truth_michel_capture_ke_min_mev = 0,
     truth_michel_stopped_only = false,
+    // pr_ml doc 25 sec 7 (owner 2026-10-25): the point labels' real_assoc -- the per-plane SP wire-filter widths (mm, collection
+    // across the primary wires / induction in its own pitch) for the blobs the time-width association leaves empty; the particle
+    // flow and every blob with time-width charge stay as they are.  0 / 0 => key omitted => byte-identical.
+    truth_real_tran_collection_mm = 0,
+    truth_real_tran_induction_mm = 0,
 )
 
 local params_w = if wires_file == '' then params else params { files+: { wires: wires_file } };
@@ -527,7 +532,8 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         truth_end_by_pf_node=truth_end_by_pf_node, truth_end_radius=truth_end_radius_mm * wc.mm,
                         truth_end_distance=truth_end_distance, truth_heat_by_pf_node=truth_heat_by_pf_node,
                         truth_kink_tracks_only=truth_kink_tracks_only, truth_time_tie_order=truth_time_tie_order,
-                        truth_michel_capture_ke_min=truth_michel_capture_ke_min_mev * wc.MeV, truth_michel_stopped_only=truth_michel_stopped_only);
+                        truth_michel_capture_ke_min=truth_michel_capture_ke_min_mev * wc.MeV, truth_michel_stopped_only=truth_michel_stopped_only,
+                        truth_real_tran_collection=truth_real_tran_collection_mm * wc.mm, truth_real_tran_induction=truth_real_tran_induction_mm * wc.mm);
 
 // Drift-side groups: anodes 0-3 (bottom drift) and anodes 4-7 (top drift).
 // With a subset anode_indices only non-empty groups are built and the final

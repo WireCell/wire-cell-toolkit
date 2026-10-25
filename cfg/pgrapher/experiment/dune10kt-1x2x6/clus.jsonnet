@@ -63,7 +63,10 @@ function (output_dir='', runNo=1, subRunNo=1, eventNo=1,
           // pr_ml doc 25 sec 4.2: TruthPointLabeler time_tie_order (C++ default false => key omitted)
           truth_time_tie_order=false,
           // pr_ml doc 25 sec 6: PFMerger michel_capture_ke_min / michel_stopped_only (C++ default 0 / false => keys omitted)
-          truth_michel_capture_ke_min=0, truth_michel_stopped_only=false)
+          truth_michel_capture_ke_min=0, truth_michel_stopped_only=false,
+          // pr_ml doc 25 sec 7: TruthPointLabeler real_assoc, the per-plane widths for the blobs the time-width run leaves empty
+          // (C++ default absent; 0 / 0 => key omitted => byte-identical)
+          truth_real_tran_collection=0, truth_real_tran_induction=0)
 
 local drift_speed = P.drift_speed;
 // pr_ml doc 19 T6: the truth association drift speed (BlobDepoFill "speed").
@@ -264,7 +267,10 @@ local clus_per_face (
                                                  // pr_ml doc 25 sec 4.2: kinks from muons / charged hadrons only (C++ default false => key omitted)
                                                  [if truth_kink_tracks_only then 'kink_tracks_only']: true,
                                                  // pr_ml doc 25 sec 4.2: equal-time depos ordered along the track (C++ default false => key omitted)
-                                                 [if truth_time_tie_order then 'time_tie_order']: true}),
+                                                 [if truth_time_tie_order then 'time_tie_order']: true,
+                                                 // pr_ml doc 25 sec 7: real_assoc (key omitted when both widths are 0)
+                                                 [if truth_real_tran_collection != 0 || truth_real_tran_induction != 0 then 'real_assoc']: {
+                                                     extra_smear_tran_collection: truth_real_tran_collection, extra_smear_tran_induction: truth_real_tran_induction}}),
     local cluster2pct = if truth_point_label then g.intern(
         innodes = [cluster_scope_filter_live, cluster_scope_filter_dead],
         centernodes = [truth_cfo, ptb, truth_depo_src],

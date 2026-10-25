@@ -16,6 +16,9 @@
       the DepoBlobAssoc knobs of BlobDepoLabel: time_offset, nsigma,
         speed (required), pindex, id_from_prior, extra_smear_long,
         extra_smear_tran, extra_smear_tran_collection / _induction
+      real_assoc      {extra_smear_tran_collection, extra_smear_tran_induction}: a
+                      second association; only blobs the primary leaves empty
+                      take its labels (default absent = off)
       inpath          datapath pattern of the live tree ("pointtrees/%d/live")
       anode, face     the AnodePlane and face of the tree (as PointTreeBuilding)
       detector_volumes  for the time_offset / drift_speed / tick metadata
@@ -80,6 +83,17 @@ namespace WireCell::Truth {
         Configuration labels_meta(const TruthTable& tt, const PFResult& pf, const PointLabelSummary& sum) const;
 
         DepoBlobAssocParams m_assoc;
+        /// real_assoc (default off): a second association with extra
+        /// transverse widths (extra_smear_tran_collection / _induction,
+        /// the per-plane SP wire-filter widths; every other setting as
+        /// the primary's).  A blob the primary leaves without charge but
+        /// the second run fills takes the second run's entry; every other
+        /// blob, the particle flow (q_vis) and the truth table stay the
+        /// primary's (pr_ml doc 25 sec 7, owner 2026-10-25: the hybrid of
+        /// the deghoster's W9 labels for the point labels).
+        bool m_real_assoc{false};
+        double m_real_tran_collection{0.0};
+        double m_real_tran_induction{0.0};
         PFMergerParams m_pfparams;
         PointLabelParams m_label;
         std::string m_inpath{"pointtrees/%d/live"};

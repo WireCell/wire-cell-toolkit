@@ -413,6 +413,7 @@ def main():
     ap.add_argument("--event", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--truth-donor", default="", help="labelled cascade tree for blobs without a truth cloud (doc 24 sec 6)")
+    ap.add_argument("--tie-order", action="store_true", help="order equal-time depos along the track (pr_ml doc 25 sec 7; default off)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     truth = a.truth or None
@@ -426,7 +427,7 @@ def main():
     seg_rows, chk = segment_rows(tree, ev)
     res["join"] = chk
     blocks = calib_blocks(a.calib)
-    trajs, tinfo = build_trajectories(a.depos, truth, a.wires, a.depo_toff_us, a.reco_toff_us, a.speed_mmus)
+    trajs, tinfo = build_trajectories(a.depos, truth, a.wires, a.depo_toff_us, a.reco_toff_us, a.speed_mmus, tie_order_on=a.tie_order)
     res.update(tinfo)
     ptrajs = {}
     for k, tr in trajs.items():

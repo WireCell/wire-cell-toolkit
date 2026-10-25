@@ -170,6 +170,23 @@ double Truth::induction_sin_theta(const IAnodeFace::pointer& face, int pindex, d
     return first;
 }
 
+Truth::DepoBlobAssocResult Truth::hybrid_assoc(const DepoBlobAssocResult& primary,
+                                              const DepoBlobAssocResult& second, size_t* nreal)
+{
+    DepoBlobAssocResult out = primary;
+    size_t n = 0;
+    for (auto& [vdesc, e] : out.blobs) {
+        if (e.q_total > 0.0) continue;
+        auto it = second.blobs.find(vdesc);
+        if (it != second.blobs.end() && it->second.q_total > 0.0) {
+            e = it->second;
+            ++n;
+        }
+    }
+    if (nreal) *nreal = n;
+    return out;
+}
+
 ICluster::pointer Truth::filled_cluster(const ICluster::pointer& icluster,
                                         const DepoBlobAssocResult& res)
 {

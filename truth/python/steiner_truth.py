@@ -227,7 +227,36 @@ class KeyTraj:
         return d, s, t, u.astype(int)
 
 
-def build_trajectories(depos, truth, wires, depo_toff_us, reco_toff_us, speed):
+def tie_order(t, V):
+    """Indices that order one particle's time-sorted vertices V (N, 3) with times t, equal-time runs ordered along the track: the
+    rule of DepoPolyline.h order_time_ties (toolkit 735b0fc6, time_tie_order), ported exactly -- each run of equal times is sorted
+    (stably) by its projection on centroid(next run) - centroid(previous run), its own centroid standing in at either end; a lone
+    run uses the direction from its first item to its farthest.  The depo file stores times as float32, so a ms-scale particle's
+    steps collapse onto few values (pr_ml doc 25 sec 7)."""
+    n = len(t)
+    idx = np.arange(n)
+    if n < 2:
+        return idx
+    beg = np.r_[0, np.flatnonzero(np.diff(t) != 0) + 1, n]
+    nr = len(beg) - 1
+    if nr == n:
+        return idx
+    cen = np.array([V[beg[r]:beg[r + 1]].mean(0) for r in range(nr)])
+    out = idx.copy()
+    for r in range(nr):
+        a, b = beg[r], beg[r + 1]
+        if b - a < 2:
+            continue
+        d = (cen[r + 1] if r + 1 < nr else cen[r]) - (cen[r - 1] if r > 0 else cen[r])
+        if not np.linalg.norm(d) > 0:
+            far = a + int(np.argmax(np.linalg.norm(V[a:b] - V[a], axis=1)))
+            d = V[far] - V[a]
+        proj = (V[a:b] - cen[r]) @ d
+        out[a:b] = a + np.argsort(proj, kind="stable")
+    return out
+
+
+def build_trajectories(depos, truth, wires, depo_toff_us, reco_toff_us, speed, tie_order_on=False):
     D, I = load_depos(depos)
     n = len(D)
     act = np.flatnonzero(I[:, 2] == 0)
@@ -271,6 +300,8 @@ def build_trajectories(depos, truth, wires, depo_toff_us, reco_toff_us, speed):
     units = {}
     for s0, e0 in zip(st, en):
         V = Pg[s0:e0]
+        if tie_order_on:   # --tie-order (default off): equal-time runs along the track, as the point labeler's time_tie_order
+            V = V[tie_order(tk[s0:e0], V)]
         keep = np.r_[True, np.any(np.diff(V, axis=0) != 0, axis=1)]   # coincident consecutive vertices merged
         units.setdefault(int(tg[s0]), []).append((int(og[s0]), float(tk[s0]), Polyline(V[keep])))
     out = {k: KeyTraj(k, [u for _, _, u in us], [o for o, _, _ in us], [t for _, t, _ in us]) for k, us in units.items()}
@@ -437,6 +468,7 @@ def main():
     ap.add_argument("--tau-on-pitch", type=float, default=None, help="tau_on in wire pitches instead (doc 12 sec 4.1: 2)")
     ap.add_argument("--tau-off-pitch", type=float, default=None, help="tau_off in wire pitches instead (doc 12: 5)")
     ap.add_argument("--d-cap-mm", type=float, default=25.0, help="the C++ labeler's d_traj cap (cross-check)")
+    ap.add_argument("--tie-order", action="store_true", help="order equal-time depos along the track (pr_ml doc 25 sec 7; default off)")
     ap.add_argument("--event", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -451,7 +483,7 @@ def main():
     except RuntimeError as err:   # an event whose imaging made no blob (R2: PDHD beam2, doc 20)
         json.dump({"event": a.event, "error": str(err)}, open(os.path.join(a.out, a.event + ".json"), "w"), indent=1)
         print(a.event, "no tree:", err); return
-    trajs, tinfo = build_trajectories(a.depos, truth, a.wires, a.depo_toff_us, a.reco_toff_us, a.speed_mmus)
+    trajs, tinfo = build_trajectories(a.depos, truth, a.wires, a.depo_toff_us, a.reco_toff_us, a.speed_mmus, tie_order_on=a.tie_order)
     # edge classes and vertices at the G4-particle level (doc 12 sec 4.1: shower daughters keep their own id so
     # fragment-level labels exist); the merged track key of each particle is kept beside it
     ptrajs, pkey = {}, {}

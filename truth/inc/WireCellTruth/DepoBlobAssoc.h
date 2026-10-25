@@ -137,6 +137,14 @@ namespace WireCell::Truth {
     /// (DepoBlobAssocParams::extra_smear_tran_induction).
     double induction_sin_theta(const IAnodeFace::pointer& face, int pindex, double tol = 1e-3);
 
+    /// The hybrid of two associations of the same cluster and depos: a
+    /// copy of `primary` in which every blob without primary charge
+    /// (q_total <= 0) takes `second`'s entry when that one has charge.
+    /// nreal (optional) receives the number of blobs so taken.
+    DepoBlobAssocResult hybrid_assoc(const DepoBlobAssocResult& primary,
+                                     const DepoBlobAssocResult& second,
+                                     size_t* nreal = nullptr);
+
     /// A copy of the cluster with each blob's value replaced by its
     /// q_total and uncertainty 0 -- what BlobDepoFill emits.
     ICluster::pointer filled_cluster(const ICluster::pointer& cluster,
