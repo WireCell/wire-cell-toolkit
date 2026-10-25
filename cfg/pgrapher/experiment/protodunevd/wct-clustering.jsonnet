@@ -443,6 +443,10 @@ function(
     truth_point_label = false,
     truth_depos = '',
     truth_time_offset_us = 0,
+    // pr_ml doc 25 sec 7 (owner 2026-10-24, PDVD re-simulated at 1.48073): the truth association drift speed in mm/us
+    // (BlobDepoFill / DepoBlobAssoc "speed"); null => clus.jsonnet's default (params lar.drift_speed, 1.568) =>
+    // byte-identical compiled config.  Set it to the speed the simulation drifted with.
+    truth_speed_mmus = null,
     truth_table = '',
     // doc 20 sec 6.1: fold larg4's negative EM-daughter ids to the ancestor (C++ default false => key omitted => byte-identical)
     truth_fold_negative_ids = false,
@@ -514,6 +518,7 @@ local clus_maker = clus(output_dir=output_dir, runNo=run, subRunNo=subrun, event
                         cluster_id_order=clus_cluster_id_order,
                         truth_point_label=truth_point_label, truth_depos=truth_depos,
                         truth_time_offset=truth_time_offset_us * wc.us, truth_table=truth_table,
+                        truth_speed=if truth_speed_mmus == null then null else truth_speed_mmus * wc.mm / wc.us,
                         truth_fold_negative_ids=truth_fold_negative_ids,
                         truth_polyline_drift_volume_only=truth_polyline_drift_volume_only, truth_polyline_per_particle=truth_polyline_per_particle,
                         truth_point_zero_width=truth_point_zero_width,
