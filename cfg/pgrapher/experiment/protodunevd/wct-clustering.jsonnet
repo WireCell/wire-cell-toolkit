@@ -34,6 +34,9 @@ function(
     // byte-identical compiled config (proof: doc pdvd/28 sec 12).
     ql_po_fast = false,
     ql_dg_fast = false,
+    // pr_ml doc 25 sec 7.5 (owner 2026-10-25): empty_view_unique on the per-APA Deghost (see clus.jsonnet clus_per_apa).
+    // false => key omitted => byte-identical.
+    apa_deghost_empty_view_unique = false,
     // doc 31 round 3: resolve induction charge by channel IDENT on a wrapped
     // strip's continuation (PDVD 1568 U/V wires).  false => key omitted =>
     // byte-identical.  See pdvd/docs/nf_sp_img_clus/31_*.md.
@@ -571,7 +574,7 @@ local group_pipe(gd) =
     local n = std.length(gd.anodes);
     local actives = [cluster_source("%s/clusters-apa-anode%d-ms-active.tar.gz"%[input, a.data.ident]) for a in gd.anodes];
     local maskeds = [cluster_source("%s/clusters-apa-anode%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in gd.anodes];
-    local apa_pipes = [clus_maker.per_apa(gd.anodes[i], dump=false, po_fast=ql_po_fast, dg_fast=ql_dg_fast) for i in std.range(0, n - 1)];
+    local apa_pipes = [clus_maker.per_apa(gd.anodes[i], dump=false, po_fast=ql_po_fast, dg_fast=ql_dg_fast, dg_empty_view_unique=apa_deghost_empty_view_unique) for i in std.range(0, n - 1)];
     local pg = clus_maker.per_group(gd.anodes, gd.name, dump=false, dg_fast=ql_dg_fast,
                                     save_assoc_id=clus_save_assoc_id);
     g.intern(

@@ -79,6 +79,9 @@ function(
     // NOT byte-identical: it changes the pctree, hence clustering and Q/L
     // output.  Pass false here to reproduce a pre-2026-09-06 run.
     wrapped_channel_charge = true,
+    // pr_ml doc 25 sec 7.5 (owner 2026-10-25): empty_view_unique on the per-APA Deghost (see clus.jsonnet clus_per_apa).
+    // false => key omitted => byte-identical.
+    apa_deghost_empty_view_unique = false,
     // doc pdhd/06: record what clustering_isolated MERGED (the perblob arrays
     // isolated / assoc_cluster_id / assoc_cluster_main) so the PR job's
     // unmerge_assoc visitor can undo it.  PDHD runs cm.isolated() at the
@@ -211,7 +214,7 @@ local group_pipe(gd) =
     local n = std.length(gd.anodes);
     local actives = [cluster_source("%s/clusters-apa-apa%d-ms-active.tar.gz"%[input, a.data.ident]) for a in gd.anodes];
     local maskeds = [cluster_source("%s/clusters-apa-apa%d-ms-masked.tar.gz"%[input, a.data.ident]) for a in gd.anodes];
-    local apa_pipes = [clus_maker.per_apa(gd.anodes[i], dump=false, wrapped_channel_charge=wrapped_channel_charge) for i in std.range(0, n - 1)];
+    local apa_pipes = [clus_maker.per_apa(gd.anodes[i], dump=false, wrapped_channel_charge=wrapped_channel_charge, dg_empty_view_unique=apa_deghost_empty_view_unique) for i in std.range(0, n - 1)];
     local pg = clus_maker.per_group(gd.anodes, gd.name, gd.face, dump=false,
                                     save_assoc_id=clus_save_assoc_id);
     g.intern(

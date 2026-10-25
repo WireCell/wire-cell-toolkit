@@ -524,6 +524,11 @@ local clus_per_apa (
     // config.
     po_fast = false,
     dg_fast = false,
+    // pr_ml doc 25 sec 7.5 (owner 2026-10-25): the per-APA Deghost with empty_view_unique (C++ default false): a point whose
+    // per-(face, apa) 2-D view holds no other cluster yet counts as unique, not as a bogus overlap at distance -1.  Off, the
+    // per-APA stage deletes every cluster of a face that is not yet seeded (PDVD: the anode's two faces are the y-halves of one
+    // CRP; R3 cosmics lose >= 80 % of 42 faces in 36 / 50 events).  false => key omitted => byte-identical compiled config.
+    dg_empty_view_unique = false,
     ) =
 {
     local cfout_live = g.pnode({
@@ -564,7 +569,8 @@ local clus_per_apa (
                                        coords=common_coords),
     local cm_pipeline = [
         // dg_fast / po_fast: see the clus_per_apa signature (doc pdvd/28 round 2).
-        cm.deghost(graph_name=(if dg_fast then 'ctpc_fast' else null)),
+        cm.deghost(graph_name=(if dg_fast then 'ctpc_fast' else null),
+                   empty_view_unique=(if dg_empty_view_unique then true else null)),
         cm.protect_overclustering(busy_num_threshold=(if po_fast then 200 else null)),
     ],
 
@@ -1059,7 +1065,7 @@ local clus_all_tpc (
 {
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback),
-    per_apa(anode, dump=true, po_fast=false, dg_fast=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast),
+    per_apa(anode, dump=true, po_fast=false, dg_fast=false, dg_empty_view_unique=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, stepped_center_fallback=stepped_center_fallback, po_fast=po_fast, dg_fast=dg_fast, dg_empty_view_unique=dg_empty_view_unique),
     per_group(anodes, group_name, dump=true, dg_fast=false, save_assoc_id=false) :: clus_per_group(anodes, group_name, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, dg_fast=dg_fast, save_assoc_id=save_assoc_id),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, cc_tip_touch_cut=null, cc_tip_touch_angle_cut=null, cc_cathode_x_cut=5*wc.cm, cc_drift_cut=8*wc.cm, cc_dis_cut=5*wc.cm, cc_crosser_conn_relax=null, cc_crosser_pca_angle=null, cc_cathode_band_dis=null, bee_img_per_side=false, tensor_outname='', save_assoc_id=false, bee_beam_window_us=null, bee_flash_cluster_anodes=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, cc_tip_touch_cut=cc_tip_touch_cut, cc_tip_touch_angle_cut=cc_tip_touch_angle_cut, cc_cathode_x_cut=cc_cathode_x_cut, cc_drift_cut=cc_drift_cut, cc_dis_cut=cc_dis_cut, cc_crosser_conn_relax=cc_crosser_conn_relax, cc_crosser_pca_angle=cc_crosser_pca_angle, cc_cathode_band_dis=cc_cathode_band_dis, bee_img_per_side=bee_img_per_side, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id, bee_beam_window_us=bee_beam_window_us, bee_flash_cluster_anodes=bee_flash_cluster_anodes),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can

@@ -493,6 +493,10 @@ local clus_per_apa (
     // off => byte-identical compiled config.  DEFAULT FALSE: turning it on
     // changes the pctree the Q/L job writes, hence production Q/L output.
     wrapped_channel_charge = true,
+    // pr_ml doc 25 sec 7.5 (owner 2026-10-25): the per-APA Deghost with empty_view_unique (C++ default false): a point whose
+    // per-(face, apa) 2-D view holds no other cluster yet counts as unique, not as a bogus overlap at distance -1.  Off, the
+    // per-APA stage deletes every cluster of a face that is not yet seeded (PDHD R3: no face lost; the knob mirrors PDVD's).  false => key omitted => byte-identical compiled config.
+    dg_empty_view_unique = false,
     ) =
 {
     local cfout_live = g.pnode({
@@ -532,7 +536,7 @@ local clus_per_apa (
                                        pc_transforms=pcts,
                                        coords=common_coords),
     local cm_pipeline = [
-        cm.deghost(),
+        cm.deghost(empty_view_unique=(if dg_empty_view_unique then true else null)),
         cm.protect_overclustering(),
     ],
 
@@ -991,7 +995,7 @@ local clus_all_tpc (
 {
     local bee_dir = if output_dir == '' then 'data' else output_dir,
     per_face(anode, face=0, dump=true, wrapped_channel_charge=true) :: clus_per_face(anode, face=face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
-    per_apa(anode, dump=true, wrapped_channel_charge=true) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge),
+    per_apa(anode, dump=true, wrapped_channel_charge=true, dg_empty_view_unique=false) :: clus_per_apa(anode, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, wrapped_channel_charge=wrapped_channel_charge, dg_empty_view_unique=dg_empty_view_unique),
     per_group(anodes, group_name, face, dump=true, save_assoc_id=false) :: clus_per_group(anodes, group_name, face, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_assoc_id=save_assoc_id),
     all_tpc(anodes, ngroups=2, dump=true, save_opflash=false, premerged=false, tensor_outname='', save_assoc_id=false) :: clus_all_tpc(anodes, ngroups=ngroups, dump=dump, bee_dir=bee_dir, runNo=runNo, subRunNo=subRunNo, eventNo=eventNo, save_opflash=save_opflash, premerged=premerged, tensor_outname=tensor_outname, save_assoc_id=save_assoc_id),
     // Expose the DetectorVolumes node builder so the Q/L matching graph can
