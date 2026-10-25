@@ -15,7 +15,7 @@
 
       the DepoBlobAssoc knobs of BlobDepoLabel: time_offset, nsigma,
         speed (required), pindex, id_from_prior, extra_smear_long,
-        extra_smear_tran
+        extra_smear_tran, extra_smear_tran_collection / _induction
       inpath          datapath pattern of the live tree ("pointtrees/%d/live")
       anode, face     the AnodePlane and face of the tree (as PointTreeBuilding)
       detector_volumes  for the time_offset / drift_speed / tick metadata

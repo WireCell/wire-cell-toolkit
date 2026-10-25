@@ -22,6 +22,7 @@
 #ifndef WIRECELLTRUTH_DEPOBLOBASSOC
 #define WIRECELLTRUTH_DEPOBLOBASSOC
 
+#include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/ICluster.h"
 #include "WireCellIface/IDepo.h"
 #include "WireCellUtil/Logging.h"
@@ -49,6 +50,22 @@ namespace WireCell::Truth {
         /// which case the integration is exactly BlobDepoFill's.
         double extra_smear_long{0.0};
         double extra_smear_tran{0.0};
+        /// Per-plane transverse widths (in distance, each in its own
+        /// plane's pitch direction), e.g. the collection and induction
+        /// wire-filter widths of the signal processing (wcfm doc 53
+        /// sec 10.1 W9, owner 2026-10-24).  collection: added in
+        /// quadrature to the transverse extent across the primary
+        /// (pindex) plane's wires, where the depo is diced.  induction:
+        /// across the other planes' wires; it enters along the primary
+        /// wire, where those planes' wire spans bound the blob, as
+        /// induction / |sin theta|, theta the angle between the other
+        /// plane's wires and the primary wires (from the face's planes;
+        /// the two other planes must agree, else ValueError).  The
+        /// depo's own transverse extent (diffusion, isotropic) is not
+        /// projected.  0 / 0 = off: the integration is unchanged.  Not
+        /// combinable with extra_smear_tran (ValueError).
+        double extra_smear_tran_collection{0.0};
+        double extra_smear_tran_induction{0.0};
         /// Optional map from the key depo's id() to the track key
         /// (Stage A index mode: id = SimEnergyDeposit index, the map
         /// is the truth file's sed_ids trackid column).  An id outside
@@ -112,6 +129,13 @@ namespace WireCell::Truth {
                                         const IDepo::vector& depos,
                                         const DepoBlobAssocParams& params,
                                         Log::logptr_t log = nullptr);
+
+    /// |sin theta| between the wires of the primary plane (pindex) and
+    /// those of the face's other wire planes, which must agree within
+    /// tol (relative), else ValueError: the factor that turns an
+    /// induction-plane pitch width into a width along the primary wire
+    /// (DepoBlobAssocParams::extra_smear_tran_induction).
+    double induction_sin_theta(const IAnodeFace::pointer& face, int pindex, double tol = 1e-3);
 
     /// A copy of the cluster with each blob's value replaced by its
     /// q_total and uncertainty 0 -- what BlobDepoFill emits.

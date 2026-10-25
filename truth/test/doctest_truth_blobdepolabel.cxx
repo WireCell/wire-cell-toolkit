@@ -425,3 +425,84 @@ TEST_CASE("blobdepolabel gives a zero-extent depo to the blob holding it when as
     CHECK(p2.point_zero_width);
     CHECK(Truth::assoc_default_configuration(p2)["point_zero_width"].asBool());
 }
+
+TEST_CASE("blobdepolabel per-plane transverse widths")
+{
+    // wcfm doc 53 sec 10.1 W9 (owner 2026-10-24): the collection width across
+    // the primary wires, the induction width along them through the angle of
+    // the induction wires.
+    auto s = make_setup();
+    Truth::DepoBlobAssocParams p0;
+    p0.speed = 1.6 * units::mm / units::us;
+
+    // the factor from the face: dune10kt-1x2x6 induction wires at ~35.7 degrees to the vertical collection wires
+    const double sin_theta = Truth::induction_sin_theta(s.face, p0.pindex);
+    CHECK(sin_theta == doctest::Approx(std::sin(35.7 * M_PI / 180.0)).epsilon(0.005));
+
+    // collection c and induction c * |sin theta| is the single width c of extra_smear_tran
+    const double c = 2.0 * units::mm;
+    auto pt = p0;
+    pt.extra_smear_tran = c;
+    auto pp = p0;
+    pp.extra_smear_tran_collection = c;
+    pp.extra_smear_tran_induction = c * sin_theta;
+    auto rt = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), pt);
+    auto rp = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), pp);
+    REQUIRE(rt.blobs.size() == rp.blobs.size());
+    double tot = 0;
+    for (const auto& [vd, e] : rt.blobs) {
+        CHECK(rp.blobs.at(vd).q_total == doctest::Approx(e.q_total).epsilon(1e-12));
+        tot += e.q_total;
+    }
+    CHECK(tot > 0.0);
+
+    // a wider induction width spreads the charge along the wire: per-track sums stay consistent
+    pp.extra_smear_tran_induction = 3.0 * c;
+    auto rw = Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), pp);
+    double sumw = 0, totw = 0;
+    for (const auto& [vd, e] : rw.blobs) {
+        totw += e.q_total;
+        for (const auto& [tid, qe] : e.by_track) sumw += qe.first;
+    }
+    CHECK(sumw == doctest::Approx(totw).epsilon(1e-9));
+    CHECK(totw > 0.0);
+    CHECK(totw <= std::abs(s.qa) + std::abs(s.qb) + 1e-6);
+
+    // exclusive with extra_smear_tran
+    auto px = pp;
+    px.extra_smear_tran = c;
+    CHECK_THROWS(Truth::depo_blob_assoc(s.cluster, *s.depos->depos(), px));
+
+    // zero-extent depos with only the induction width: a point across the wires (dice), a Gaussian along them
+    IDepo::vector dv;
+    for (const auto& d : *s.depos->depos()) {
+        dv.push_back(std::make_shared<Aux::SimpleDepo>(d->time(), d->pos(), d->charge(), d->prior(),
+                                                       0.0, 0.0, d->id(), 0, 1.0));
+    }
+    auto pz = p0;
+    pz.point_zero_width = true;
+    pz.extra_smear_tran_induction = c;
+    auto rz = Truth::depo_blob_assoc(s.cluster, dv, pz);
+    double totz = 0;
+    for (const auto& [vd, e] : rz.blobs) totz += e.q_total;
+    CHECK(totz > 0.0);
+    CHECK(totz <= std::abs(s.qa) + std::abs(s.qb) + 1e-6);
+
+    // the keys round-trip and are absent from the default configuration
+    auto cfg = Truth::assoc_default_configuration(Truth::DepoBlobAssocParams{});
+    CHECK(cfg["extra_smear_tran_collection"].isNull());
+    CHECK(cfg["extra_smear_tran_induction"].isNull());
+    Truth::DepoBlobAssocParams p2;
+    Configuration on;
+    on["speed"] = 1.6 * units::mm / units::us;   // required
+    on["extra_smear_tran_collection"] = 0.5;
+    on["extra_smear_tran_induction"] = 3.5;
+    Truth::assoc_configure(p2, on);
+    CHECK(p2.extra_smear_tran_collection == 0.5);
+    CHECK(p2.extra_smear_tran_induction == 3.5);
+    auto cfg2 = Truth::assoc_default_configuration(p2);
+    CHECK(cfg2["extra_smear_tran_induction"].asDouble() == 3.5);
+    on["extra_smear_tran"] = 1.0;
+    Truth::DepoBlobAssocParams p3;
+    CHECK_THROWS(Truth::assoc_configure(p3, on));
+}

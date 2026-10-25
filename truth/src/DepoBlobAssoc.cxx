@@ -147,6 +147,29 @@ slice_and_dice_depos(const Binning& sbins,       // run over s nodes
     return gr;
 }
 
+double Truth::induction_sin_theta(const IAnodeFace::pointer& face, int pindex, double tol)
+{
+    const auto planes = face->planes();
+    const Vector& wire = planes.at(pindex)->pimpos()->axis(1);
+    double first = -1.0;
+    for (size_t ip = 0; ip < planes.size(); ++ip) {
+        if ((int)ip == pindex) continue;
+        // |sin| of the angle between the wires = |primary wire . other pitch|
+        const double s = std::abs(wire.dot(planes[ip]->pimpos()->axis(2)));
+        if (first < 0) {
+            first = s;
+        }
+        else if (std::abs(s - first) > tol * first) {
+            THROW(ValueError() << errmsg{"DepoBlobAssoc: induction planes at different angles to the primary wires; "
+                                         "a single along-wire induction width does not apply"});
+        }
+    }
+    if (!(first > 0)) {
+        THROW(ValueError() << errmsg{"DepoBlobAssoc: no induction plane at an angle to the primary wires"});
+    }
+    return first;
+}
+
 ICluster::pointer Truth::filled_cluster(const ICluster::pointer& icluster,
                                         const DepoBlobAssocResult& res)
 {
@@ -181,6 +204,10 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
 {
     if (params.speed <= 0.0) {
         THROW(ValueError() << errmsg{"DepoBlobAssoc: no speed provided"});
+    }
+    const bool per_plane = params.extra_smear_tran_collection > 0.0 || params.extra_smear_tran_induction > 0.0;
+    if (per_plane && params.extra_smear_tran > 0.0) {
+        THROW(ValueError() << errmsg{"DepoBlobAssoc: extra_smear_tran and the per-plane transverse widths are exclusive"});
     }
     if (!log) {
         log = Log::logger("truth");
@@ -232,8 +259,19 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
         // pre-calculate their central position in the primary wire
         // plane "pimpos" coordinate system, their track key and the
         // (smeared) transverse sigma.
+        // With the per-plane widths: the induction width along the
+        // primary wire, through the angle of the other planes' wires.
+        double along_extra = 0.0;
+        if (per_plane) {
+            const double sin_theta = induction_sin_theta(ianodeface, params.pindex);
+            along_extra = params.extra_smear_tran_induction / sin_theta;
+            log->debug("depo_blob_assoc: face={} per-plane widths: collection {} mm across the primary wires, induction {} mm "
+                       "-> {} mm along them (|sin theta| {})", ianodeface->ident(), params.extra_smear_tran_collection / units::mm,
+                       params.extra_smear_tran_induction / units::mm, along_extra / units::mm, sin_theta);
+        }
+
         IDepo::vector depos;
-        std::vector<double> dwcenter, tran_sigma, key_energy;
+        std::vector<double> dwcenter, tran_sigma, along_sigma, key_energy;
         std::vector<int> key_id;
         auto mydepos = sensitive(alldepos, ianodeface);
         const int dirx = ianodeface->dirx();
@@ -246,7 +284,13 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
             depos.push_back(maybe);
             res.q_depos += std::abs(maybe->charge());
             dwcenter.push_back(pimpos->transform(maybe->pos())[1]);
-            tran_sigma.push_back(smeared(maybe->extent_tran(), params.extra_smear_tran));
+            if (per_plane) {
+                tran_sigma.push_back(smeared(maybe->extent_tran(), params.extra_smear_tran_collection));
+                along_sigma.push_back(smeared(maybe->extent_tran(), along_extra));
+            }
+            else {
+                tran_sigma.push_back(smeared(maybe->extent_tran(), params.extra_smear_tran));
+            }
             const IDepo* src = maybe.get();
             if (params.id_from_prior && maybe->prior()) {
                 src = maybe->prior().get();
@@ -329,7 +373,8 @@ Truth::depo_blob_assoc(const ICluster::pointer& icluster,
                 const auto didx = gr[ddesc].idx;
                 const auto& idepo = depos[didx];
                 const double depo_center = dwcenter[didx];
-                const double depo_sigma = tran_sigma[didx];
+                // the along-wire width: the dice width unless per-plane
+                const double depo_sigma = per_plane ? along_sigma[didx] : tran_sigma[didx];
                 const double depo_min = depo_center - depo_sigma*params.nsigma;
                 const double depo_max = depo_center + depo_sigma*params.nsigma;
                 const double depo_q = std::abs(idepo->charge());

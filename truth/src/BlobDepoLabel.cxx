@@ -30,6 +30,12 @@ Configuration Truth::assoc_default_configuration(const DepoBlobAssocParams& p)
     // exactly BlobDepoFill's and the filled cluster is bit-identical.
     cfg["extra_smear_long"] = p.extra_smear_long;
     cfg["extra_smear_tran"] = p.extra_smear_tran;
+    // Per-plane transverse widths (collection across the primary wires,
+    // induction across the other planes' wires; see DepoBlobAssocParams).
+    // Written only when on, as point_zero_width, so labels_meta keeps
+    // its bytes with the knob off.
+    if (p.extra_smear_tran_collection > 0.0) cfg["extra_smear_tran_collection"] = p.extra_smear_tran_collection;
+    if (p.extra_smear_tran_induction > 0.0) cfg["extra_smear_tran_induction"] = p.extra_smear_tran_induction;
     // Record which depos fed each blob (per-point refinement in
     // TruthPointLabeler).  Bookkeeping only; off by default.
     cfg["keep_depos"] = p.keep_depos;
@@ -58,6 +64,11 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.id_from_prior = get(cfg, "id_from_prior", p.id_from_prior);
     p.extra_smear_long = get(cfg, "extra_smear_long", p.extra_smear_long);
     p.extra_smear_tran = get(cfg, "extra_smear_tran", p.extra_smear_tran);
+    p.extra_smear_tran_collection = get(cfg, "extra_smear_tran_collection", p.extra_smear_tran_collection);
+    p.extra_smear_tran_induction = get(cfg, "extra_smear_tran_induction", p.extra_smear_tran_induction);
+    if ((p.extra_smear_tran_collection > 0.0 || p.extra_smear_tran_induction > 0.0) && p.extra_smear_tran > 0.0) {
+        THROW(ValueError() << errmsg{"extra_smear_tran and the per-plane transverse widths are exclusive"});
+    }
     p.keep_depos = get(cfg, "keep_depos", p.keep_depos);
     p.fold_negative_ids = get(cfg, "fold_negative_ids", p.fold_negative_ids);
     p.point_zero_width = get(cfg, "point_zero_width", p.point_zero_width);
