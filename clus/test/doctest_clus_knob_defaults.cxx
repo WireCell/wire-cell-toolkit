@@ -87,6 +87,7 @@ TEST_CASE("clus knob defaults: group-mode calib-dump fixes are OFF (sbnd_xin/doc
 {
     auto mabc = defaults_of("MultiAlgBlobClustering");
     CHECK_KNOB_BOOL(mabc, "reset_shower_ids_per_event", false);
+    CHECK_KNOB_BOOL(mabc, "fill_isolated", false);           // pr_ml doc 26 sec 6
     auto dump = defaults_of("PrDisplayDump");
     CHECK_KNOB_BOOL(dump, "rse_from_ensemble", false);
 }

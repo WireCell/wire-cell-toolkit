@@ -677,7 +677,7 @@ local clus_per_face(anode, face, dump, output_dir, runNo, subRunNo, eventNo, per
 // all-APA clustering + Bee in SCE true space (x_sce) instead of the T0-corrected
 // reco scope (x_t0cor).  Both SBND realities currently set use_sce=false (see
 // the reco table in the tail function), so this is a no-op for our chain.
-local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_bee=true, bee_sink=null, premerged=false, rse_from_ident=false, rse_from_metadata=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false, evt_subdir='') = {
+local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_bee=true, bee_sink=null, premerged=false, rse_from_ident=false, rse_from_metadata=false, event_from_ident=false, rse_map={}, pos_offset_on=true, tensor_outname='', save_real_cluster_id=false, trace_bee=false, save_assoc_cluster_id=false, real_cluster_id_global=null, cathode_rescue_on=true, cathode_rescue_unmatched=true, adopt_nu_fragments=false, save_bundle_main_provenance=false, rescue_allow_in_beam_far=true, rescue_geom_first=true, rescue_pierce_test=true, rescue_pierce_cut=null, rescue_dest_beam_for_new=true, rescue_beam_main_only=true, bee_flash_pred_min=null, use_sce=false, reality='data', eb_fast=false, evt_subdir='', fill_isolated=false) = {
     local nanodes = std.length(anodes),
     local pcmerging = g.pnode({
         type: 'PointTreeMerging',
@@ -853,6 +853,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
             // assoc_cluster_id/assoc_cluster_main survive into the PR job's
             // pctree tarball.  C++ default false; key omitted when off.
             [if save_assoc_cluster_id then 'save_assoc_cluster_id']: true,
+            // Before the pctree dump, a cluster with a per-blob PC but no 'isolated' gets all -1 (ExamineBundles writes it
+            // on in-scope clusters only, which threw 'missing keys in append: isolated' on SBND MPV/MPR; pr_ml doc 26 sec 6).
+            // C++ default false.  Key omitted when off => byte-identical pre-fix config and tarball.
+            [if fill_isolated then 'fill_isolated']: true,
             // Re-stamp real_cluster_id at save time into ONE globally unique
             // ident epoch (doc 53).  Without it the array mixes the numbering
             // examine_bundles recorded with the numbering enumerate_idents has
@@ -1079,7 +1083,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
             rescue_allow_in_beam_far=true, rescue_geom_first=true,
             rescue_pierce_test=true, rescue_pierce_cut=null,
             rescue_dest_beam_for_new=true, rescue_beam_main_only=true,
-            bee_flash_pred_min=null, eb_fast=false)::
+            bee_flash_pred_min=null, eb_fast=false, fill_isolated=false)::
         // Clustering + matching ONLY (all-APA MABC).  The follow-up PR tagger
         // pass (pr() below) and the wclsTensorSetLabeler are wired by the entry
         // configuration, not here -- see the note in clus_all_apa.
@@ -1088,6 +1092,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                      bee_sink=bee_sink, premerged=premerged, rse_from_ident=rse_from_ident, rse_from_metadata=rse_from_metadata, event_from_ident=event_from_ident, rse_map=rse_map, pos_offset_on=pos_offset_on,
                      tensor_outname=tensor_outname, save_real_cluster_id=save_real_cluster_id,
                      save_assoc_cluster_id=save_assoc_cluster_id,
+                     fill_isolated=fill_isolated,
                      real_cluster_id_global=real_cluster_id_global,
                      trace_bee=trace_bee, cathode_rescue_on=cathode_rescue_on,
                      cathode_rescue_unmatched=cathode_rescue_unmatched,

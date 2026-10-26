@@ -726,6 +726,14 @@ namespace WireCell::Clus {
         // ident, and main=1 -- an ungrouped cluster IS a main, which is the
         // sentinel the un-merge relies on to keep cathode crossers whole.
         bool m_save_assoc_cluster_id{false};
+        // fill_isolated (default false = byte-identical legacy tarball): before
+        // the pctree dump, a cluster with a "perblob" PC but no "isolated" gets
+        // all -1 (fill_isolated_before_serialize), so the per-blob key sets are
+        // homogeneous -- ClusteringExamineBundles writes "isolated" only on
+        // in-scope clusters, which threw "missing keys in append: isolated" on
+        // SBND MPV/MPR mpvmpr_0 and silently drops the array in the opposite
+        // order (wcp-porting-img pr_ml/docs/26 sec 6, owner 2026-10-26).
+        bool m_fill_isolated{false};
         // 1 = legacy bare-array channel-deadarea-*.json (default; back-compat for
         //     single-TPC viewers like the original Bee).  2 = wire-cell-bee3 v2
         //     wrapper {"version":2,"tpc":<apa>,"polygons":[...]} that places the

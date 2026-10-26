@@ -96,6 +96,10 @@ function(
     // '' keeps the all-APA stage's default sink; a path writes the post-clustering
     // point-cloud tree there (all_apa tensor_outname, as the Q/L job's save_tensors).
     save_tensors = '',
+    // pr_ml doc 26 sec 6 (owner 2026-10-26): before the all-APA pctree dump, a cluster with a per-blob PC but no 'isolated'
+    // gets all -1 (MABC fill_isolated; SBND MPV/MPR threw 'missing keys in append: isolated').  C++ default false => key
+    // omitted => byte-identical compiled config.
+    fill_isolated = false,
 )
     // Build params inside function so all physics values are TLAs.
     local base = import 'pgrapher/experiment/sbnd/simparams.jsonnet';
@@ -158,7 +162,7 @@ function(
         ]
     ) for n in std.range(0, nanodes - 1)];
 
-    local clus_all = clus_maker.all_apa(anodes, tensor_outname=save_tensors);
+    local clus_all = clus_maker.all_apa(anodes, tensor_outname=save_tensors, fill_isolated=fill_isolated);
 
     local graph = g.intern(
         innodes=   img_clus_pipe,

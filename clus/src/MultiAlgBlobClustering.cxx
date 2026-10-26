@@ -174,6 +174,21 @@ size_t fill_sep_family_before_serialize(Grouping& grouping)
     }
     return nfilled;
 }
+
+size_t fill_isolated_before_serialize(Grouping& grouping)
+{
+    // Every cluster with a "perblob" PC, in node order (as_tensors' order);
+    // the fill value is the one the save_assoc_cluster_id path uses.
+    size_t nfilled = 0;
+    for (Cluster* cluster : grouping.children()) {
+        const auto& lpcs = cluster->value().local_pcs();
+        if (lpcs.find("perblob") == lpcs.end()) continue;
+        if (cluster->has_pcarray<int>("isolated", "perblob")) continue;
+        cluster->put_pcarray(std::vector<int>(cluster->nchildren(), -1), "isolated", "perblob");
+        ++nfilled;
+    }
+    return nfilled;
+}
 }  // namespace WireCell::Clus::Facade
 
 
@@ -290,6 +305,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
     m_save_deadarea = get(cfg, "save_deadarea", m_save_deadarea);
     m_save_real_cluster_id = get(cfg, "save_real_cluster_id", m_save_real_cluster_id);
     m_save_assoc_cluster_id = get(cfg, "save_assoc_cluster_id", m_save_assoc_cluster_id);
+    m_fill_isolated = get(cfg, "fill_isolated", m_fill_isolated);
     m_real_cluster_id_global = get(cfg, "real_cluster_id_global", m_real_cluster_id_global);
     m_dead_area_version = get(cfg, "dead_area_version", m_dead_area_version);
 
@@ -592,6 +608,7 @@ WireCell::Configuration MultiAlgBlobClustering::default_configuration() const
     cfg["save_deadarea"] = m_save_deadarea;
     cfg["save_real_cluster_id"] = m_save_real_cluster_id;
     cfg["save_assoc_cluster_id"] = m_save_assoc_cluster_id;
+    cfg["fill_isolated"] = m_fill_isolated;
     cfg["real_cluster_id_global"] = m_real_cluster_id_global;
     cfg["bee_flash_pred_min"] = m_bee_flash_pred_min;
 
@@ -4322,6 +4339,14 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
         // sub-component" value, which is exactly what a cluster nothing merged is.
         // Running before the flash loop lets that loop's "isolated" gate then
         // cover these clusters too.
+        // fill_isolated: the same "isolated" fill for every cluster with a
+        // "perblob" PC, without the assoc pair (pr_ml/docs/26 sec 6).
+        if (m_fill_isolated) {
+            if (const size_t niso = fill_isolated_before_serialize(grouping)) {
+                SPDLOG_LOGGER_DEBUG(log, "fill_isolated_before_serialize: ident={} grouping={} filled={}",
+                                    ident, name, niso);
+            }
+        }
         if (m_save_assoc_cluster_id) {
             for (Cluster* cluster : grouping.children()) {
                 const auto& lpcs = cluster->value().local_pcs();

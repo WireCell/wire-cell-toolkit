@@ -302,6 +302,19 @@ namespace WireCell::Clus::Facade {
     // (wcp-porting-img wcfm/docs/13).
     size_t fill_sep_family_before_serialize(Grouping& grouping);
 
+    // The same trap for the per-blob "isolated" array: ClusteringExamineBundles
+    // writes it only on the clusters inside its scope filter, so the "perblob"
+    // PCs reaching the pctree dump can differ in keys (SBND MPV/MPR mpvmpr_0
+    // threw "missing keys in append: 1 missing: isolated"; in the opposite
+    // order the array is silently dropped for the whole grouping).  This gives
+    // every cluster that has a "perblob" PC but no "isolated" an all -1 array,
+    // the array's documented "this blob is in the main sub-component" value (a
+    // cluster nothing split), the rule MultiAlgBlobClustering already applies
+    // under save_assoc_cluster_id.  Clusters without a "perblob" PC are left
+    // alone.  Returns the number of clusters filled (MABC knob fill_isolated,
+    // default off; wcp-porting-img pr_ml/docs/26 sec 6).
+    size_t fill_isolated_before_serialize(Grouping& grouping);
+
     // The same trap for "cluster_t0": ClusteringBeamDeghost sets it only on
     // the cascade clusters the beam bundle touches, so serializing the
     // deghost grouping throws (first cluster has it) or drops it (a later one
