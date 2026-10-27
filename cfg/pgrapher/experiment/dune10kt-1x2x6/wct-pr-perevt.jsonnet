@@ -44,6 +44,13 @@ function(
     bee_detector = P.bee_detector,
     // '' keeps the inert dump_mode sink (trash-pr.tar.gz); a path writes the post-PR pctree.
     save_tensors = '',
+    // pr_ml doc 26 sec 7.3 -- PR-chain crash guards (toolkit f341b874; PDVD S1
+    // cosmic1170 / cosmic1176).  pr_alias_invalidate_old: add_segment()
+    // invalidates the previous owner of a taken-over edge (doc pr/31 F9).
+    // pr_kine_skip_nonfinite: the dQ/dx kinetic energy skips NaN fit points.
+    // C++ defaults false; keys suppressed when off => byte-identical config.
+    pr_alias_invalidate_old = false,
+    pr_kine_skip_nonfinite = false,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -59,7 +66,9 @@ local pr_maker = (import 'pgrapher/experiment/dune10kt-1x2x6/pr.jsonnet')(
     output_dir=output_dir, runNo=run, subRunNo=subrun, eventNo=event);
 local pr = pr_maker.pr(anodes, pds, pipeline_names, dump=true, tensor_outname=save_tensors,
                        pr_bee=pr_bee, trackfitting_config_file=trackfitting_config,
-                       bee_detector=bee_detector);
+                       bee_detector=bee_detector,
+                       pr_alias_invalidate_old=pr_alias_invalidate_old,
+                       pr_kine_skip_nonfinite=pr_kine_skip_nonfinite);
 
 local graph = g.pipeline([source, pr]);
 

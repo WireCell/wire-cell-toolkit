@@ -990,7 +990,10 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // truth_point_label / truth_depos / truth_time_offset / truth_table (pr_ml doc
 // 19/20 T6): per-point truth labels in the per-face stage, see clus_per_face.
 // Defaults off => every call site passes the pre-change defaults => byte-identical.
-function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data',
+function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
+         // pr_ml doc 26 sec 7.3: PR crash guards (toolkit f341b874), C++ default false, keys omitted when off.
+         pr_alias_invalidate_old=false, pr_kine_skip_nonfinite=false,
+         rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data',
          truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false,
            // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
            truth_polyline_drift_volume_only=true, truth_polyline_per_particle=true,
@@ -3044,6 +3047,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
+                  [if pr_alias_invalidate_old then 'pr_alias_invalidate_old']: true,   // pr_ml doc 26 sec 7.3
+                  [if pr_kine_skip_nonfinite then 'pr_kine_skip_nonfinite']: true,
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the

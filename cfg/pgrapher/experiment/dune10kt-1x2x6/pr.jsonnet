@@ -306,7 +306,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
        vertex_z_prior_scale=268.6,      // cm
        nticks=P.nticks,
        bee_detector=P.bee_detector,
-       bundle_t0=0.0) :: {
+       bundle_t0=0.0,
+       // pr_ml doc 26 sec 7.3: PR crash guards (wct-pr-perevt.jsonnet TLAs); keys omitted when off.
+       pr_alias_invalidate_old=false,
+       pr_kine_skip_nonfinite=false) :: {
         local dv = clus_maker.detector_volumes(anodes),
         local pcts = clus_maker.pc_transforms(dv),
         local cm_old = clus.clustering_methods(
@@ -417,7 +420,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
                 beam_window_high=beam_window[1],
                 fiducial=wc.tn(fd_pr_fv),
                 fv_tolerance=fd_pr_fv_margins,
-                knobs=sbnd_tcn_knobs + fd_tcn_overrides(pr_y_top, vertex_z_prior_scale)),
+                knobs=sbnd_tcn_knobs + fd_tcn_overrides(pr_y_top, vertex_z_prior_scale) + {
+                    [if pr_alias_invalidate_old then 'pr_alias_invalidate_old']: true,   // pr_ml doc 26 sec 7.3
+                    [if pr_kine_skip_nonfinite then 'pr_kine_skip_nonfinite']: true,
+                }),
             // Magnify-tracking ROOT dump; channel scheme from every anode's wires (wrapped U/V
             // channels counted once), as PDHD/PDVD production.
             tracking_visitor: {

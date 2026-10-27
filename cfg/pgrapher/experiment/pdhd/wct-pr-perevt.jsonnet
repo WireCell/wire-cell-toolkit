@@ -876,6 +876,13 @@ function(
     // C++ default false; key suppressed when off => byte-identical config.
     // Set SBND_TRAJ_COVER_PROBE=1 on run_pr_chain_batch.sh.
     traj_cover_probe = false,
+    // pr_ml doc 26 sec 7.3 -- PR-chain crash guards (toolkit f341b874; PDVD S1
+    // cosmic1170 / cosmic1176).  pr_alias_invalidate_old: add_segment()
+    // invalidates the previous owner of a taken-over edge (doc pr/31 F9).
+    // pr_kine_skip_nonfinite: the dQ/dx kinetic energy skips NaN fit points.
+    // C++ defaults false; keys suppressed when off => byte-identical config.
+    pr_alias_invalidate_old = false,
+    pr_kine_skip_nonfinite = false,
     // doc pr/67 -- counterfactual ONLY, not a production setting.
     // find_proto_vertex's nrounds_find_other_tracks is hardcoded (2 for the
     // main cluster) with no config surface; > 0 overrides it so the owner's
@@ -3804,6 +3811,8 @@ function(
         [if iso_endpoint_min_aspect != null then 'iso_endpoint_min_aspect']: iso_endpoint_min_aspect,
         [if v3_extension_guard then 'v3_extension_guard']: true,
         [if traj_cover_probe then 'traj_cover_probe']: true,
+        [if pr_alias_invalidate_old then 'pr_alias_invalidate_old']: true,
+        [if pr_kine_skip_nonfinite then 'pr_kine_skip_nonfinite']: true,
         [if pr_find_other_rounds != null then 'pr_find_other_rounds']: pr_find_other_rounds,
         [if v3_extension_min_gain != null then 'v3_extension_min_gain']: v3_extension_min_gain,
         [if vertex_z_prior_scale != null then 'vertex_z_prior_scale']: vertex_z_prior_scale,
