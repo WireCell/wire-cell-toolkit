@@ -1,5 +1,9 @@
 #include "WireCellClus/ImageDeghostFunctions.h"
 
+#include "WireCellClus/ClusteringFuncs.h"
+#include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Blob.h"
+
 #include <cmath>
 #include <map>
 
@@ -46,4 +50,26 @@ std::vector<ImageDeghostT0> WireCell::Clus::PR::image_deghost_cluster_t0(const s
         if (std::abs(owner_t0[owner_of[i]] - out[d].t0) <= tol) take[i] = 1;
     }
     return out;
+}
+
+size_t WireCell::Clus::PR::harmonize_blob_arrays(WireCell::Clus::Facade::Grouping& grouping, const std::string& pcname,
+                                                 std::vector<std::string>& partial)
+{
+    // keys every blob's PC carries; std::map of strings => sorted, deterministic
+    std::map<std::string, size_t> nkey;
+    size_t nblob = 0;
+    for (auto* c : grouping.children()) {
+        for (auto* b : c->children()) {
+            auto it = b->local_pcs().find(pcname);
+            if (it == b->local_pcs().end()) continue;
+            ++nblob;
+            for (const auto& name : it->second.keys()) ++nkey[name];
+        }
+    }
+    partial.clear();
+    for (const auto& [name, n] : nkey) if (n != nblob) partial.push_back(name);
+    size_t nerased = 0;
+    if (partial.empty()) return 0;
+    for (auto* c : grouping.children()) nerased += WireCell::Clus::Facade::erase_blob_arrays(*c, partial, pcname);
+    return nerased;
 }

@@ -17,7 +17,10 @@
 #ifndef WIRECELL_CLUS_IMAGEDEGHOSTFUNCTIONS
 #define WIRECELL_CLUS_IMAGEDEGHOSTFUNCTIONS
 
+#include <string>
 #include <vector>
+
+#include "WireCellClus/Facade_Grouping.h"
 
 namespace WireCell::Clus::PR {
 
@@ -41,6 +44,13 @@ namespace WireCell::Clus::PR {
                                                          const std::vector<double>& owner_t0,
                                                          int n_dgc, double tol,
                                                          std::vector<char>& take);
+
+    /// harmonize_3d_keys of ClusteringImageDeghost: erase, from every blob of the grouping, each array of the
+    /// blobs' local PC `pcname` that not all blobs carrying that PC have, so TensorDM::as_tensors sees one key set
+    /// (it throws when the first node has a key a later one lacks, and drops the key in the opposite order).
+    /// Returns the number of arrays erased; `partial` (out) = the erased key names, sorted.
+    size_t harmonize_blob_arrays(WireCell::Clus::Facade::Grouping& grouping, const std::string& pcname,
+                                 std::vector<std::string>& partial);
 
 }  // namespace WireCell::Clus::PR
 

@@ -277,27 +277,12 @@ public:
                            nerased, ntouched);
         }
         if (m_harmonize_3d_keys) {
-            // keys every live blob's "3d" PC carries; std::map / std::set of strings => sorted, deterministic
-            std::map<std::string, size_t> nkey;
-            size_t nblob = 0;
-            for (Cluster* c : live.children()) {
-                for (Blob* b : c->children()) {
-                    auto it = b->local_pcs().find("3d");
-                    if (it == b->local_pcs().end()) continue;
-                    ++nblob;
-                    for (const auto& name : it->second.keys()) ++nkey[name];
-                }
-            }
             std::vector<std::string> partial;
-            for (const auto& [name, n] : nkey) if (n != nblob) partial.push_back(name);
-            size_t nerased = 0;
-            if (!partial.empty()) {
-                for (Cluster* c : live.children()) nerased += erase_blob_arrays(*c, partial, "3d");
-            }
+            const size_t nerased = harmonize_blob_arrays(live, "3d", partial);
             std::string names;
             for (const auto& name : partial) names += (names.empty() ? "" : ",") + name;
-            logger()->info("ClusteringImageDeghost: harmonize_3d_keys: {} live blob(s), {} partial key(s) [{}], {} array(s) erased",
-                           nblob, partial.size(), names, nerased);
+            logger()->info("ClusteringImageDeghost: harmonize_3d_keys: {} partial key(s) [{}], {} array(s) erased",
+                           partial.size(), names, nerased);
         }
         if (m_fill_cluster_t0) {
             const size_t nfill = fill_cluster_t0_before_serialize(dg);

@@ -2,6 +2,8 @@
 #include "WireCellClus/ImageDeghostFunctions.h"
 #include "WireCellUtil/doctest.h"
 
+#include <algorithm>
+
 using namespace WireCell::Clus::PR;
 
 TEST_CASE("image_deghost_cluster_t0: one t0 per cascade cluster")
@@ -57,4 +59,71 @@ TEST_CASE("image_deghost_cluster_t0: empty input")
     std::vector<char> take{1};
     auto r = image_deghost_cluster_t0({}, {}, {}, {}, 0, 1.0, take);
     CHECK(r.empty()); CHECK(take.empty());
+}
+
+// harmonize_blob_arrays (ClusteringImageDeghost harmonize_3d_keys): after the cells replace a cluster's blobs, the live
+// blobs can carry different "3d" key sets (SBND simulation: y_cor / z_cor persisted by the clustering job on the blobs
+// not replaced, absent on the cells).  TensorDM::as_tensors then throws ("missing keys in append", SBND mpvmpr_1076) or,
+// in the opposite node order, drops the key for every blob.
+#include "WireCellClus/Facade_Cluster.h"
+#include "WireCellClus/Facade_Blob.h"
+#include "WireCellAux/TensorDMpointtree.h"
+
+using namespace WireCell;
+using namespace WireCell::PointCloud;
+using namespace WireCell::PointCloud::Tree;
+using namespace WireCell::Clus::Facade;
+
+// ncl clusters x nblob blobs; every blob has a "3d" PC with x, y, z; the blobs of the clusters in `extra` also y_cor.
+static Grouping* make_grouping3d(Points::node_t& root, int ncl, int nblob, const std::vector<int>& extra)
+{
+    Grouping* g = root.value.facade<Grouping>();
+    for (int i = 0; i < ncl; ++i) {
+        Cluster& cl = g->make_child();
+        for (int b = 0; b < nblob; ++b) {
+            Blob& bl = cl.make_child();
+            Dataset ds;
+            ds.add("x", Array(std::vector<double>{1.0 * i, 2.0}));
+            ds.add("y", Array(std::vector<double>{3.0, 4.0}));
+            ds.add("z", Array(std::vector<double>{5.0, 6.0}));
+            if (std::find(extra.begin(), extra.end(), i) != extra.end()) {
+                ds.add("y_cor", Array(std::vector<double>{3.5, 4.5}));
+            }
+            bl.local_pcs()["3d"] = ds;
+        }
+        cl.set_ident(100 + i);
+    }
+    return g;
+}
+
+TEST_CASE("harmonize_blob_arrays: a key only the first cluster's blobs carry -- throws before, serializes after")
+{
+    Points::node_t root;
+    Grouping* g = make_grouping3d(root, 3, 2, {0});
+    CHECK_THROWS(Aux::TensorDM::as_tensors(root, "pointtrees/0"));   // the bug
+    std::vector<std::string> partial;
+    CHECK(harmonize_blob_arrays(*g, "3d", partial) == 2);            // y_cor of cluster 0's two blobs
+    CHECK(partial == std::vector<std::string>{"y_cor"});
+    for (auto* cl : g->children()) {
+        for (auto* b : cl->children()) {
+            const auto& ds = b->local_pcs().at("3d");
+            CHECK_FALSE(ds.has("y_cor"));
+            CHECK(ds.has("x")); CHECK(ds.has("y")); CHECK(ds.has("z"));
+        }
+    }
+    CHECK_NOTHROW(Aux::TensorDM::as_tensors(root, "pointtrees/0"));
+    CHECK(harmonize_blob_arrays(*g, "3d", partial) == 0);            // nothing left
+    CHECK(partial.empty());
+}
+
+TEST_CASE("harmonize_blob_arrays: one key set already -- no-op")
+{
+    Points::node_t root;
+    Grouping* g = make_grouping3d(root, 2, 2, {0, 1});
+    std::vector<std::string> partial;
+    CHECK(harmonize_blob_arrays(*g, "3d", partial) == 0);
+    CHECK(partial.empty());
+    for (auto* cl : g->children()) {
+        for (auto* b : cl->children()) CHECK(b->local_pcs().at("3d").has("y_cor"));
+    }
 }
