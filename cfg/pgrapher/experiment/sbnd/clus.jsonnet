@@ -2515,6 +2515,17 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
        // way; this only books them.  C++ default false; key omitted when off
        // => byte-identical pre-knob config AND tracking-pr.root.
        root_particle_links=true,  // SBND PRODUCTION -- doc sbnd_xin/128 sec 10.1
+       // pr_ml doc 28: ImproveCluster_2 retile_mode of the Steiner-stage retiler (improve2), as the PDHD / PDVD
+       // pr() (doc pdvd/113; C++ default "full"; "none" re-samples the cluster's own blobs in place).  null =>
+       // key omitted => byte-identical compiled config.  R&D knob: SBND production keeps the full retile.
+       retile_mode=null,
+       // pr_ml doc 28 ("combination 3": traditional imaging + clustering, then the deghosting cascade's cells
+       // replace the blobs of every live cluster before steiner): the MABC reads a third grouping 'deghost'
+       // (the caller joins the cascade image to the pctree, deghost_tree() below) and 'image_deghost' becomes
+       // a pipeline name (ClusteringImageDeghost; place it after unmerge_assoc, before steiner).  false =>
+       // keys omitted => byte-identical compiled config.  R&D knob, not for production.
+       image_deghost=false, image_deghost_select='all',
+       image_deghost_fill_cluster_t0=false, image_deghost_strip_t0cor_leftover=false, image_deghost_harmonize_3d_keys=false,
        provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
@@ -2612,7 +2623,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                                                 strategy_name=if retile_sampler_strategy == null then 'charge_stepped' else retile_sampler_strategy,   // doc sbnd_xin/pr/149; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20)
                                                 wire_product=retile_sampler_wire_product,
                                                 charge_threshold=retile_sampler_charge_threshold),
-                                   apa=a.data.ident, face=0) for a in anodes]),
+                                   apa=a.data.ident, face=0) for a in anodes])
+            // pr_ml doc 28: key omitted when null => byte-identical (as pdhd / protodunevd pr.jsonnet).
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode } },
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
         // runtime state and does not persist through the tarball); it recomputes
@@ -2647,6 +2660,22 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                 uses: anodes + [dv] + samplers,
             },
             switch_scope: cm_old.switch_scope(),
+            // pr_ml doc 28 ("combination 3"): replace the blobs of every live cluster (image_deghost_select
+            // 'all'; 'main' = main clusters) by the overlapping cells of the deghost grouping.  Needs
+            // image_deghost (the grouping).  Absent from pipeline_names => absent from the compiled config.
+            image_deghost: (assert image_deghost : "pipeline name 'image_deghost' needs image_deghost=true"; {
+                type: 'ClusteringImageDeghost',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    deghost_grouping: 'deghost',
+                    pc_transforms: wc.tn(pcts),
+                    select: image_deghost_select,
+                    [if image_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
+                    [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
+                    [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
+                },
+            }),
             // Restore the prototype main+associated data product before anything
             // fits or walks a "main cluster".  The Q/L stage's flash-time merge
             // (examine_bundles use_flash_t0) collapses every member of a matched
@@ -3256,6 +3285,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
             data: {
                 inpath: 'pointtrees/%d',
                 outpath: 'pointtrees/%d',
+                // pr_ml doc 28 (image_deghost).  C++ default groupings ['live', 'dead'].  Keys omitted when
+                // off => byte-identical (as the protodunevd pr() beam_deghost).
+                [if image_deghost then 'groupings']: ['live', 'dead', 'deghost'],
+                [if image_deghost then 'insubpaths']: [{ name: 'deghost', subpath: '/dg/live' }],
                 perf: true,
                 bee_dir: bee_dir,
                 bee_zip: if pr_bee then bee_zip_path else '',  // doc 87
@@ -3499,6 +3532,91 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
         ret:: if dump then g.pipeline([mabc, sink]) else g.pipeline([mabc]),
     }.ret,
     detector_volumes(anodes, face=0):: detector_volumes(anodes=anodes, face=face, pos_offset_on=pos_offset_on),
+    // pr_ml doc 28 ("combination 3"): the deghosting cascade's image of each anode as a point tree for the PR
+    // job's 'deghost' grouping -- the SBND counterpart of protodunevd/pr.jsonnet deghost_tree (doc pdvd/125):
+    // ClusterFileSource (<dir>/icluster-apa<N>-active.npz, the d53 imaging fork's archive) -> ClusterScopeFilter
+    // (face 0, as per_apa) -> PointTreeBuilding with the clustering job's live sampler (renamed 'dg-live-*')
+    // -> [TruthPointLabeler] -> PointTreeMerging at 'pointtrees/%d/dg'.  truth: null => no labeler; an object
+    // {depos, time_offset, speed, truth_table, extra} => the labeler with the clustering job's settings, so the
+    // cells keep the per-point "truth" cloud of the blobs they replace.  Nothing reaches a compiled config unless
+    // the caller builds it.
+    deghost_tree(anodes, dir, truth=null)::
+        local truthlib = import 'pgrapher/common/truth.jsonnet';
+        local n = std.length(anodes);
+        local face(a) =
+            local src = g.pnode({
+                type: 'ClusterFileSource',
+                name: 'dg-src-%d' % a.data.ident,
+                data: {
+                    inname: '%s/icluster-apa%d-active.npz' % [dir, a.data.ident],
+                    anodes: [wc.tn(x) for x in anodes],
+                },
+            }, nin=0, nout=1, uses=anodes);
+            local dvf = detector_volumes([a], 0, pos_offset_on) + { name: 'dg-dv-apa%d-0' % a.data.ident };
+            local bs = bs_live_face(a.name, 0) + { name: 'dg-live-%s-0' % a.name };
+            local csf = g.pnode({
+                type: 'ClusterScopeFilter',
+                name: 'dg-csf-%s-0' % a.name,
+                data: { face_index: 0 },
+            }, nin=1, nout=1);
+            local ptb = g.pnode({
+                type: 'PointTreeBuilding',
+                name: 'dg-%s-0' % a.name,
+                data: {
+                    samplers: { '3d': wc.tn(bs) },
+                    multiplicity: 1,
+                    tags: ['live'],
+                    datapath: 'pointtrees/%d/dg',
+                    anode: wc.tn(a),
+                    face: 0,
+                    detector_volumes: wc.tn(dvf),
+                },
+            }, nin=1, nout=1, uses=[bs, dvf]);
+            if truth == null then g.pipeline([src, csf, ptb], 'dg-face-%s-0' % a.name)
+            else
+                local cfo = g.pnode({
+                    type: 'ClusterFanout',
+                    name: 'dg-truth-cfo-%s-0' % a.name,
+                    data: { multiplicity: 2 },
+                }, nin=1, nout=2);
+                local dsrc = g.pnode({
+                    type: 'DepoFileSource',
+                    name: 'dg-truth-depos-%s-0' % a.name,
+                    data: { inname: truth.depos, scale: 1 },
+                }, nin=0, nout=1);
+                local tpl = truthlib.point_labeler('dg-%s-0' % a.name, a, 0, dvf,
+                                                   speed=truth.speed, time_offset=truth.time_offset,
+                                                   inpath='pointtrees/%d/dg/live', truth_table=truth.truth_table,
+                                                   extra=truth.extra);
+                g.intern(
+                    innodes=[src],
+                    centernodes=[csf, cfo, ptb, dsrc],
+                    outnodes=[tpl],
+                    edges=[
+                        g.edge(src, csf, 0, 0),
+                        g.edge(csf, cfo, 0, 0),
+                        g.edge(cfo, ptb, 0, 0),
+                        g.edge(ptb, tpl, 0, 0),
+                        g.edge(cfo, tpl, 1, 1),
+                        g.edge(dsrc, tpl, 0, 2),
+                    ],
+                    name='dg-face-%s-0' % a.name);
+        local faces = [face(a) for a in anodes];
+        local merge = g.pnode({
+            type: 'PointTreeMerging',
+            name: 'dg-merge',
+            data: {
+                multiplicity: n,
+                inpath: 'pointtrees/%d/dg',
+                outpath: 'pointtrees/%d/dg',
+                tolerate_missing: true,
+            },
+        }, nin=n, nout=1);
+        g.intern(
+            innodes=faces,
+            outnodes=[merge],
+            edges=[g.edge(faces[i], merge, 0, i) for i in std.range(0, n - 1)],
+        ),
     // Primitives the entry configuration needs to build the wclsTensorSetLabeler
     // node itself (it is no longer wired inside clus_all_apa).  All are the exact
     // objects the labeler used to receive, with the reality-correct pos_offset_on.

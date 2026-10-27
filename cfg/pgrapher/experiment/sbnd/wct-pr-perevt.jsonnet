@@ -900,6 +900,35 @@ function(
     retile_sampler_strategy         = null,
     retile_sampler_wire_product     = null,
     retile_sampler_charge_threshold = null,
+    // pr_ml doc 28 (deghoster placement study; R&D knobs, SBND production keeps the traditional imaging deghosting
+    // and the full retile):
+    // retile_mode -- ImproveCluster_2 retile_mode of the Steiner-stage retiler (C++ default "full"; "none" =
+    // the cluster's own blobs re-sampled in place, as PDHD / PDVD, doc pdvd/113).  null => key omitted =>
+    // byte-identical compiled config.  A string TLA needs inner quotes: -S "retile_mode='none'".
+    retile_mode = null,
+    // image_deghost_dir -- "combination 3": a directory holding the deghosting cascade's image of the event
+    // (icluster-apa<N>-active.npz, the sbnd_xin/d53 imaging fork with deghost_w9ft).  '' (default) => nothing is
+    // built and the compiled config is byte-identical.  Set => the image joins the pctree as a third grouping
+    // 'deghost' (PointTreeConcat) and the pipeline name 'image_deghost' (ClusteringImageDeghost; after
+    // unmerge_assoc, before steiner) replaces the blobs of every live cluster (image_deghost_select 'all') or of
+    // the main clusters ('main') by the overlapping cells.  fill_cluster_t0 / strip_t0cor_leftover: as the PDVD
+    // beam_deghost keys (C++ default false; keys omitted when false).
+    image_deghost_dir = '',
+    image_deghost_select = 'all',
+    image_deghost_fill_cluster_t0 = false,
+    image_deghost_strip_t0cor_leftover = false,
+    // harmonize_3d_keys: erase the "3d" arrays not all live blobs carry after the replacement (SBND sim: the
+    // clustering job's y_cor / z_cor, unread by the PR's sim scope).  C++ default false; key omitted when false.
+    image_deghost_harmonize_3d_keys = false,
+    // The per-point truth cloud on the cascade cells (simulation): '' => no labeler.  Set (the drifted
+    // sim-depos) => a TruthPointLabeler per anode with these settings; pass the event's clustering values
+    // (time offset 268 us, the imaging drift speed, the Stage A truth.npz) and, as image_deghost_truth_extra,
+    // the extra keys of the clustering job's TruthPointLabeler, so replaced and kept blobs carry one key set.
+    image_deghost_truth_depos = '',
+    image_deghost_truth_time_offset_us = 0,
+    image_deghost_truth_speed_mmus = null,
+    image_deghost_truth_table = '',
+    image_deghost_truth_extra = {},
     // doc sbnd_xin/pr/149 round 2: the PR job's RESAMPLE stage (ClusteringResampleLive,
     // sbnd/clus.jsonnet cm_by_name.resample_live).  Non-null => 'resample_live' is
     // prepended to pipeline_names and re-samples every live blob's "3d" cloud with this
@@ -3921,12 +3950,40 @@ function(
                              pseudo_shower_track_paint=pseudo_shower_track_paint,
                              use_power_recomb=use_power_recomb,
                              fast_xgb_forest=fast_xgb_forest,
+                             retile_mode=retile_mode,   // pr_ml doc 28
+                             image_deghost=(image_deghost_dir != ''),   // pr_ml doc 28
+                             image_deghost_select=image_deghost_select,
+                             image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
+                             image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
+                             image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
                              tcn_knobs=tcn_knobs);
 
-    local graph = g.intern(
+    // pr_ml doc 28: with image_deghost_dir the pctree and the cascade image are joined (tensors concatenated,
+    // distinct datapaths) in front of the MABC, as the protodunevd job does for beam_deghost.
+    local dg_tree = clus_maker.deghost_tree(anodes, image_deghost_dir,
+        truth=if image_deghost_truth_depos == '' then null else (
+            assert image_deghost_truth_speed_mmus != null : 'image_deghost_truth_depos needs image_deghost_truth_speed_mmus';
+            {
+                depos: image_deghost_truth_depos,
+                time_offset: image_deghost_truth_time_offset_us * wc.us,
+                speed: image_deghost_truth_speed_mmus * wc.mm / wc.us,
+                truth_table: image_deghost_truth_table,
+                extra: image_deghost_truth_extra,
+            }));
+    local dg_join = g.pnode({
+        type: 'PointTreeConcat',
+        name: 'pr_deghost',
+        data: { multiplicity: 2 },
+    }, nin=2, nout=1);
+    local graph = if image_deghost_dir == '' then g.intern(
         innodes=[source],
         outnodes=[pr],
         edges=[g.edge(source, pr, 0, 0)],
+    ) else g.intern(
+        innodes=[source, dg_tree],
+        centernodes=[dg_join],
+        outnodes=[pr],
+        edges=[g.edge(source, dg_join, 0, 0), g.edge(dg_tree, dg_join, 0, 1), g.edge(dg_join, pr, 0, 0)],
     );
 
     local app = {
@@ -3956,7 +4013,9 @@ function(
         data: {
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
-                     + (if needs_root then ['WireCellRoot'] else []),
+                     + (if needs_root then ['WireCellRoot'] else [])
+                     // pr_ml doc 28: the cascade-tree TruthPointLabeler (image_deghost_truth_depos); '' => not loaded
+                     + (if image_deghost_dir != '' && image_deghost_truth_depos != '' then ['WireCellTruth'] else []),
             apps: ['Pgrapher'],
         },
     };
