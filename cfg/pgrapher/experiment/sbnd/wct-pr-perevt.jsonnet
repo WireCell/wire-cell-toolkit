@@ -458,8 +458,9 @@ function(
     // invalidates the previous owner of a taken-over edge (doc pr/31 F9).
     // pr_kine_skip_nonfinite: the dQ/dx kinetic energy skips NaN fit points.
     // C++ defaults false; keys suppressed when off => byte-identical config.
-    pr_alias_invalidate_old = false,
-    pr_kine_skip_nonfinite = false,
+    // FLIPPED ON 2026-10-26 (owner: "flip knob by default for future batches"); -S <key>=false restores legacy.
+    pr_alias_invalidate_old = true,
+    pr_kine_skip_nonfinite = true,
     // doc pr/67 -- counterfactual ONLY, not a production setting.
     // find_proto_vertex's nrounds_find_other_tracks is hardcoded (2 for the
     // main cluster) with no config surface; > 0 overrides it so the owner's
@@ -3333,6 +3334,9 @@ function(
 
     local clus_mod = import 'clus.jsonnet';
     local clus_maker = clus_mod(
+        // pr_ml doc 26 sec 7.3: the job TLAs also set clus.jsonnet's own copy, so -S <key>=false restores legacy everywhere.
+        pr_alias_invalidate_old=pr_alias_invalidate_old,
+        pr_kine_skip_nonfinite=pr_kine_skip_nonfinite,
         output_dir=output_dir,
         runNo=run,
         subRunNo=subrun,

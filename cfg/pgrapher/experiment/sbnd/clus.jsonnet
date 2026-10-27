@@ -992,7 +992,8 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // Defaults off => every call site passes the pre-change defaults => byte-identical.
 function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
          // pr_ml doc 26 sec 7.3: PR crash guards (toolkit f341b874), C++ default false, keys omitted when off.
-         pr_alias_invalidate_old=false, pr_kine_skip_nonfinite=false,
+         // FLIPPED ON 2026-10-26 (owner); =false restores legacy.
+         pr_alias_invalidate_old=true, pr_kine_skip_nonfinite=true,
          rse_from_ident=false, rse_from_metadata=false, pre_mabc=null, event_from_ident=false, rse_map={}, evt_subdir='', reality='data',
          truth_point_label=false, truth_depos='', truth_time_offset=0, truth_table='', truth_fold_negative_ids=false,
            // pr_ml doc 23 sec 10: TruthPointLabeler trajectories from the face's drift volume only / one per Geant4 particle; ON by default for truth-label jobs (owner 2026-10-22; C++ default false; false => key omitted => the pre-fix labels)
