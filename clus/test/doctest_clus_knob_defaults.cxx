@@ -101,6 +101,8 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "proton_dir_vote", false);          // doc pr/8
     CHECK_KNOB_BOOL(cfg, "endpoint_trim_retry", false);      // doc pr/9 F1
     CHECK_KNOB_BOOL(cfg, "iso_endpoint", false);             // doc pr/25 isochronous trunk
+    CHECK_KNOB_BOOL(cfg, "pr_alias_invalidate_old", false);  // pr_ml doc 26 sec 7.3
+    CHECK_KNOB_BOOL(cfg, "pr_kine_skip_nonfinite", false);   // pr_ml doc 26 sec 7.3
     CHECK_KNOB_BOOL(cfg, "v3_extension_guard", false);       // doc pr/24 sec 18 round 5
     CHECK_KNOB_BOOL(cfg, "sp_dedx_use_recomb_model", false); // doc pr/2 2e(i)
     CHECK_KNOB_BOOL(cfg, "nu_skip_cosmic", false);           // doc pr/3 sec 8

@@ -329,6 +329,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_iso_endpoint_min_aspect    = get(config, "iso_endpoint_min_aspect",    m_iso_endpoint_min_aspect);
     // doc sbnd_xin/docs/pr/67 (log-only probe + round-budget counterfactual).
     m_traj_cover_probe           = get(config, "traj_cover_probe",           m_traj_cover_probe);
+    // pr_ml doc 26 sec 7.3: invalidate the previous owner of a taken-over PR graph edge.
+    m_pr_alias_invalidate_old    = get(config, "pr_alias_invalidate_old",    m_pr_alias_invalidate_old);
+    // pr_ml doc 26 sec 7.3: the dQ/dx kinetic energy skips non-finite fit points.
+    m_pr_kine_skip_nonfinite     = get(config, "pr_kine_skip_nonfinite",     m_pr_kine_skip_nonfinite);
     // doc sbnd_xin/docs/pr/107: dQ/dx fit keeps every trajectory point (prototype parity).
     m_dqdx_fit_keep_all_points   = get(config, "dqdx_fit_keep_all_points",   m_dqdx_fit_keep_all_points);
     // doc pdvd/45: exclusion cells compared in the t0-corrected frame.
@@ -1013,6 +1017,8 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["iso_endpoint_tube_radius"]   = m_iso_endpoint_tube_radius;    // cm
     cfg["iso_endpoint_min_aspect"]    = m_iso_endpoint_min_aspect;     // trimmed transverse/axial extent ratio
     cfg["traj_cover_probe"]           = m_traj_cover_probe;            // false = no pr/67 diagnostic lines
+    cfg["pr_alias_invalidate_old"]    = m_pr_alias_invalidate_old;     // pr_ml doc 26 sec 7.3: false = legacy (aliased segment keeps its descriptor)
+    cfg["pr_kine_skip_nonfinite"]     = m_pr_kine_skip_nonfinite;      // pr_ml doc 26 sec 7.3: false = legacy (a NaN fit dQ makes the dQ/dx KE NaN)
     cfg["dqdx_fit_keep_all_points"]   = m_dqdx_fit_keep_all_points;    // doc pr/107: false = legacy (pre-dQ/dx pass drops zero-quantity points)
     cfg["excl_t0_frame"]              = m_excl_t0_frame;               // doc pdvd/45: false = legacy (exclusion cells in the raw drift frame)
     cfg["pr_find_other_rounds"]       = m_pr_find_other_rounds;        // 0 = keep find_proto_vertex's hardcoded budget
@@ -3311,6 +3317,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // doc pr/67 P6: remove_segment() is a free function, so the knob is mirrored
         // into a file-static in PRGraph.cxx rather than read from pattern_algos.
         PR::set_traj_cover_probe(m_traj_cover_probe);
+        // pr_ml doc 26 sec 7.3: add_segment() is a free function too.
+        PR::set_alias_invalidate_old(m_pr_alias_invalidate_old);
+        PR::set_kine_skip_nonfinite(m_pr_kine_skip_nonfinite);
         pattern_algos.m_pr_find_other_rounds       = m_pr_find_other_rounds;
         pattern_algos.m_v3_extension_guard         = m_v3_extension_guard;
         pattern_algos.m_v3_extension_min_gain      = m_v3_extension_min_gain * units::cm;    // cm -> internal

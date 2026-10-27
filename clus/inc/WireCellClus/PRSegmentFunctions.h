@@ -994,6 +994,15 @@ namespace WireCell::Clus::PR {
 
     // kinemiatics calculations ...
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model);
+
+    /// pr_ml doc 26 sec 7.3 -- segment_cal_kine_dQdx skips fit points whose dQ
+    /// or dx is not finite.  The dQ/dx fit can leave a whole segment at
+    /// dQ = NaN (S1 PDVD cosmic1176: 13 / 13 points); the sum is then NaN, the
+    /// clamps do not catch it, and Aux::ParticleInfo throws "energy-momentum
+    /// relation violated" on the NaN 4-momentum.  File-static mirror (like
+    /// PR::set_traj_cover_probe); TaggerCheckNeutrino sets it from
+    /// pr_kine_skip_nonfinite.  Default false => byte-identical when off.
+    void set_kine_skip_nonfinite(bool enable);
     /// doc pdvd/45 sec 5.4: skip_zero_dx=true drops fit points with dx <= 0 before
     /// the recombination model sees them (dQ/dx = 0/0 -> NaN poisons the sum).  The
     /// prototype (ProtoSegment.cxx:1316) divides by (dx + 1e-9) and multiplies by dx,

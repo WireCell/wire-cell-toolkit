@@ -373,6 +373,13 @@ public:
         // counterfactual override for find_proto_vertex's hardcoded
         // branch-search round budget.  false / 0 => byte-identical.
         bool   m_traj_cover_probe{false};
+        // pr_ml doc 26 sec 7.3: add_segment() invalidates the previous owner of
+        // a taken-over edge (doc pr/31 F9), mirrored into PRGraph.cxx like
+        // traj_cover_probe.  false => byte-identical.
+        bool   m_pr_alias_invalidate_old{false};
+        // pr_ml doc 26 sec 7.3: segment_cal_kine_dQdx skips non-finite fit
+        // points, mirrored into PRSegmentFunctions.cxx.  false => byte-identical.
+        bool   m_pr_kine_skip_nonfinite{false};
         // doc sbnd_xin/docs/pr/107: keep every trajectory point in the
         // pre-dQ/dx form_map_graph pass (prototype parity for the dQ/dx fit
         // input; the toolkit-only third pass otherwise deletes the

@@ -2480,6 +2480,10 @@ namespace WireCell::Clus::PR {
     // per-face recombination model would be needed; callers must pre-apply lifetime corrections
     // to dQ before this function is called.  This is a known limitation inherited from the
     // prototype and deliberately deferred — see pid_direction_kinematics_review.md §0 G3.
+    // pr_ml doc 26 sec 7.3: see set_kine_skip_nonfinite in PRSegmentFunctions.h.
+    static bool s_kine_skip_nonfinite = false;
+    void set_kine_skip_nonfinite(bool enable) { s_kine_skip_nonfinite = enable; }
+
     double segment_cal_kine_dQdx(SegmentPtr seg, const IRecombinationModel::pointer& recomb_model){
         if (!seg || !recomb_model) {
             return 0.0;
@@ -2495,6 +2499,8 @@ namespace WireCell::Clus::PR {
         
         for (size_t i = 0; i < fits.size(); i++) {
             if (!fits[i].valid() || fits[i].dx <= 0) continue;
+            // pr_ml doc 26 sec 7.3 (pr_kine_skip_nonfinite, default off): a NaN dQ or dx is a missing measurement.
+            if (s_kine_skip_nonfinite && !(std::isfinite(fits[i].dQ) && std::isfinite(fits[i].dx))) continue;
             
             double dX = fits[i].dx;  // path length used for energy accumulation (may be shortened)
             double dQ = fits[i].dQ;

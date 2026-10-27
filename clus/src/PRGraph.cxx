@@ -127,6 +127,9 @@ namespace WireCell::Clus::PR {
         return at_an_end(vtx1) && at_an_end(vtx2);
     }
 
+    // set_alias_invalidate_old (PRGraph.h), read by add_segment below.
+    static bool s_alias_invalidate_old = false;
+
     bool add_segment(Graph& g, SegmentPtr seg, VertexPtr vtx1, VertexPtr vtx2)
     {
         g_port_audit.add_segment_calls.fetch_add(1, std::memory_order_relaxed);
@@ -249,6 +252,12 @@ namespace WireCell::Clus::PR {
                     g[desc].index, g[desc].segment->wcpts().size(), seg->wcpts().size());
             }
         }
+        // pr_ml doc 26 sec 7.3 (pr_alias_invalidate_old, default off): the
+        // previous owner leaves the graph here, so its descriptor cannot outlive
+        // the edge (S1 PDVD cosmic1170).  Off: legacy, it keeps the descriptor.
+        if (s_alias_invalidate_old && seg && g[desc].segment && g[desc].segment != seg) {
+            g[desc].segment->invalidate_descriptor();
+        }
         g[desc].segment = seg;
         seg->set_graph_index(g[desc].index);
 
@@ -259,6 +268,9 @@ namespace WireCell::Clus::PR {
     // file-static mirror rather than a PatternAlgorithms member.
     static bool s_traj_cover_probe = false;
     void set_traj_cover_probe(bool enable) { s_traj_cover_probe = enable; }
+
+    // pr_ml doc 26 sec 7.3: see the declaration in PRGraph.h.
+    void set_alias_invalidate_old(bool enable) { s_alias_invalidate_old = enable; }
 
     // doc sbnd_xin/docs/pr/96: WCT_PR96_REMSEG_DEBUG -- which CALLER deletes a
     // fitted segment.  pr/67's P6 sentinel above locates a removal

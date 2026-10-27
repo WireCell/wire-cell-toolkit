@@ -282,6 +282,15 @@ namespace WireCell::Clus::PR {
     /// tagging every call site.  Default false => byte-identical when off.
     void set_traj_cover_probe(bool enable);
 
+    /// doc sbnd_xin/docs/pr/31 F9, pr_ml doc 26 sec 7.3 -- when add_segment()
+    /// hands an existing edge to a DIFFERENT segment (setS: no parallel edges),
+    /// invalidate the previous owner's descriptor, so it reads as "not in the
+    /// graph" instead of holding a descriptor that dangles once the new owner is
+    /// removed (S1 PDVD cosmic1170: SIGSEGV in find_vertices via mcs_fill_kine).
+    /// File-static mirror like set_traj_cover_probe; TaggerCheckNeutrino sets it
+    /// from pr_alias_invalidate_old.  Default false => byte-identical when off.
+    void set_alias_invalidate_old(bool enable);
+
     
     /// Return the end-point vertices of a segment.
     ///
