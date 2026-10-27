@@ -23,6 +23,9 @@ file.  The rules, in this order (the distance cut must see the delta / Michel no
      root's first ancestor with points in another node); without one, the track class and their own instance.
   4. d_traj mask: track-labelled points with d_traj >= dtraj_cut_mm (the labeler's 25 mm cap) are left out of the class
      and instance losses; ghosts are never masked by it (they carry the cap by construction).
+  5. orphan_le (default off): a labelled point without a PF node (tid >= 0, pf_node -1: a nucleus with no visible ancestor
+     in the truth table -- its mother not stored, or an all-invisible chain such as K0 -> K0L -> alpha) takes class LE with
+     no instance.  Off, its labeler class -1 passes through and reads as GHOST (pr_ml doc 26 sec 7.3, owner 2026-10-26).
 
 Per point out: x / y / z (mm, corrected frame), cls (-1 ghost, -2 no label; else 0 track, 1 shower, 2 Michel, 3 delta,
 4 LE after the rules), inst (-1 none), mask_cls, mask_inst, frame_valid, detached.
@@ -36,7 +39,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 PARAMS = dict(version=1, frame="true_t0_dominant_primary", radius_mm=100.0, em_cut_classes=[2, 3], delta_fold=True,
-              dtraj_cut_mm=25.0, compton_q=2.0e5)
+              dtraj_cut_mm=25.0, compton_q=2.0e5, orphan_le=False)
 TRACK, SHOWER, MICHEL, DELTA, LE = 0, 1, 2, 3, 4
 GHOST, NOLABEL = -1, -2
 
@@ -203,6 +206,12 @@ def targets(P, truth, speed_mmus, params=None):
             folded += int(s.sum())
     S["delta_fold"] = dict(points=folded)
 
+    # 5. orphan nuclei (no PF node) -> LE, no instance
+    orphan = lab & (pfn < 0)
+    if p["orphan_le"]:
+        cls[orphan] = LE; inst[orphan] = -1; iv[orphan] = False
+    S["orphan"] = dict(points=int(orphan.sum()), to_le=bool(p["orphan_le"]))
+
     # 4. masks
     out_cls = np.where(tid == -1, GHOST, np.where(tid < -1, NOLABEL, cls))
     far_traj = lab & (dtr >= p["dtraj_cut_mm"])
@@ -271,9 +280,9 @@ def selftest():
     cluster 0 and -x on cluster 1 (the far photon of the Michel converted across the cathode)."""
     v, t0 = 1.6, 100.0
     shift = v * t0
-    mother = {1: 0, 2: 1, 3: 2, 4: 2, 5: 1, 6: 5}
-    start = {1: t0 * 1000, 2: t0 * 1000 + 2000, 3: t0 * 1000 + 2000, 4: t0 * 1000 + 2000, 5: t0 * 1000, 6: t0 * 1000}
-    nvis = {1: 1e6, 2: 3e5, 3: 1e4, 4: 1e4, 5: 5e4, 6: 4e5}
+    mother = {1: 0, 2: 1, 3: 2, 4: 2, 5: 1, 6: 5, 7: 0}
+    start = {1: t0 * 1000, 2: t0 * 1000 + 2000, 3: t0 * 1000 + 2000, 4: t0 * 1000 + 2000, 5: t0 * 1000, 6: t0 * 1000, 7: t0 * 1000}
+    nvis = {1: 1e6, 2: 3e5, 3: 1e4, 4: 1e4, 5: 5e4, 6: 4e5, 7: 3e3}
     pts = []   # (true x, y, z, cluster, dir, tid, orig_tid, pf_node, cls, iv, d_traj)
     for i in range(20):
         pts.append((-200.0 + 10 * i, 0, 0, 0, +1, 1, 1, 0, TRACK, 1, 3.0))       # muon, node 0
@@ -288,6 +297,8 @@ def selftest():
         pts.append((-100.0, 400 + i, 0, 0, +1, 6, 6, 2, DELTA, 1, 2.0))          # delta's far photon, 4e5 e -> shower
     pts.append((-150.0, 0, 30, 0, +1, 1, 1, 0, TRACK, 1, 30.0))                   # muon point far off its trajectory
     pts.append((0.0, -50, 0, 0, +1, -1, -1, -1, -1, 0, 25.0))                    # ghost (d_traj at the cap)
+    for i in range(2):
+        pts.append((-120.0, 30 + i, 0, 0, +1, 7, 7, -1, -1, 1, 5.0))             # a nucleus (7) without a PF node
     A = np.array(pts, dtype=float)
     Xtrue = A[:, :3]
     X = Xtrue.copy(); X[:, 0] += A[:, 4] * shift                                 # what the raw frame shows
@@ -313,6 +324,14 @@ def selftest():
     ok.append(("track point beyond the d_traj cut masked", (~out["mask_cls"][offt]).all() and (~out["mask_inst"][offt]).all()))
     gh = np.flatnonzero(P["tid"] == -1)
     ok.append(("ghost stays ghost and in the class loss", (out["cls"][gh] == GHOST).all() and out["mask_cls"][gh].all()))
+    orp = np.flatnonzero(P["tid"] == 7)
+    ok.append(("orphan nucleus, orphan_le off: labeler class -1 passes through (reads as GHOST), counted",
+               (out["cls"][orp] == GHOST).all() and S["orphan"]["points"] == 2 and not S["orphan"]["to_le"]))
+    outo, So = targets(P, dict(mother=mother, start_t_ns=start, nvis_q=nvis), v, dict(orphan_le=True))
+    ok.append(("orphan nucleus, orphan_le on: LE, in the class loss, no instance",
+               (outo["cls"][orp] == LE).all() and outo["mask_cls"][orp].all() and (~outo["mask_inst"][orp]).all() and (outo["inst"][orp] == -1).all()))
+    nonorp = np.flatnonzero(P["tid"] != 7)
+    ok.append(("orphan_le on changes nothing else", all(np.array_equal(out[k][nonorp], outo[k][nonorp]) for k in out)))
     # root without own points: the Michel node is left as it is
     P2 = {k: (v.copy() if hasattr(v, "copy") else v) for k, v in P.items()}
     keep = P2["tid"] != 2
@@ -340,12 +359,13 @@ def main():
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--pctree"); ap.add_argument("--truth"); ap.add_argument("--wires"); ap.add_argument("--speed-mmus", type=float)
     ap.add_argument("--radius-mm", type=float, default=PARAMS["radius_mm"]); ap.add_argument("--dtraj-cut-mm", type=float, default=PARAMS["dtraj_cut_mm"])
+    ap.add_argument("--orphan-le", action="store_true", help="rule 5: nucleus points without a PF node -> LE (default off)")
     ap.add_argument("--out"); ap.add_argument("--json")
     a = ap.parse_args()
     if a.selftest:
         sys.exit(0 if selftest() else 1)
     P, truth = read_event(a.pctree, a.truth, a.wires)
-    out, S = targets(P, truth, a.speed_mmus, dict(radius_mm=a.radius_mm, dtraj_cut_mm=a.dtraj_cut_mm))
+    out, S = targets(P, truth, a.speed_mmus, dict(radius_mm=a.radius_mm, dtraj_cut_mm=a.dtraj_cut_mm, orphan_le=a.orphan_le))
     if a.out:
         np.savez_compressed(a.out, **out, params=json.dumps(S["params"]))
     txt = json.dumps(S, indent=1)
