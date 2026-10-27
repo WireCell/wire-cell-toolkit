@@ -213,6 +213,9 @@ function(
     retile_deghost_gap_min_slices = 2,
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
+    // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
+    // null => key omitted => byte-identical.
+    retile_deghost_writeback = null,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4810,6 +4813,7 @@ function(
                              retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
+                             retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdvd/48; + doc pdvd/51 override bag

@@ -202,6 +202,29 @@ function(
     // 'none' (no tiling: the cluster's own blobs re-sampled with the retile samplers, so
     // charge_stepped is kept).  Set as code: PDHD_PR_TLA="-S retile_mode='none'".
     retile_mode = null,
+    // pr_ml doc 28 step 2 (owner 2026-10-27, gap-fill arm): the Steiner-stage retile in the doc pdvd/131 gapfill
+    // mode (ImproveCluster_2 retile_deghost; see pr.jsonnet).  false (default) => key omitted, no model service,
+    // no WireCellPytorch => byte-identical compiled config.  true needs retile_deghost_ml_levels = the imaging
+    // job's ml_levels rows [name, width, superwire, threshold]; model dir default the w9ft export,
+    // charge_scale / repair_q_floor default the PDHD imaging cascade's.
+    retile_deghost = false,
+    retile_deghost_ml_levels = null,
+    retile_deghost_model_dir = 'fm/protodunehd/deghost_w9ft',
+    retile_deghost_model_suffix = '',
+    retile_deghost_device = 'cpu',
+    retile_deghost_charge_scale = 0.25,
+    retile_deghost_repair_q_floor = 1e4,
+    retile_deghost_nthreads = 4,
+    retile_deghost_dump_dir = null,
+    retile_deghost_residual = true,
+    retile_deghost_corridor_wires = 1,
+    retile_deghost_bridge_planes = 1,
+    retile_deghost_gap_min_slices = 2,
+    retile_deghost_gap_max_cm = 20,
+    retile_deghost_reach_cm = 20,
+    // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
+    // null => key omitted => byte-identical.
+    retile_deghost_writeback = null,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4189,6 +4212,22 @@ function(
                              retile_sampler_wire_product=retile_sampler_wire_product,
                              retile_sampler_charge_threshold=retile_sampler_charge_threshold,
                              retile_mode=retile_mode,   // doc pdvd/113
+                             retile_deghost=retile_deghost,   // pr_ml doc 28 step 2
+                             retile_deghost_ml_levels=retile_deghost_ml_levels,
+                             retile_deghost_model_dir=retile_deghost_model_dir,
+                             retile_deghost_model_suffix=retile_deghost_model_suffix,
+                             retile_deghost_device=retile_deghost_device,
+                             retile_deghost_charge_scale=retile_deghost_charge_scale,
+                             retile_deghost_repair_q_floor=retile_deghost_repair_q_floor,
+                             retile_deghost_nthreads=retile_deghost_nthreads,
+                             retile_deghost_dump_dir=retile_deghost_dump_dir,
+                             retile_deghost_residual=retile_deghost_residual,
+                             retile_deghost_corridor_wires=retile_deghost_corridor_wires,
+                             retile_deghost_bridge_planes=retile_deghost_bridge_planes,
+                             retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                             retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
+                             retile_deghost_reach_cm=retile_deghost_reach_cm,
+                             retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdhd/03; + doc pdvd/51 override bag
@@ -4357,7 +4396,8 @@ function(
         data: {
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
-                     + (if needs_root then ['WireCellRoot'] else []),
+                     + (if needs_root then ['WireCellRoot'] else [])
+                     + (if retile_deghost then ['WireCellPytorch'] else []),   // pr_ml doc 28 step 2
             apps: ['Pgrapher'],
         },
     };

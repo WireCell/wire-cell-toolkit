@@ -929,6 +929,29 @@ function(
     image_deghost_truth_speed_mmus = null,
     image_deghost_truth_table = '',
     image_deghost_truth_extra = {},
+    // pr_ml doc 28 step 2 (owner 2026-10-27, gap-fill arm): the Steiner-stage retile in the doc pdvd/131 gapfill mode
+    // (ImproveCluster_2 retile_deghost; see sbnd/clus.jsonnet pr()).  false (default) => key omitted, no model
+    // service, no WireCellPytorch => byte-identical compiled config.  true needs retile_deghost_ml_levels = the
+    // imaging job's ml_levels rows [name, width, superwire, threshold] (-S, as the d53 imaging fork's arm);
+    // model dir default the w9ft export, charge_scale / repair_q_floor default the SBND imaging cascade's.
+    retile_deghost = false,
+    retile_deghost_ml_levels = null,
+    retile_deghost_model_dir = 'fm/sbnd/deghost_w9ft',
+    retile_deghost_model_suffix = '',
+    retile_deghost_device = 'cpu',
+    retile_deghost_charge_scale = 0.25,
+    retile_deghost_repair_q_floor = 6300,
+    retile_deghost_nthreads = 4,
+    retile_deghost_dump_dir = null,
+    retile_deghost_residual = true,
+    retile_deghost_corridor_wires = 1,
+    retile_deghost_bridge_planes = 1,
+    retile_deghost_gap_min_slices = 2,
+    retile_deghost_gap_max_cm = 20,
+    retile_deghost_reach_cm = 20,
+    // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
+    // null => key omitted => byte-identical.
+    retile_deghost_writeback = null,
     // doc sbnd_xin/pr/149 round 2: the PR job's RESAMPLE stage (ClusteringResampleLive,
     // sbnd/clus.jsonnet cm_by_name.resample_live).  Non-null => 'resample_live' is
     // prepended to pipeline_names and re-samples every live blob's "3d" cloud with this
@@ -3956,6 +3979,22 @@ function(
                              image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
                              image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
                              image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
+                             retile_deghost=retile_deghost,   // pr_ml doc 28 step 2
+                             retile_deghost_ml_levels=retile_deghost_ml_levels,
+                             retile_deghost_model_dir=retile_deghost_model_dir,
+                             retile_deghost_model_suffix=retile_deghost_model_suffix,
+                             retile_deghost_device=retile_deghost_device,
+                             retile_deghost_charge_scale=retile_deghost_charge_scale,
+                             retile_deghost_repair_q_floor=retile_deghost_repair_q_floor,
+                             retile_deghost_nthreads=retile_deghost_nthreads,
+                             retile_deghost_dump_dir=retile_deghost_dump_dir,
+                             retile_deghost_residual=retile_deghost_residual,
+                             retile_deghost_corridor_wires=retile_deghost_corridor_wires,
+                             retile_deghost_bridge_planes=retile_deghost_bridge_planes,
+                             retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                             retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
+                             retile_deghost_reach_cm=retile_deghost_reach_cm,
+                             retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
                              tcn_knobs=tcn_knobs);
 
     // pr_ml doc 28: with image_deghost_dir the pctree and the cascade image are joined (tensors concatenated,
@@ -4015,7 +4054,8 @@ function(
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
                      + (if needs_root then ['WireCellRoot'] else [])
                      // pr_ml doc 28: the cascade-tree TruthPointLabeler (image_deghost_truth_depos); '' => not loaded
-                     + (if image_deghost_dir != '' && image_deghost_truth_depos != '' then ['WireCellTruth'] else []),
+                     + (if image_deghost_dir != '' && image_deghost_truth_depos != '' then ['WireCellTruth'] else [])
+                     + (if retile_deghost then ['WireCellPytorch'] else []),   // pr_ml doc 28 step 2
             apps: ['Pgrapher'],
         },
     };

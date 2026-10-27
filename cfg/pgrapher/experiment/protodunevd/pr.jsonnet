@@ -188,6 +188,10 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_deghost_gap_min_slices=2,
               retile_deghost_gap_max_cm=20,
               retile_deghost_reach_cm=20,
+              // pr_ml doc 28 step 2: writeback, C++ true (CreateSteinerGraph replaces the cluster's
+              // blobs by the gapfill cells, the -beam behaviour); false = the gapfill cloud feeds the
+              // Steiner graph only, as the full / none retiles do.  null => key omitted.
+              retile_deghost_writeback=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1629,6 +1633,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             gap_min_slices: retile_deghost_gap_min_slices,
             gap_max: retile_deghost_gap_max_cm * wc.cm,
             reach: retile_deghost_reach_cm * wc.cm,
+            // pr_ml doc 28 step 2: null => key omitted (C++ true: CreateSteinerGraph writes the cells back)
+            [if retile_deghost_writeback != null then 'writeback']: retile_deghost_writeback,
         } else null,
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is

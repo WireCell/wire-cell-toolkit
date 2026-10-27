@@ -123,6 +123,11 @@ namespace WireCell::Clus {
             int gap_min_slices{2};           // a gap spans at least this many slices
             double gap_max{20 * units::cm};  // longer gaps are left to the Steiner graph
             double reach{20 * units::cm};    // the owner map's region = the base's bounds widened by this
+            // pr_ml doc 28 step 2: true (default, doc 130 behaviour) tags the cluster so CreateSteinerGraph replaces
+            // its blobs by the base + corridor cells; false leaves the cluster's blobs untouched and the gapfill cloud
+            // feeds the Steiner graph only, as the retile_mode full / none copies do (the replaced cells carry no
+            // truth cloud and no clustering-job arrays such as SBND's y_cor / z_cor).
+            bool writeback{true};
         };
         RetileDeghost m_rd;
         // doc pdvd/131 gapfill, one face: the base cells and the corridor candidates as IBlobs
@@ -245,6 +250,7 @@ namespace WireCell::Clus {
         rd.gap_min_slices = std::max(1, get(j, "gap_min_slices", rd.gap_min_slices));
         rd.gap_max = get(j, "gap_max", rd.gap_max);
         rd.reach = get(j, "reach", rd.reach);
+        rd.writeback = get(j, "writeback", rd.writeback);
         rd.levels.clear();
         for (const auto& jl : j["levels"]) {
             Aux::Cascade::LevelSpec lc;
@@ -267,10 +273,10 @@ namespace WireCell::Clus {
         }
         SPDLOG_LOGGER_INFO(log, "retile_deghost on (gapfill, doc pdvd/131): scope={} window=[{:.3f}, {:.3f}) us levels:{} repair={} budget={:.4f} "
                            "charge_scale={} nthreads={} dump_dir='{}' residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
-                           "gap_max={:.1f} cm reach={:.1f} cm",
+                           "gap_max={:.1f} cm reach={:.1f} cm writeback={}",
                            rd.scope, rd.beam_window_low / units::us, rd.beam_window_high / units::us, desc,
                            rp.repair, rp.steiner.budget, rd.charge_scale, rp.nthreads, rd.dump_dir, rd.residual, rd.corridor_wires,
-                           rd.bridge_planes, rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm);
+                           rd.bridge_planes, rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm, rd.writeback);
     }
 
     bool ImproveCluster_2::rd_in_scope(const Cluster& cluster) const
@@ -311,6 +317,9 @@ namespace WireCell::Clus {
         cfg["terminal_charge_threshold"] = m_steiner_terminal_charge;
         cfg["retile_mode"] = m_retile_mode;
         cfg["dump_dir"] = m_dump_dir;
+        // pr_ml doc 28 step 2: an echo of the parsed gapfill write-back switch, present only once a retile_deghost
+        // object has been configured (never at the framework's pre-configure call, so no config changes).
+        if (m_rd.on) cfg["retile_deghost_writeback"] = m_rd.writeback;
 
         return cfg;
     }
@@ -709,7 +718,8 @@ namespace WireCell::Clus {
                     RetileDump::write(m_rd.dump_dir, orig_cluster->ident(), rd_call, apa, fout, "rdout");
                 }
             }
-            orig_cluster->set_scalar<int>("retile_deghost_writeback", 1);   // CreateSteinerGraph replaces the blobs
+            // CreateSteinerGraph replaces the blobs (pr_ml doc 28 step 2: not when writeback is off)
+            if (m_rd.writeback) orig_cluster->set_scalar<int>("retile_deghost_writeback", 1);
         }
 
         // Remove this cluster from the grouping
