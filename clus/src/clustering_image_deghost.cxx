@@ -10,8 +10,8 @@
 //     clusters taking its cells (image_deghost_cluster_t0): one bundle had one
 //     t0, every cluster may not -- a cell whose owner's t0 differs from the
 //     t0 its cascade cluster borrows is not taken (counted in the log),
-//     unless t0_split (pr_ml doc 32 sec B.4) moves those cells to a cascade
-//     cluster of their own, corrected with their owner's t0;
+//     unless t0_split (pr_ml doc 32 sec B.4, default on) moves those cells to
+//     a cascade cluster of their own, corrected with their owner's t0;
 //   * per-cluster lines go to debug, one summary line to info.
 // As in the beam stage: the cascade image arrives as a second grouping
 // (default "deghost", built by PointTreeBuilding from the cascade's cluster
@@ -107,8 +107,8 @@ public:
         m_dump_dir = get<std::string>(config, "dump_dir", m_dump_dir);
         // pr_ml doc 32 sec B.4: a cascade cluster joining tracks of different flash t0 borrows one t0 and leaves the
         // cells of the other owners behind (29107_3 cluster 118: 383 cells, 4.9 M e).  true: those cells move to a new
-        // cascade cluster per owner t0, are corrected with that t0 and are taken.  Default false (one t0 per cascade
-        // cluster, the cells left).
+        // cascade cluster per owner t0, are corrected with that t0 and are taken.  Default TRUE since pr_ml doc 32 sec
+        // B.4 (owner 2026-10-28: "Switch on"); false = one t0 per cascade cluster, the cells left (doc pdvd/125 rule).
         m_t0_split = get<bool>(config, "t0_split", m_t0_split);
     }
 
@@ -410,5 +410,5 @@ private:
     bool m_strip_t0cor_leftover{false};
     bool m_harmonize_3d_keys{false};
     std::string m_dump_dir{""};
-    bool m_t0_split{false};
+    bool m_t0_split{true};
 };

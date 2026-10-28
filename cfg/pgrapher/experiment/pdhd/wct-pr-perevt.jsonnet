@@ -246,9 +246,9 @@ function(
     // pr_ml doc 32: the hand-over diagnostic dump (ClusteringImageDeghost dump_dir).  null => key omitted.
     image_deghost_dump_dir = null,
     // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split -- a cascade cluster joining tracks of different flash t0
-    // gives each cell its owner's t0 instead of leaving the cells of the minority t0.  C++ default false; key omitted
-    // when false.
-    image_deghost_t0_split = false,
+    // gives each cell its owner's t0 instead of leaving the cells of the minority t0.  C++ default TRUE (flipped);
+    // null => key omitted, false restores the one-t0 rule.
+    image_deghost_t0_split = null,
     image_deghost_truth_depos = '',
     image_deghost_truth_time_offset_us = 0,
     image_deghost_truth_speed_mmus = null,
