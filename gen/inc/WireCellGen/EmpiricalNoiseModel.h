@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <memory>
 #include <mutex>
 
 namespace WireCell {
@@ -112,18 +113,33 @@ namespace WireCell {
             // cache amplitudes to the nearest integral distance.
             mutable std::unordered_map<int, int> m_chid_to_intlen;
 
-            typedef std::unordered_map<int, spectrum_data_t> len_amp_cache_t;
-            mutable std::vector<len_amp_cache_t> m_len_amp_cache;
-
             // two layered caching to avoid per-channel cache
             // chid -> pack-key
             mutable std::unordered_map<int, unsigned int> m_channel_packkey_cache;
+
+            typedef std::unordered_map<int, spectrum_data_t> len_amp_cache_t;
             using channel_amp_cache_t = std::unordered_map<unsigned int, amplitude_t>;
-            mutable channel_amp_cache_t m_channel_amp_cache;
-            
+
+            // The spectra depend only on the configuration (spectra,
+            // sampling, binning), not on the anode, so they are held in a
+            // cache shared by all identically configured instances.  A job
+            // has one model per anode; per-instance caches cost tens of MB
+            // for every anode that ever saw activity.  Entries are never
+            // erased, so references into the maps stay valid.
+            struct SpectrumCache {
+                std::mutex mutex;
+                std::vector<len_amp_cache_t> len_amp{4};    // per plane
+                channel_amp_cache_t channel_amp;            // by pack-key
+                std::unordered_map<int, Waveform::realseq_t> elec_resp;
+            };
+            std::shared_ptr<SpectrumCache> m_cache;
+            static std::shared_ptr<SpectrumCache> shared_cache(const std::string& key);
+
+            // the get_spectrum_data() body; m_cache->mutex must be held.
+            const spectrum_data_t& get_spectrum_data_locked(int iplane, int ilen) const;
+
             // need to convert the electronics response in here ...
             Waveform::realseq_t m_elec_resp_freq;
-            mutable std::unordered_map<int, Waveform::realseq_t> m_elec_resp_cache;
 
         };
 
