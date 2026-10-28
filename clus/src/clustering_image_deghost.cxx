@@ -9,7 +9,9 @@
 //   * the T0 correction is applied per cascade cluster with the t0 of the live
 //     clusters taking its cells (image_deghost_cluster_t0): one bundle had one
 //     t0, every cluster may not -- a cell whose owner's t0 differs from the
-//     t0 its cascade cluster borrows is not taken (counted in the log);
+//     t0 its cascade cluster borrows is not taken (counted in the log),
+//     unless t0_split (pr_ml doc 32 sec B.4) moves those cells to a cascade
+//     cluster of their own, corrected with their owner's t0;
 //   * per-cluster lines go to debug, one summary line to info.
 // As in the beam stage: the cascade image arrives as a second grouping
 // (default "deghost", built by PointTreeBuilding from the cascade's cluster
@@ -103,6 +105,11 @@ public:
         // t0 decision of its cascade cluster and whether it was taken) to <dump_dir>/image_deghost.json.  Empty
         // (default) = no file; the dump never changes the output.
         m_dump_dir = get<std::string>(config, "dump_dir", m_dump_dir);
+        // pr_ml doc 32 sec B.4: a cascade cluster joining tracks of different flash t0 borrows one t0 and leaves the
+        // cells of the other owners behind (29107_3 cluster 118: 383 cells, 4.9 M e).  true: those cells move to a new
+        // cascade cluster per owner t0, are corrected with that t0 and are taken.  Default false (one t0 per cascade
+        // cluster, the cells left).
+        m_t0_split = get<bool>(config, "t0_split", m_t0_split);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -117,6 +124,7 @@ public:
         cfg["strip_t0cor_leftover"] = m_strip_t0cor_leftover;
         cfg["harmonize_3d_keys"] = m_harmonize_3d_keys;
         cfg["dump_dir"] = m_dump_dir;
+        cfg["t0_split"] = m_t0_split;
         return cfg;
     }
 
@@ -152,7 +160,7 @@ public:
         std::vector<Blob*> cells;
         std::vector<int> cell_dgc;      // index of the cell's cluster in the deghost grouping
         std::vector<DeghostBox> cboxes;
-        const std::vector<Cluster*> dclusters = dg.children();
+        std::vector<Cluster*> dclusters = dg.children();   // t0_split appends
         for (size_t k = 0; k < dclusters.size(); ++k) {
             for (Blob* b : dclusters[k]->children()) {
                 cells.push_back(b);
@@ -162,7 +170,7 @@ public:
         }
         const auto owner_of = beam_deghost_assign(cboxes, owners);
         std::vector<char> take;
-        const auto dgt0 = image_deghost_cluster_t0(cell_dgc, owner_of, selected, owner_t0, (int) dclusters.size(),
+        auto dgt0 = image_deghost_cluster_t0(cell_dgc, owner_of, selected, owner_t0, (int) dclusters.size(),
                                                    m_t0_tolerance, take);
         size_t n_t0_conflict = 0, n_t0_left = 0;
         for (const auto& d : dgt0) n_t0_conflict += d.conflict ? 1 : 0;
@@ -175,6 +183,39 @@ public:
         size_t n_outside = 0; double q_outside = 0;
         for (size_t i = 0; i < cells.size(); ++i) {
             if (owner_of[i] < 0 && dgt0[cell_dgc[i]].touched) { ++n_outside; q_outside += cells[i]->charge(); }
+        }
+
+        // ---- t0_split: the cells a t0 conflict leaves behind move, one new cascade cluster per owner t0 (appended
+        // to the deghost grouping, cells in ascending index = child order), and are taken.
+        size_t n_split = 0, n_split_cells = 0;
+        Json::Value jsplit(Json::arrayValue);
+        if (m_t0_split) {
+            const auto splits = image_deghost_t0_split(cell_dgc, owner_of, selected, owner_t0, dgt0, m_t0_tolerance);
+            for (const auto& sp : splits) {
+                Cluster& nc = dg.make_child();
+                const int nd = (int) dclusters.size();
+                for (size_t i : sp.cells) {
+                    auto node = cells[i]->cluster()->remove_child(*cells[i]);
+                    nc.node()->insert(std::move(node));
+                    cell_dgc[i] = nd;
+                    take[i] = 1;
+                }
+                dclusters[sp.dgc]->invalidate_cache();
+                nc.invalidate_cache();
+                dclusters.push_back(&nc);
+                ImageDeghostT0 x;
+                x.touched = true;
+                x.t0 = sp.t0;
+                dgt0.push_back(x);
+                ++n_split;
+                n_split_cells += sp.cells.size();
+                Json::Value r(Json::arrayValue);
+                r.append(sp.dgc);
+                r.append(nd);
+                r.append(sp.t0);
+                r.append((Json::UInt64) sp.cells.size());
+                jsplit.append(r);
+            }
         }
 
         // ---- T0 correction of the taken cells, per cascade cluster, while they
@@ -247,6 +288,10 @@ public:
             jdump["cell_columns"] = "wpid t0 t1 u0 u1 v0 v1 w0 w1 cascade_cluster owner_key take in_scope charge x y z";
             jdump["blob_columns"] = "wpid t0 t1 u0 u1 v0 v1 w0 w1 charge x y z";
             jdump["cascade_cluster_columns"] = "touched t0 conflict";
+            if (m_t0_split) {
+                jdump["t0_splits"] = jsplit;
+                jdump["t0_split_columns"] = "from_cascade_cluster new_cascade_cluster t0 ncells";
+            }
         }
 
         // ---- replace, one cluster at a time (ascending key) -------------------
@@ -323,6 +368,10 @@ public:
                        " the production footprint {} q {:.0f}",
                        m_select, keys.size(), lclusters.size(), n_replaced, n_dropped, n_kept_asis, tot_before, tot_after,
                        totq_before, totq_after, tot_unc, totq_unc, tot_oos, n_t0_conflict, n_t0_left, n_outside, q_outside);
+        if (m_t0_split) {
+            logger()->info("ClusteringImageDeghost: t0_split: {} cascade cluster(s) of the {} with a t0 conflict split off,"
+                           " {} cell(s) taken with their owner's t0", n_split, n_t0_conflict, n_split_cells);
+        }
         if (dumping) Persist::dump(m_dump_dir + "/image_deghost.json", jdump);
         if (m_strip_t0cor_leftover) {
             const auto& pct = m_pcts->pc_transform(m_correction_name);
@@ -361,4 +410,5 @@ private:
     bool m_strip_t0cor_leftover{false};
     bool m_harmonize_3d_keys{false};
     std::string m_dump_dir{""};
+    bool m_t0_split{false};
 };

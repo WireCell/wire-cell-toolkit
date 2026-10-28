@@ -1919,6 +1919,10 @@ function(
     image_deghost_harmonize_3d_keys = false,
     // pr_ml doc 32: the hand-over diagnostic dump (ClusteringImageDeghost dump_dir).  null => key omitted.
     image_deghost_dump_dir = null,
+    // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split -- a cascade cluster joining tracks of different flash t0
+    // gives each cell its owner's t0 instead of leaving the cells of the minority t0.  C++ default false; key omitted
+    // when false.
+    image_deghost_t0_split = false,
     image_deghost_truth_depos = '',
     image_deghost_truth_time_offset_us = 0,
     image_deghost_truth_speed_mmus = null,
@@ -4864,6 +4868,7 @@ function(
                              image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
                              image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
                              image_deghost_dump_dir=image_deghost_dump_dir,   // pr_ml doc 32
+                             image_deghost_t0_split=image_deghost_t0_split,   // pr_ml doc 32 sec B.4
                              beam_deghost_fill_cluster_t0=beam_deghost_fill_cluster_t0,   // pr_ml doc 24 sec 6
                              beam_deghost_strip_t0cor_leftover=beam_deghost_strip_t0cor_leftover,   // pr_ml doc 24 sec 6
                              beam_pr_knobs=beam_pr_knobs + (if beam_fill_scalars then { fill_beam_scalars: true } else {}),   // doc pdvd/120; pr_ml doc 24 sec 6

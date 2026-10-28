@@ -61,6 +61,35 @@ TEST_CASE("image_deghost_cluster_t0: empty input")
     CHECK(r.empty()); CHECK(take.empty());
 }
 
+// pr_ml doc 32 sec B.4 (29107_3 cluster 118): the cells a t0 conflict leaves behind, grouped by their owner's t0.
+TEST_CASE("image_deghost_t0_split: one group per owner t0 left behind")
+{
+    // cascade cluster 0: owners 0 (t0 10) x3, 1 (t0 20) x2, 2 (t0 20.5, within tol of 20) x1, 3 (t0 30) x1,
+    //                    owner 4 unselected (t0 40), one unowned cell
+    // cascade cluster 1: owner 1 only -> no conflict, nothing split
+    const std::vector<int> dgc{0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    const std::vector<int> own{0, 1, 0, 3, 2, 1, 0, 4, -1, 1};
+    const std::vector<char> sel{1, 1, 1, 1, 0};
+    const std::vector<double> t0{10, 20, 20.5, 30, 40};
+    std::vector<char> take;
+    const auto r = image_deghost_cluster_t0(dgc, own, sel, t0, 2, 1.0, take);
+    REQUIRE(r[0].conflict);
+    CHECK(r[0].t0 == 10);
+    CHECK(!r[1].conflict);
+    const auto sp = image_deghost_t0_split(dgc, own, sel, t0, r, 1.0);
+    REQUIRE(sp.size() == 2);
+    CHECK(sp[0].dgc == 0); CHECK(sp[0].t0 == 20);
+    CHECK(sp[0].cells == std::vector<size_t>{1, 4, 5});   // owners 1 and 2: one t0 within tol
+    CHECK(sp[1].dgc == 0); CHECK(sp[1].t0 == 30);
+    CHECK(sp[1].cells == std::vector<size_t>{3});
+    // every split cell was left by the one-t0 rule; nothing taken is split
+    for (const auto& g : sp) for (size_t i : g.cells) CHECK(!take[i]);
+    // without a conflict there is nothing to split
+    const std::vector<double> t0same{10, 10, 10, 10, 10};
+    const auto r2 = image_deghost_cluster_t0(dgc, own, sel, t0same, 2, 1.0, take);
+    CHECK(image_deghost_t0_split(dgc, own, sel, t0same, r2, 1.0).empty());
+}
+
 // harmonize_blob_arrays (ClusteringImageDeghost harmonize_3d_keys): after the cells replace a cluster's blobs, the live
 // blobs can carry different "3d" key sets (SBND simulation: y_cor / z_cor persisted by the clustering job on the blobs
 // not replaced, absent on the cells).  TensorDM::as_tensors then throws ("missing keys in append", SBND mpvmpr_1076) or,

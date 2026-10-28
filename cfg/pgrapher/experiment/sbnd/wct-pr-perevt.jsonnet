@@ -922,6 +922,10 @@ function(
     image_deghost_harmonize_3d_keys = false,
     // pr_ml doc 32: the hand-over diagnostic dump (ClusteringImageDeghost dump_dir).  null => key omitted.
     image_deghost_dump_dir = null,
+    // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split -- a cascade cluster joining tracks of different flash t0
+    // gives each cell its owner's t0 instead of leaving the cells of the minority t0.  C++ default false; key omitted
+    // when false.
+    image_deghost_t0_split = false,
     // The per-point truth cloud on the cascade cells (simulation): '' => no labeler.  Set (the drifted
     // sim-depos) => a TruthPointLabeler per anode with these settings; pass the event's clustering values
     // (time offset 268 us, the imaging drift speed, the Stage A truth.npz) and, as image_deghost_truth_extra,
@@ -3984,6 +3988,7 @@ function(
                              image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
                              image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
                              image_deghost_dump_dir=image_deghost_dump_dir,   // pr_ml doc 32
+                             image_deghost_t0_split=image_deghost_t0_split,   // pr_ml doc 32 sec B.4
                              retile_deghost=retile_deghost,   // pr_ml doc 28 step 2
                              retile_deghost_ml_levels=retile_deghost_ml_levels,
                              retile_deghost_model_dir=retile_deghost_model_dir,

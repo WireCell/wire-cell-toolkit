@@ -711,6 +711,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               image_deghost_harmonize_3d_keys=false,
               // pr_ml doc 32: ClusteringImageDeghost dump_dir (the hand-over diagnostic); null => key omitted.
               image_deghost_dump_dir=null,
+              // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split (cells a t0 conflict leaves behind are taken with
+              // their owner's t0).  C++ default false; key omitted when false => byte-identical compiled config.
+              image_deghost_t0_split=false,
               // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
               // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
               // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
@@ -1705,6 +1708,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                     [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
                     [if image_deghost_dump_dir != null then 'dump_dir']: image_deghost_dump_dir,   // pr_ml doc 32
+                    [if image_deghost_t0_split then 't0_split']: true,   // pr_ml doc 32 sec B.4
                 },
             }),
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the

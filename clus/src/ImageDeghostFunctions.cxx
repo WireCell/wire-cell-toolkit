@@ -52,6 +52,42 @@ std::vector<ImageDeghostT0> WireCell::Clus::PR::image_deghost_cluster_t0(const s
     return out;
 }
 
+std::vector<ImageDeghostSplit> WireCell::Clus::PR::image_deghost_t0_split(const std::vector<int>& cell_dgc,
+                                                                          const std::vector<int>& owner_of,
+                                                                          const std::vector<char>& selected,
+                                                                          const std::vector<double>& owner_t0,
+                                                                          const std::vector<ImageDeghostT0>& dgt0,
+                                                                          double tol)
+{
+    const int n_dgc = (int) dgt0.size();
+    std::map<int, std::vector<ImageDeghostSplit>> per_dgc;   // int keys => sorted, deterministic
+    for (size_t i = 0; i < cell_dgc.size(); ++i) {
+        const int d = cell_dgc[i];
+        if (d < 0 || d >= n_dgc || !dgt0[d].conflict) continue;
+        const int k = owner_of[i];
+        if (k < 0 || k >= (int) selected.size() || !selected[k]) continue;
+        const double t0 = owner_t0[k];
+        if (std::abs(t0 - dgt0[d].t0) <= tol) continue;   // taken with the cascade cluster's own t0
+        auto& groups = per_dgc[d];
+        ImageDeghostSplit* g = nullptr;
+        for (auto& x : groups) {
+            if (std::abs(t0 - x.t0) <= tol) { g = &x; break; }
+        }
+        if (!g) {
+            groups.emplace_back();
+            g = &groups.back();
+            g->dgc = d;
+            g->t0 = t0;
+        }
+        g->cells.push_back(i);
+    }
+    std::vector<ImageDeghostSplit> out;
+    for (auto& [d, groups] : per_dgc) {
+        for (auto& g : groups) out.push_back(std::move(g));
+    }
+    return out;
+}
+
 size_t WireCell::Clus::PR::harmonize_blob_arrays(WireCell::Clus::Facade::Grouping& grouping, const std::string& pcname,
                                                  std::vector<std::string>& partial)
 {

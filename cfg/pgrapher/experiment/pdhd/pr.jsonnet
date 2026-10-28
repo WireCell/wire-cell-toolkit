@@ -202,6 +202,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               image_deghost_harmonize_3d_keys=false,
               // pr_ml doc 32: ClusteringImageDeghost dump_dir (the hand-over diagnostic); null => key omitted.
               image_deghost_dump_dir=null,
+              // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split (cells a t0 conflict leaves behind are taken with
+              // their owner's t0).  C++ default false; key omitted when false => byte-identical compiled config.
+              image_deghost_t0_split=false,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1584,6 +1587,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                     [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
                     [if image_deghost_dump_dir != null then 'dump_dir']: image_deghost_dump_dir,   // pr_ml doc 32
+                    [if image_deghost_t0_split then 't0_split']: true,   // pr_ml doc 32 sec B.4
                 },
             }),
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the

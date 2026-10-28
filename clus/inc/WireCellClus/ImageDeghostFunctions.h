@@ -45,6 +45,24 @@ namespace WireCell::Clus::PR {
                                                          int n_dgc, double tol,
                                                          std::vector<char>& take);
 
+    /// t0_split of ClusteringImageDeghost (pr_ml doc 32 sec B.4): one cascade cluster can join tracks of different
+    /// flash t0 (they overlap in raw time and wires), and image_deghost_cluster_t0 leaves the cells of every owner
+    /// whose t0 differs from the one it borrows.  This finds those cells: per cascade cluster with a conflict, the
+    /// cells of a selected owner whose t0 is beyond tol of dgt0[d].t0, grouped by t0 (within tol of the group's
+    /// first cell).  Each group becomes a cascade cluster of its own, corrected with its own t0, so every cell is
+    /// T0-corrected with its owner's t0.  Groups come in ascending cascade cluster, then by first cell index;
+    /// cells ascending.
+    struct ImageDeghostSplit {
+        int dgc{-1};               ///< the cascade cluster the cells come from
+        double t0{0};              ///< the t0 of their owners
+        std::vector<size_t> cells; ///< cell indices
+    };
+    std::vector<ImageDeghostSplit> image_deghost_t0_split(const std::vector<int>& cell_dgc,
+                                                          const std::vector<int>& owner_of,
+                                                          const std::vector<char>& selected,
+                                                          const std::vector<double>& owner_t0,
+                                                          const std::vector<ImageDeghostT0>& dgt0, double tol);
+
     /// harmonize_3d_keys of ClusteringImageDeghost: erase, from every blob of the grouping, each array of the
     /// blobs' local PC `pcname` that not all blobs carrying that PC have, so TensorDM::as_tensors sees one key set
     /// (it throws when the first node has a key a later one lacks, and drops the key in the opposite order).

@@ -2528,6 +2528,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
        image_deghost_fill_cluster_t0=false, image_deghost_strip_t0cor_leftover=false, image_deghost_harmonize_3d_keys=false,
        // pr_ml doc 32: ClusteringImageDeghost dump_dir (the hand-over diagnostic); null => key omitted.
        image_deghost_dump_dir=null,
+       // pr_ml doc 32 sec B.4: ClusteringImageDeghost t0_split (cells a t0 conflict leaves behind are taken with their
+       // owner's t0).  C++ default false; key omitted when false.
+       image_deghost_t0_split=false,
        // pr_ml doc 28 step 2 (owner 2026-10-27, gap-fill arm): the Steiner-stage retile in the doc pdvd/131 GAPFILL
        // mode (ImproveCluster_2 "retile_deghost", C++ absent = off), as protodunevd/pr.jsonnet: the cluster's blobs
        // are the fixed base, gaps along its path are bridged by one-wire corridors at cell resolution, and the
@@ -2727,6 +2730,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                     [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                     [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
                     [if image_deghost_dump_dir != null then 'dump_dir']: image_deghost_dump_dir,   // pr_ml doc 32
+                    [if image_deghost_t0_split then 't0_split']: true,   // pr_ml doc 32 sec B.4
                 },
             }),
             // Restore the prototype main+associated data product before anything
