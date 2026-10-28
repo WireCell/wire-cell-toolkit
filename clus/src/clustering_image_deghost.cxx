@@ -40,6 +40,7 @@
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Logging.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/Persist.h"
 
 #include <map>
 #include <set>
@@ -98,6 +99,10 @@ public:
         // then throws or drops them depending on node order.  true: after the replacement, erase from every
         // live blob each "3d" array that not all live blobs carry (logged).  Default false.
         m_harmonize_3d_keys = get<bool>(config, "harmonize_3d_keys", m_harmonize_3d_keys);
+        // pr_ml doc 32 sec B.3: a diagnostic dump of the hand-over (every live blob, every cell with its owner, the
+        // t0 decision of its cascade cluster and whether it was taken) to <dump_dir>/image_deghost.json.  Empty
+        // (default) = no file; the dump never changes the output.
+        m_dump_dir = get<std::string>(config, "dump_dir", m_dump_dir);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -111,6 +116,7 @@ public:
         cfg["fill_cluster_t0"] = m_fill_cluster_t0;
         cfg["strip_t0cor_leftover"] = m_strip_t0cor_leftover;
         cfg["harmonize_3d_keys"] = m_harmonize_3d_keys;
+        cfg["dump_dir"] = m_dump_dir;
         return cfg;
     }
 
@@ -190,6 +196,59 @@ public:
             }
         }
 
+        // pr_ml doc 32 sec B.3: the hand-over as it stands before any blob moves
+        Json::Value jdump;
+        const bool dumping = !m_dump_dir.empty();
+        auto jbox = [](const DeghostBox& x) {
+            Json::Value r(Json::arrayValue);
+            for (int v : {x.wpid, x.t0, x.t1, x.u0, x.u1, x.v0, x.v1, x.w0, x.w1}) r.append(v);
+            return r;
+        };
+        if (dumping) {
+            for (size_t k = 0; k < lclusters.size(); ++k) {
+                Cluster* c = lclusters[k];
+                Json::Value jc;
+                jc["key"] = (int) k;
+                jc["cluster_id"] = c->get_cluster_id();
+                jc["t0"] = owner_t0[k];
+                jc["selected"] = (int) selected[k];
+                jc["npoints"] = (Json::UInt64) c->npoints();
+                Json::Value jb(Json::arrayValue);
+                for (const Blob* b : c->children()) {
+                    Json::Value r = jbox(make_box(*b, (int) k));
+                    r.append(b->charge());
+                    r.append(b->center_x());
+                    r.append(b->center_y());
+                    r.append(b->center_z());
+                    jb.append(r);
+                }
+                jc["blobs"] = jb;
+                jdump["clusters"].append(jc);
+            }
+            for (size_t i = 0; i < cells.size(); ++i) {
+                Json::Value r = jbox(cboxes[i]);
+                r.append(cell_dgc[i]);
+                r.append(owner_of[i]);
+                r.append((int) take[i]);
+                r.append(cell_ok[i]);
+                r.append(cells[i]->charge());
+                r.append(cells[i]->center_x());
+                r.append(cells[i]->center_y());
+                r.append(cells[i]->center_z());
+                jdump["cells"].append(r);
+            }
+            for (size_t k = 0; k < dgt0.size(); ++k) {
+                Json::Value r(Json::arrayValue);
+                r.append((int) dgt0[k].touched);
+                r.append(dgt0[k].t0);
+                r.append((int) dgt0[k].conflict);
+                jdump["cascade_clusters"].append(r);
+            }
+            jdump["cell_columns"] = "wpid t0 t1 u0 u1 v0 v1 w0 w1 cascade_cluster owner_key take in_scope charge x y z";
+            jdump["blob_columns"] = "wpid t0 t1 u0 u1 v0 v1 w0 w1 charge x y z";
+            jdump["cascade_cluster_columns"] = "touched t0 conflict";
+        }
+
         // ---- replace, one cluster at a time (ascending key) -------------------
         size_t tot_before = 0, tot_after = 0, n_dropped = 0, n_kept_asis = 0, n_replaced = 0, tot_oos = 0, tot_unc = 0;
         double totq_before = 0, totq_after = 0, totq_unc = 0;
@@ -264,6 +323,7 @@ public:
                        " the production footprint {} q {:.0f}",
                        m_select, keys.size(), lclusters.size(), n_replaced, n_dropped, n_kept_asis, tot_before, tot_after,
                        totq_before, totq_after, tot_unc, totq_unc, tot_oos, n_t0_conflict, n_t0_left, n_outside, q_outside);
+        if (dumping) Persist::dump(m_dump_dir + "/image_deghost.json", jdump);
         if (m_strip_t0cor_leftover) {
             const auto& pct = m_pcts->pc_transform(m_correction_name);
             const auto names = pct->stored_array_names();
@@ -300,4 +360,5 @@ private:
     bool m_fill_cluster_t0{false};
     bool m_strip_t0cor_leftover{false};
     bool m_harmonize_3d_keys{false};
+    std::string m_dump_dir{""};
 };

@@ -80,3 +80,23 @@ TEST_CASE("pr_ml doc 28: gapfill writeback false is parsed")
     REQUIRE(cfg.isMember("retile_deghost_writeback"));
     CHECK(cfg["retile_deghost_writeback"].asBool() == false);                      // case 2
 }
+
+// pr_ml doc 32 sec C.3 / C.4 -- skip_base_subcells: absent => true (flipped 2026-10-28), false parsed (the doc 131
+// behaviour), and no echo without a retile_deghost object.
+TEST_CASE("pr_ml doc 32: gapfill skip_base_subcells defaults to true and parses false")
+{
+    auto icfg = probe("d32_sub_default");
+    CHECK(!icfg->default_configuration().isMember("retile_deghost_skip_base_subcells"));
+    configure_tolerant(icfg, gapfill_cfg());
+    auto cfg = icfg->default_configuration();
+    REQUIRE(cfg.isMember("retile_deghost_skip_base_subcells"));
+    CHECK(cfg["retile_deghost_skip_base_subcells"].asBool() == true);
+
+    auto icfg2 = probe("d32_sub_off");
+    auto c = gapfill_cfg();
+    c["retile_deghost"]["skip_base_subcells"] = false;
+    configure_tolerant(icfg2, c);
+    cfg = icfg2->default_configuration();
+    REQUIRE(cfg.isMember("retile_deghost_skip_base_subcells"));
+    CHECK(cfg["retile_deghost_skip_base_subcells"].asBool() == false);
+}

@@ -73,6 +73,18 @@ namespace WireCell::Clus::GapFill {
         return (nlive[0] == 0) + (nlive[1] == 0) + (nlive[2] == 0);
     }
 
+    /// True when `inner` lies inside `outer`: its slices [smin, smax) and its wires [lo, hi) in every plane within
+    /// those of `outer`.  pr_ml doc 32 sec C.3: the gapfill cascade re-tiles the base on its own cell grid, so a kept
+    /// cell inside a base cell is a piece of that base cell, already sampled (ruling 2 of doc 131), not a fill.
+    inline bool within(const Box& inner, const Box& outer)
+    {
+        if (inner.smin < outer.smin || inner.smax > outer.smax) return false;
+        for (size_t p = 0; p < 3; ++p) {
+            if (inner.w[p].first < outer.w[p].first || inner.w[p].second > outer.w[p].second) return false;
+        }
+        return true;
+    }
+
 }  // namespace WireCell::Clus::GapFill
 
 #endif

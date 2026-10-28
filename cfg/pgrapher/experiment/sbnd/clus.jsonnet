@@ -2526,6 +2526,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
        // keys omitted => byte-identical compiled config.  R&D knob, not for production.
        image_deghost=false, image_deghost_select='all',
        image_deghost_fill_cluster_t0=false, image_deghost_strip_t0cor_leftover=false, image_deghost_harmonize_3d_keys=false,
+       // pr_ml doc 32: ClusteringImageDeghost dump_dir (the hand-over diagnostic); null => key omitted.
+       image_deghost_dump_dir=null,
        // pr_ml doc 28 step 2 (owner 2026-10-27, gap-fill arm): the Steiner-stage retile in the doc pdvd/131 GAPFILL
        // mode (ImproveCluster_2 "retile_deghost", C++ absent = off), as protodunevd/pr.jsonnet: the cluster's blobs
        // are the fixed base, gaps along its path are bridged by one-wire corridors at cell resolution, and the
@@ -2542,6 +2544,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
        // writeback: C++ true (CreateSteinerGraph replaces the cluster's blobs by the gapfill cells); false = the gapfill
        // cloud feeds the Steiner graph only, as the full / none retiles do.  null => key omitted.
        retile_deghost_writeback=null,
+       // pr_ml doc 32 sec C.3: skip_base_subcells, C++ true since doc 32 sec C.4 (a kept cell inside a base cell is skipped); false adds it (doc 131).  null => key omitted.
+       retile_deghost_skip_base_subcells=null,
        provenance_extra={}):: {
         // Only gate when the caller actually supplied a window; beam_window=[0,0]
         // (the arg default, i.e. "no beam window") must not silently drop every
@@ -2672,6 +2676,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
             reach: retile_deghost_reach_cm * wc.cm,
             // pr_ml doc 28 step 2: null => key omitted (C++ true: CreateSteinerGraph writes the cells back)
             [if retile_deghost_writeback != null then 'writeback']: retile_deghost_writeback,
+            [if retile_deghost_skip_base_subcells != null then 'skip_base_subcells']: retile_deghost_skip_base_subcells,   // pr_ml doc 32
         } else null,
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
@@ -2721,6 +2726,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                     [if image_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
                     [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                     [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
+                    [if image_deghost_dump_dir != null then 'dump_dir']: image_deghost_dump_dir,   // pr_ml doc 32
                 },
             }),
             // Restore the prototype main+associated data product before anything

@@ -187,6 +187,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               // cells); false = the gapfill cloud feeds the Steiner graph only, as the full / none
               // retiles do.  null => key omitted.
               retile_deghost_writeback=null,
+              // pr_ml doc 32 sec C.3: skip_base_subcells, C++ true since doc 32 sec C.4 (a kept cell inside a base cell is skipped); false adds it (doc 131).  null => key omitted.
+              retile_deghost_skip_base_subcells=null,
               // pr_ml doc 29 sec 6.3 (the ML-PR branch, "combination 3" of pr_ml doc 28): image_deghost = the MABC
               // also loads a third grouping 'deghost' (the deghosting cascade's cells, built by deghost_tree() below
               // and joined to the pctree by PointTreeConcat in wct-pr-perevt.jsonnet) and the pipeline name
@@ -198,6 +200,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               image_deghost_fill_cluster_t0=false,
               image_deghost_strip_t0cor_leftover=false,
               image_deghost_harmonize_3d_keys=false,
+              // pr_ml doc 32: ClusteringImageDeghost dump_dir (the hand-over diagnostic); null => key omitted.
+              image_deghost_dump_dir=null,
               // PDVD boundary vetoes for the STM verdict (doc 25 M3).  All C++
               // default OFF; keys omitted when off => byte-identical config.
               // readout_edge_guard: the stop's fitted arrival tick within
@@ -1547,6 +1551,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             reach: retile_deghost_reach_cm * wc.cm,
             // pr_ml doc 28 step 2: null => key omitted (C++ true: CreateSteinerGraph writes the cells back)
             [if retile_deghost_writeback != null then 'writeback']: retile_deghost_writeback,
+            [if retile_deghost_skip_base_subcells != null then 'skip_base_subcells']: retile_deghost_skip_base_subcells,   // pr_ml doc 32
         } else null,
         // Visitors available to the PR pipeline, by name.  switch_scope re-applies
         // the per-cluster T0 correction on the loaded tree (the corrected scope is
@@ -1578,6 +1583,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
                     [if image_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
                     [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                     [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
+                    [if image_deghost_dump_dir != null then 'dump_dir']: image_deghost_dump_dir,   // pr_ml doc 32
                 },
             }),
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the

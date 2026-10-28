@@ -330,7 +330,9 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
        retile_deghost_gap_min_slices=2, retile_deghost_gap_max_cm=20, retile_deghost_reach_cm=20,
        // writeback: C++ true (CreateSteinerGraph replaces the cluster's blobs by the gapfill cells); false = the
        // gapfill cloud feeds the Steiner graph only.  null => key omitted.
-       retile_deghost_writeback=null) :: {
+       retile_deghost_writeback=null,
+       // pr_ml doc 32 sec C.3: skip_base_subcells, C++ true since doc 32 sec C.4 (a kept cell inside a base cell is skipped); false adds it (doc 131).  null => key omitted.
+       retile_deghost_skip_base_subcells=null) :: {
         local dv = clus_maker.detector_volumes(anodes),
         local pcts = clus_maker.pc_transforms(dv),
         local cm_old = clus.clustering_methods(
@@ -396,6 +398,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
             gap_max: retile_deghost_gap_max_cm * wc.cm,
             reach: retile_deghost_reach_cm * wc.cm,
             [if retile_deghost_writeback != null then 'writeback']: retile_deghost_writeback,
+            [if retile_deghost_skip_base_subcells != null then 'skip_base_subcells']: retile_deghost_skip_base_subcells,   // pr_ml doc 32
         } else null,
         // SBND production steiner settings (doc sbnd_xin/118 flip: prefer3 / 0.5 / tree+path).
         local steiner_args = {

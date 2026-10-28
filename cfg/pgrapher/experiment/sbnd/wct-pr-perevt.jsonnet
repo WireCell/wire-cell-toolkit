@@ -920,6 +920,8 @@ function(
     // harmonize_3d_keys: erase the "3d" arrays not all live blobs carry after the replacement (SBND sim: the
     // clustering job's y_cor / z_cor, unread by the PR's sim scope).  C++ default false; key omitted when false.
     image_deghost_harmonize_3d_keys = false,
+    // pr_ml doc 32: the hand-over diagnostic dump (ClusteringImageDeghost dump_dir).  null => key omitted.
+    image_deghost_dump_dir = null,
     // The per-point truth cloud on the cascade cells (simulation): '' => no labeler.  Set (the drifted
     // sim-depos) => a TruthPointLabeler per anode with these settings; pass the event's clustering values
     // (time offset 268 us, the imaging drift speed, the Stage A truth.npz) and, as image_deghost_truth_extra,
@@ -952,6 +954,8 @@ function(
     // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
     // null => key omitted => byte-identical.
     retile_deghost_writeback = null,
+    // pr_ml doc 32 sec C.3: gapfill skips kept cells inside a base cell (C++ true since doc 32 sec C.4; false = doc 131).  null => key omitted.
+    retile_deghost_skip_base_subcells = null,
     // doc sbnd_xin/pr/149 round 2: the PR job's RESAMPLE stage (ClusteringResampleLive,
     // sbnd/clus.jsonnet cm_by_name.resample_live).  Non-null => 'resample_live' is
     // prepended to pipeline_names and re-samples every live blob's "3d" cloud with this
@@ -3979,6 +3983,7 @@ function(
                              image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
                              image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
                              image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
+                             image_deghost_dump_dir=image_deghost_dump_dir,   // pr_ml doc 32
                              retile_deghost=retile_deghost,   // pr_ml doc 28 step 2
                              retile_deghost_ml_levels=retile_deghost_ml_levels,
                              retile_deghost_model_dir=retile_deghost_model_dir,
@@ -3995,6 +4000,7 @@ function(
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
+                             retile_deghost_skip_base_subcells=retile_deghost_skip_base_subcells,   // pr_ml doc 32
                              tcn_knobs=tcn_knobs);
 
     // pr_ml doc 28: with image_deghost_dir the pctree and the cascade image are joined (tensors concatenated,

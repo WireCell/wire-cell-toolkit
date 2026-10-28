@@ -216,6 +216,8 @@ function(
     // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
     // null => key omitted => byte-identical.
     retile_deghost_writeback = null,
+    // pr_ml doc 32 sec C.3: gapfill skips kept cells inside a base cell (C++ true since doc 32 sec C.4; false = doc 131).  null => key omitted.
+    retile_deghost_skip_base_subcells = null,
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -1915,6 +1917,8 @@ function(
     image_deghost_fill_cluster_t0 = false,
     image_deghost_strip_t0cor_leftover = false,
     image_deghost_harmonize_3d_keys = false,
+    // pr_ml doc 32: the hand-over diagnostic dump (ClusteringImageDeghost dump_dir).  null => key omitted.
+    image_deghost_dump_dir = null,
     image_deghost_truth_depos = '',
     image_deghost_truth_time_offset_us = 0,
     image_deghost_truth_speed_mmus = null,
@@ -4833,6 +4837,7 @@ function(
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
+                             retile_deghost_skip_base_subcells=retile_deghost_skip_base_subcells,   // pr_ml doc 32
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdvd/48; + doc pdvd/51 override bag
@@ -4858,6 +4863,7 @@ function(
                              image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
                              image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
                              image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
+                             image_deghost_dump_dir=image_deghost_dump_dir,   // pr_ml doc 32
                              beam_deghost_fill_cluster_t0=beam_deghost_fill_cluster_t0,   // pr_ml doc 24 sec 6
                              beam_deghost_strip_t0cor_leftover=beam_deghost_strip_t0cor_leftover,   // pr_ml doc 24 sec 6
                              beam_pr_knobs=beam_pr_knobs + (if beam_fill_scalars then { fill_beam_scalars: true } else {}),   // doc pdvd/120; pr_ml doc 24 sec 6

@@ -128,6 +128,10 @@ namespace WireCell::Clus {
             // feeds the Steiner graph only, as the retile_mode full / none copies do (the replaced cells carry no
             // truth cloud and no clustering-job arrays such as SBND's y_cor / z_cor).
             bool writeback{true};
+            // pr_ml doc 32 sec C.3: true (default since doc 32 sec C.4, owner 2026-10-28) skips a kept cell lying
+            // inside a base cell (same face, within its slice and wire ranges): a piece of a base cell cut by the
+            // cascade's own grid, sampled on top of its parent.  false = the doc 131 behaviour, which adds it.
+            bool skip_base_subcells{true};
         };
         RetileDeghost m_rd;
         // doc pdvd/131 gapfill, one face: the base cells and the corridor candidates as IBlobs
@@ -251,6 +255,7 @@ namespace WireCell::Clus {
         rd.gap_max = get(j, "gap_max", rd.gap_max);
         rd.reach = get(j, "reach", rd.reach);
         rd.writeback = get(j, "writeback", rd.writeback);
+        rd.skip_base_subcells = get(j, "skip_base_subcells", rd.skip_base_subcells);
         rd.levels.clear();
         for (const auto& jl : j["levels"]) {
             Aux::Cascade::LevelSpec lc;
@@ -273,10 +278,11 @@ namespace WireCell::Clus {
         }
         SPDLOG_LOGGER_INFO(log, "retile_deghost on (gapfill, doc pdvd/131): scope={} window=[{:.3f}, {:.3f}) us levels:{} repair={} budget={:.4f} "
                            "charge_scale={} nthreads={} dump_dir='{}' residual={} corridor_wires={} bridge_planes={} gap_min_slices={} "
-                           "gap_max={:.1f} cm reach={:.1f} cm writeback={}",
+                           "gap_max={:.1f} cm reach={:.1f} cm writeback={} skip_base_subcells={}",
                            rd.scope, rd.beam_window_low / units::us, rd.beam_window_high / units::us, desc,
                            rp.repair, rp.steiner.budget, rd.charge_scale, rp.nthreads, rd.dump_dir, rd.residual, rd.corridor_wires,
-                           rd.bridge_planes, rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm, rd.writeback);
+                           rd.bridge_planes, rd.gap_min_slices, rd.gap_max / units::cm, rd.reach / units::cm, rd.writeback,
+                           rd.skip_base_subcells);
     }
 
     bool ImproveCluster_2::rd_in_scope(const Cluster& cluster) const
@@ -320,6 +326,8 @@ namespace WireCell::Clus {
         // pr_ml doc 28 step 2: an echo of the parsed gapfill write-back switch, present only once a retile_deghost
         // object has been configured (never at the framework's pre-configure call, so no config changes).
         if (m_rd.on) cfg["retile_deghost_writeback"] = m_rd.writeback;
+        // pr_ml doc 32 sec C.3: the same kind of echo for the base sub-cell skip
+        if (m_rd.on) cfg["retile_deghost_skip_base_subcells"] = m_rd.skip_base_subcells;
 
         return cfg;
     }
@@ -662,11 +670,37 @@ namespace WireCell::Clus {
                     }
                     return false;
                 };
+                // pr_ml doc 32 sec C.3 (skip_base_subcells): the base cells as boxes per (face, slice start tick)
+                auto rd_box = [&](const IBlob::pointer& b) {
+                    const rd_key_t k = rd_key(b);
+                    const double tk = m_grouping->get_tick().at(apa).at(k[0]);
+                    GapFill::Box box;
+                    box.smin = k[1];
+                    box.smax = (int) std::lround((b->slice()->start() + b->slice()->span()) / tk);
+                    for (size_t p = 0; p < 3; ++p) box.w[p] = {k[2 + 2 * p], k[3 + 2 * p]};
+                    return box;
+                };
+                std::map<std::pair<int, int>, std::vector<GapFill::Box>> base_boxes;   // int-keyed: deterministic
+                if (m_rd.skip_base_subcells) {
+                    for (const auto& b : ra.base) {
+                        const rd_key_t k = rd_key(b);
+                        base_boxes[{k[0], k[1]}].push_back(rd_box(b));
+                    }
+                }
+                auto in_base_cell = [&](const IBlob::pointer& cell) {
+                    const rd_key_t k = rd_key(cell);
+                    auto it = base_boxes.find({k[0], k[1]});
+                    if (it == base_boxes.end()) return false;
+                    const auto box = rd_box(cell);
+                    for (const auto& b : it->second) if (GapFill::within(box, b)) return true;
+                    return false;
+                };
                 std::vector<IBlob::pointer> final_cells;   // what is sampled, in order
                 for (const auto& b : ra.base) final_cells.push_back(b);
-                size_t ncand_kept = 0;
+                size_t ncand_kept = 0, nsubcells = 0;
                 for (const auto& cell : res.kept) {
                     if (base_keys.count(rd_key(cell))) continue;
+                    if (m_rd.skip_base_subcells && in_base_cell(cell)) { ++nsubcells; continue; }
                     final_cells.push_back(cell);
                     ++ncand_kept;
                 }
@@ -685,6 +719,8 @@ namespace WireCell::Clus {
                 }
                 {
                     std::string gf_face;
+                    // pr_ml doc 32 sec C.3: only with the skip on, so the line of a skip-off config is the doc 131 one
+                    if (m_rd.skip_base_subcells) gf_face += fmt::format(" base sub-cells skipped {}", nsubcells);
                     for (const auto& f : ra.faces) {
                         gf_face += fmt::format(" [face {}: base {} path {} uncovered {} gaps {} candidates {} skipped {} owner {}]",
                                                f.face, f.nbase, f.npath, f.nuncovered, f.ngaps, f.ncand, f.nskipped, f.nowner);

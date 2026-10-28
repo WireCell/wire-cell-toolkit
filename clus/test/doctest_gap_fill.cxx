@@ -110,3 +110,16 @@ TEST_CASE("gap fill: owner map, residual and the corridor rule")
     CHECK(missing_planes({0, 0, 1}) == 2);
     CHECK(missing_planes({0, 0, 0}) == 3);
 }
+
+TEST_CASE("gap fill: within (pr_ml doc 32, a kept cell inside a base cell)")
+{
+    const Box base{100, 104, {{{4, 10}, {20, 26}, {30, 40}}}};
+    CHECK(within(base, base));                                                // equal
+    CHECK(within(Box{100, 104, {{{4, 6}, {20, 26}, {30, 40}}}}, base));       // PDHD 29107_7: W 4-9 -> 4-6, 6-9
+    CHECK(within(Box{100, 104, {{{6, 10}, {22, 24}, {35, 36}}}}, base));
+    CHECK_FALSE(within(Box{100, 104, {{{3, 6}, {20, 26}, {30, 40}}}}, base)); // one wire below
+    CHECK_FALSE(within(Box{100, 104, {{{4, 11}, {20, 26}, {30, 40}}}}, base));// one wire above (half-open)
+    CHECK_FALSE(within(Box{100, 104, {{{4, 6}, {20, 27}, {30, 40}}}}, base)); // another plane
+    CHECK_FALSE(within(Box{104, 108, {{{4, 6}, {20, 26}, {30, 40}}}}, base)); // the next slice
+    CHECK_FALSE(within(base, Box{100, 104, {{{4, 6}, {20, 26}, {30, 40}}}})); // the parent is not inside its piece
+}

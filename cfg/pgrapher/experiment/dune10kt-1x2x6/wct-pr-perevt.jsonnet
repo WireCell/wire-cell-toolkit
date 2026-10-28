@@ -72,6 +72,8 @@ function(
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
     retile_deghost_writeback = null,
+    // pr_ml doc 32 sec C.3: gapfill skips kept cells inside a base cell (C++ true since doc 32 sec C.4; false = doc 131).  null => key omitted.
+    retile_deghost_skip_base_subcells = null,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -106,7 +108,8 @@ local pr = pr_maker.pr(anodes, pds, pipeline_names, dump=true, tensor_outname=sa
                        retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
                        retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                        retile_deghost_reach_cm=retile_deghost_reach_cm,
-                       retile_deghost_writeback=retile_deghost_writeback);
+                       retile_deghost_writeback=retile_deghost_writeback,
+                       retile_deghost_skip_base_subcells=retile_deghost_skip_base_subcells);
 
 local graph = g.pipeline([source, pr]);
 
