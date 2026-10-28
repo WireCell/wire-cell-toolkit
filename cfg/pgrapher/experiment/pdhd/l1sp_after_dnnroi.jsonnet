@@ -66,8 +66,11 @@ function(anode, sp_pipe, dnnroi_pipe, tools, params,
          l1sp_pd_energy_frac_thr=0.66)
 
   local n = anode.data.ident;
+  // pr_ml doc 32: params.apa0_nominal (absent = false = production) treats APA 0 like APAs 1-3 (the training-sample
+  // simulation with a nominal APA 0 field response, pdhd/d31 apa0_nominal); absent => compiled config unchanged.
+  local apa0 = n == 0 && !(std.objectHas(params, 'apa0_nominal') && params.apa0_nominal);
   local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
-                      else if n == 0 then [0] else [0, 1];
+                      else if apa0 then [0] else [0, 1];
   local gain_scale = params.elec.gain / (14.0 * wc.mV / wc.fC);
 
   // Splitter at the head: input is the post-NF frame (still carries

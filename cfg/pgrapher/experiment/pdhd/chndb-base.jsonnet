@@ -26,6 +26,9 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
   // TLA.  When false, all per-channel freqmasks below collapse to [], making
   // the C++ consumer in PDHD::OneChannelNoise a no-op for every channel.
   local freqmask_enabled = use_freqmask;
+  // pr_ml doc 32: params.apa0_nominal (absent = false = production) treats APA 0 like APAs 1-3 (the training-sample
+  // simulation with a nominal APA 0 field response, pdhd/d31 apa0_nominal); absent => compiled config unchanged.
+  local apa0_special = n == 0 && !(std.objectHas(params, 'apa0_nominal') && params.apa0_nominal);
   {
     anode: wc.tn(anode),
     field_response: wc.tn(field),
@@ -125,8 +128,8 @@ function(params, anode, field, n, rms_cuts=[], use_freqmask=true)
         // plane.  Drop the FR⊗ER kernel and zero the response_offset there so
         // PDHD::SignalProtection's deconvolution gate falls through (the gate
         // requires respec.size()>0, respec[0]!=(1,0), and res_offset!=0).
-        response: if n == 0 then {} else { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
-        response_offset: if n == 0 then 0 else 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
+        response: if apa0_special then {} else { waveform: scale_resp(handmade.v_resp), waveformid: wc.Vlayer },
+        response_offset: if apa0_special then 0 else 132, // argmin of PDHD FR⊗ER kernel (was 124, SBND copy)
         decon_limit: 0.01,
         decon_limit1: 0.07,
         roi_min_max_ratio: 0.8,

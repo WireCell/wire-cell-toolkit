@@ -31,7 +31,10 @@ function(anode, ts, prefix='dnnroi',
          nchunks=1,
          mask_thresh=0.2,
          nchan=6,
-         debugfile='')
+         debugfile='',
+         // pr_ml doc 32: true = APA 0 like APAs 1-3 (V from the model), for the nominal-APA0 simulation
+         // (pdhd/d31 apa0_nominal).  Default false = production.
+         apa0_nominal=false)
 
   local apaid = anode.data.ident;
   local prename = prefix + std.toString(apaid);
@@ -49,7 +52,7 @@ function(anode, ts, prefix='dnnroi',
     'gauss%d' % apaid,
   ][0:nchan];
 
-  local emit_v_from_model = (apaid != 0);
+  local emit_v_from_model = (apaid != 0) || apa0_nominal;
 
   // Per-anode per-call debug filename suffix so U / V calls don't collide.
   local _dbg(suffix) =

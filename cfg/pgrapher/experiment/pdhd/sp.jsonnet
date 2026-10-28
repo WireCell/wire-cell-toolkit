@@ -80,13 +80,16 @@ function(params, tools, override = {}) {
                // its W).  See pdhd/docs/sp-w-collection-roi-break.md.
                w_col_break_roi_tune=true,
                dump_rawdecon=false)::
+    // pr_ml doc 32: params.apa0_nominal (absent = false = production) treats APA 0 like APAs 1-3 (the training-sample
+    // simulation with a nominal APA 0 field response, pdhd/d31 apa0_nominal); absent => compiled config unchanged.
+    local apa0 = anode.data.ident == 0 && !(std.objectHas(params, 'apa0_nominal') && params.apa0_nominal);
     local l1sp_planes = if l1sp_pd_planes != null then l1sp_pd_planes
-                        else if anode.data.ident == 0 then [0] else [0, 1];
+                        else if apa0 then [0] else [0, 1];
     // Gate the tuned induction-refinement knobs to APA0 only.
-    local roi_tune = apa0_w_roi_tune && anode.data.ident == 0;
+    local roi_tune = apa0_w_roi_tune && apa0;
     // Gate the collection-path BreakROI disable to APA1-3 (standard
     // [U, V, W] slot order; W = slot 2).
-    local col_break_tune = w_col_break_roi_tune && anode.data.ident != 0;
+    local col_break_tune = w_col_break_roi_tune && !apa0;
     local sp_node = g.pnode({
       type: 'OmnibusSigProc',
       name:
@@ -98,7 +101,7 @@ function(params, tools, override = {}) {
         anode: wc.tn(anode),
       dft: wc.tn(tools.dft),
       field_response: wc.tn(tools.fields[anode.data.ident]),
-      filter_responses_tn: if anode.data.ident == 0
+      filter_responses_tn: if apa0
                            then ["FilterResponse:plane0",
                                  "FilterResponse:plane2", "FilterResponse:plane1"]
                            else [ ],
@@ -119,7 +122,7 @@ function(params, tools, override = {}) {
       lroi_th_factor1: 0.7, // default 0.7
       lroi_jump_one_bin: 1, // default 0
 
-      r_th_factor: if anode.data.ident==0 then 2.5 else 3.0,  // default 3
+      r_th_factor: if apa0 then 2.5 else 3.0,  // default 3
       // APA0 W-only ROI tune.  W is slot 1 (induction role); these per-plane
       // arrays loosen ONLY slot 1, leaving slot 0 (U) and slot 2 (V/collection)
       // at the production values (so U/V refinement is byte-identical to off).
@@ -164,9 +167,9 @@ function(params, tools, override = {}) {
       
       isWrapped: false,
       // process_planes: if anode.data.ident==0 then [0, 1] else [0, 1, 2],
-      plane2layer: if anode.data.ident==0 then [0,2,1] else [0,1,2],
+      plane2layer: if apa0 then [0,2,1] else [0,1,2],
 
-      Wiener_tight_filters: if anode.data.ident==0
+      Wiener_tight_filters: if apa0
                             then ["Wiener_tight_U_APA1", "Wiener_tight_W_APA1", "Wiener_tight_V_APA1"] // ind, ind, col
                             else ["Wiener_tight_U", "Wiener_tight_V", "Wiener_tight_W"],
 

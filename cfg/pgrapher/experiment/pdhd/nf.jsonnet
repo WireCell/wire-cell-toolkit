@@ -9,6 +9,9 @@ local default_dft = { type: 'FftwDFT' };
 function(params, anode, chndbobj, n, name='', dft=default_dft,
          debug_dump_path='', debug_dump_groups=[],
          maskmap=null) {
+    // pr_ml doc 32: params.apa0_nominal (absent = false = production) treats APA 0 like APAs 1-3 (the training-sample
+    // simulation with a nominal APA 0 field response, pdhd/d31 apa0_nominal); absent => compiled config unchanged.
+    local apa0_special = anode.data.ident == 0 && !(std.objectHas(params, 'apa0_nominal') && params.apa0_nominal),
     local single = {
         type: 'PDHDOneChannelNoise',
         name: name,
@@ -35,7 +38,7 @@ function(params, anode, chndbobj, n, name='', dft=default_dft,
             dft: wc.tn(dft),
             rms_threshold: 0.0,
             time_filters:
-              if anode.data.ident == 0
+              if apa0_special
               then ['Wiener_tight_U_APA1', 'Wiener_tight_V_APA1', 'Wiener_tight_W_APA1']
               else ['Wiener_tight_U', 'Wiener_tight_V', 'Wiener_tight_W'],
             lf_tighter_filter: 'ROI_tighter_lf',
