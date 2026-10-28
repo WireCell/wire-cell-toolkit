@@ -212,12 +212,19 @@ namespace WireCell {
             const size_t isize = HydraInput::input_types().size();
             input_queues iqs(isize);
             for (size_t ind=0; ind<isize; ++ind) {
-                iqs[ind] = boost::any_cast<input_queue>(anyinqs[ind]);
+                for (auto any : anyinqs[ind]) {
+                    iqs[ind].push_back(boost::any_cast<typename HydraInput::input_pointer>(any));
+                }
             }
 
             // cross over
             output_queues oqs;
             bool ok = (*this)(iqs, oqs);
+
+            // Reflect what the body consumed back to the caller.
+            for (size_t ind = 0; ind < iqs.size(); ++ind) {
+                anyinqs[ind].assign(iqs[ind].begin(), iqs[ind].end());
+            }
             if (!ok) return false;
             
             // vector output
@@ -260,6 +267,9 @@ namespace WireCell {
             // cross over
             output_queues oqs;
             bool ok = (*this)(iqs, oqs);
+
+            // Reflect what the body consumed back to the caller.
+            anyinqs = isq.as_any_queue(iqs);
             if (!ok) return false;
 
             // tuple output
@@ -304,6 +314,11 @@ namespace WireCell {
             // cross over
             output_queues oqs;
             bool ok = (*this)(iqs, oqs);
+
+            // Reflect what the body consumed back to the caller.
+            for (size_t ind = 0; ind < iqs.size(); ++ind) {
+                anyinqs[ind].assign(iqs[ind].begin(), iqs[ind].end());
+            }
             if (!ok) return false;
             
             // tuple output
@@ -342,6 +357,9 @@ namespace WireCell {
             // cross over
             output_queues oqs;
             bool ok = (*this)(iqs, oqs);
+
+            // Reflect what the body consumed back to the caller.
+            anyinqs = isq.as_any_queue(iqs);
             if (!ok) return false;
             
             // vector output
