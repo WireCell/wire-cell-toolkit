@@ -3,6 +3,11 @@ bld.install_files('${PREFIX}/share/wirecell',
                   bld.path.ant_glob("pgrapher/common/**/*.jsonnet") +
                   bld.path.ant_glob("pgrapher/ui/**/*.jsonnet"),
                   relative_trick=True)
+# DV2-MAX vertexer model bundles: dl_weights='dv2max/<model>/bundle.json',
+# resolved through WIRECELL_PATH like any other data file.
+bld.install_files('${PREFIX}/share/wirecell',
+                  bld.path.ant_glob("dv2max/**/*"),
+                  relative_trick=True)
 exps = getattr(bld.options, 'install_config', None)
 if exps:
     for exp in exps.split(","):
