@@ -447,6 +447,21 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
     // doc sbnd_xin/docs/pr/106 sec 10: exclusion-free charge cloud for the DL vertex net.
     m_dl_vtx_cloud_no_exclusion = get(config, "dl_vtx_cloud_no_exclusion", m_dl_vtx_cloud_no_exclusion);
+    // DV2-MAX vertexer.  Default "scn" => none of it runs.
+    m_dl_vtx_engine     = get(config, "dl_vtx_engine",     m_dl_vtx_engine);
+    m_dv2_py_module     = get(config, "dv2_py_module",     m_dv2_py_module);
+    m_dv2_split_dist    = get(config, "dv2_split_dist",    m_dv2_split_dist);
+    m_dv2_max_move      = get(config, "dv2_max_move",      m_dv2_max_move);
+    m_dv2_min_score     = get(config, "dv2_min_score",     m_dv2_min_score);
+    m_dv2_two_end_veto  = get(config, "dv2_two_end_veto",  m_dv2_two_end_veto);
+    if (m_dl_vtx_engine != "scn" && m_dl_vtx_engine != "dv2max") {
+        raise<ValueError>("TaggerCheckNeutrino: dl_vtx_engine must be scn or dv2max, got %s", m_dl_vtx_engine.c_str());
+    }
+    if (m_dl_vtx_engine == "dv2max") {
+        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: DV2-MAX vertexer, bundle {}, module {}, split {} cm, max move {} cm, min score {}, two-end veto {}",
+                           m_dl_weights.empty() ? std::string("(none: DL off)") : m_dl_weights, m_dv2_py_module,
+                           m_dv2_split_dist, m_dv2_max_move, m_dv2_min_score, m_dv2_two_end_veto);
+    }
     // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
     // suggests the neutrino vertex).  All defaults = legacy.
     m_dl_vtx_dual_chain            = get(config, "dl_vtx_dual_chain",            m_dl_vtx_dual_chain);
@@ -1067,6 +1082,12 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_cloud_no_exclusion"] = m_dl_vtx_cloud_no_exclusion;  // doc pr/106 sec 10: false = legacy (net sees the exclusion fit's charge)
+    cfg["dl_vtx_engine"]           = m_dl_vtx_engine;      // "scn" = legacy SCN net; "dv2max" = DV2-MAX bundle in dl_weights
+    cfg["dv2_py_module"]           = m_dv2_py_module;      // DV2-MAX: Python module holding DV2_Vertex()
+    cfg["dv2_split_dist"]          = m_dv2_split_dist;     // DV2-MAX: cm, reuse a graph vertex within this distance, else split a segment
+    cfg["dv2_max_move"]            = m_dv2_max_move;       // DV2-MAX: cm, largest final move onto the DV2 point; < 0 = no limit
+    cfg["dv2_min_score"]           = m_dv2_min_score;      // DV2-MAX: min calibrated P(<1 cm) to accept
+    cfg["dv2_two_end_veto"]        = m_dv2_two_end_veto;   // DV2-MAX: honour the pr/48 protected two-end-break veto
     cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
     cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
     cfg["dual_chain_transfer"]     = m_dual_chain_transfer;     // doc pr/112 sec 11: false = probe (pass runs, nothing moves)
@@ -3249,6 +3270,13 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
         pattern_algos.m_fit_exclusion            = m_fit_exclusion;
         pattern_algos.m_dl_vtx_cloud_no_exclusion = m_dl_vtx_cloud_no_exclusion;   // doc pr/106 sec 10
+        // DV2-MAX vertexer (lengths cm -> internal; max move < 0 = no limit)
+        pattern_algos.m_dl_vtx_engine     = m_dl_vtx_engine;
+        pattern_algos.m_dv2_py_module     = m_dv2_py_module;
+        pattern_algos.m_dv2_split_dist    = m_dv2_split_dist * units::cm;
+        pattern_algos.m_dv2_max_move      = m_dv2_max_move < 0 ? 1e9 * units::cm : m_dv2_max_move * units::cm;
+        pattern_algos.m_dv2_min_score     = m_dv2_min_score;
+        pattern_algos.m_dv2_two_end_veto  = m_dv2_two_end_veto;
         pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
         pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
         pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
@@ -3654,6 +3682,12 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             // output-identical by construction; PDVD gate in doc pdvd/28 sec 20.
             SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass skipped for cluster {} -- no DL weights, so nothing consumes the hint (determine_overall_main_vertex_DL does not run)",
                                main_cluster ? main_cluster->get_cluster_id() : -1);
+        } else if (m_dl_vtx_dual_chain && m_dl_vtx_engine == "dv2max") {
+            // DV2-MAX decides from its own point and never reads the hint (no
+            // snap transfer, no SCN voxels), so -- by the same argument as the
+            // no-weights case above -- the OFF pass cannot change any output.
+            SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass skipped for cluster {} -- DV2-MAX engine does not consume the hint",
+                               main_cluster ? main_cluster->get_cluster_id() : -1);
         } else if (m_dl_vtx_dual_chain) {
             dual_hint.mode              = m_dual_chain_mode;
             dual_hint.transfer          = m_dual_chain_transfer;
@@ -3786,7 +3820,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 m_dl_weights, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
                 m_dl_vtx_rerank, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
                 m_dl_vtx_score_scale,
-                m_dl_vtx_dual_chain ? &dual_hint : nullptr);   // doc pr/112 sec 11
+                (m_dl_vtx_dual_chain && m_dl_vtx_engine != "dv2max") ? &dual_hint : nullptr);   // doc pr/112 sec 11
         }
         if (!flag_dl_changed) {
             // doc sbnd_xin/docs/pr/51 round 3: determine_overall_main_vertex now
@@ -3907,13 +3941,18 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
   
 
+        // DV2-MAX accepted a point this call: it decides where the main vertex
+        // is, so the two pointer re-snaps below (which exist to correct where
+        // the SCN re-rank lands) would only move the main vertex away from it.
+        const bool dv2_placed = pattern_algos.is_dv2_engine() && pattern_algos.m_dv2_target_valid;
         if (final_main_vertex) {
             // doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap --
             // inert unless vertex_kink_snap.  Runs after the overall main
             // vertex is final (either DL or fallback path) and BEFORE the
             // final improve_vertex, so the local optimizer polishes a
             // corner-anchored trajectory.
-            if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
+            if (!dv2_placed &&
+                pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
                                                        *track_fitter, m_dv, particle_data(), m_recomb_model)) {
                 map_cluster_main_vertices[main_cluster] = final_main_vertex;
                 detg_dump("snap_main_vertex_to_kink", *pr_graph);
@@ -3929,7 +3968,8 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             // the vertex fit polishes the junction with its real prongs and
             // main_vertex_graph_audit no longer has to re-anchor prongs onto
             // the wrong point.  Pointer move only: no segment is edited.
-            if (pattern_algos.snap_main_vertex_to_junction(*pr_graph, *main_cluster, final_main_vertex)) {
+            if (!dv2_placed &&
+                pattern_algos.snap_main_vertex_to_junction(*pr_graph, *main_cluster, final_main_vertex)) {
                 map_cluster_main_vertices[main_cluster] = final_main_vertex;
                 detg_dump("snap_main_vertex_to_junction", *pr_graph);
                 dup_stage_census("snap_main_vertex_to_junction", *pr_graph, *main_cluster);
@@ -3969,6 +4009,16 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                                                                *track_fitter, m_dv)) {
                 detg_dump("conn3_stitch", *pr_graph);
                 dup_stage_census("conn3_stitch", *pr_graph, *main_cluster);
+            }
+
+            // DV2-MAX: the vertex refinement block is done; put the main vertex
+            // on DV2-MAX's point (the vertex fit's own write + refit), before
+            // clustering_points / examine_direction / showers / taggers read it.
+            if (dv2_placed &&
+                pattern_algos.dv2_place_main_vertex(*pr_graph, *main_cluster, final_main_vertex, *track_fitter, m_dv)) {
+                std::cout << "After DV2-MAX placement:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+                detg_dump("dv2_place_main_vertex", *pr_graph);
+                dup_stage_census("dv2_place_main_vertex", *pr_graph, *main_cluster);
             }
 
             // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe

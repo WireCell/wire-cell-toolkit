@@ -943,6 +943,13 @@ function(
     // config.  Validation: --tla-code dl_vtx_rerank=false (or
     // SBND_DL_VTX_RERANK=false).
     dl_vtx_rerank = true,
+    // DV2-MAX vertexer (clus.jsonnet pr() dl_vtx_engine / dv2_knobs):
+    //     --tla-str dl_vtx_engine=dv2max --tla-str dl_weights=dv2max/r7_cloud/bundle.json
+    //     [--tla-code 'dv2_knobs={dv2_max_move: 3.0}']
+    // needs pyutil/python (DV2_Vertex.py) on PYTHONPATH and libpython preloaded,
+    // like the SCN net.  Default 'scn' => byte-identical compiled config.
+    dl_vtx_engine = 'scn',
+    dv2_knobs = {},
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then
     // tagger_check_neutrino falls back to uBooNE single-main selection, which on
@@ -3806,6 +3813,8 @@ function(
                              dl_vtx_min_accept_score=dl_vtx_min_accept_score,
                              dl_vtx_top_k=dl_vtx_top_k,
                              dl_vtx_rerank=dl_vtx_rerank,
+                             dl_vtx_engine=dl_vtx_engine,
+                             dv2_knobs=dv2_knobs,
                              beam_window=[t * wc.us for t in beam_window_us],
                              beam_window_only=beam_window_only,
                              tgm_neutrino_candidate=tgm_neutrino_candidate,

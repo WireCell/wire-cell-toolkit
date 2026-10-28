@@ -484,6 +484,16 @@ public:
         // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed -- live A/B
         // -36/1014 (pr/89 round 5).  See sbnd_xin/docs/77_knob-ledger.tsv.
         bool   m_dl_vtx_cloud_no_exclusion{false};   // doc pr/106 sec 10: exclusion-free charge for the DL net input
+        // DV2-MAX vertexer (see PatternAlgorithms::m_dl_vtx_engine).  "scn"
+        // (default) = the SCN net paths above, byte-identical; "dv2max" =
+        // dl_weights names a DV2-MAX bundle manifest and the DL step uses
+        // DV2-MAX's point for both the main-vertex choice and its position.
+        std::string m_dl_vtx_engine{"scn"};
+        std::string m_dv2_py_module{"DV2_Vertex"};   // Python module (on PYTHONPATH) holding DV2_Vertex()
+        double m_dv2_split_dist{1.5};    // cm: reuse a PR-graph vertex within this distance of the DV2 point, else split
+        double m_dv2_max_move{-1.0};     // cm: largest final move onto the DV2 point; < 0 = no limit
+        double m_dv2_min_score{0.0};     // calibrated P(<1 cm) below this => keep the traditional vertex
+        bool   m_dv2_two_end_veto{false};  // honour the pr/48 protected two-end-break veto in DV2 mode
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
         // stage sequence up to the vertex refinement block) suggests the

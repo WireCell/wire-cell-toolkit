@@ -12,10 +12,12 @@
 
 #ifdef HAVE_PYTHON_INC
 #include "WCPPyUtil/SCN_Vertex.h"
+#include "WCPPyUtil/DV2_Vertex.h"
 #endif
 
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <unordered_set>
 #include <cstdlib>
 #include <cstdio>
@@ -4722,6 +4724,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     const DualChainHint* dual_hint)
 {
     bool flag_change = false;
+    // DV2-MAX: per-event state, set below only when a DV2-MAX point is accepted.
+    m_dv2_target_valid = false;
+    m_dv2_score = -1.0;
+    const bool dv2 = is_dv2_engine();
 
 #ifdef HAVE_PYTHON_INC
     using Clock = std::chrono::steady_clock;
@@ -4902,11 +4908,29 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         // only (the legacy branch expects exactly 3 floats).  Gated on
         // transfer so a probe never changes the payload.  nullptr hint (the
         // default) => the single line the legacy path always ran.
-        const bool dual_voxels = dual_hint && dual_hint->transfer && flag_rerank
+        // DV2-MAX never pools SCN voxels: the dual-chain payloads are SCN-only.
+        const bool dual_voxels = !dv2 && dual_hint && dual_hint->transfer && flag_rerank
                                  && !dual_hint->voxels.empty()
                                  && (dual_hint->mode == "voxels" || dual_hint->mode == "union");
         std::vector<float> dnn_vtx;
-        if (dual_voxels && dual_hint->mode == "voxels") {
+        if (dv2) {
+            // DV2-MAX: the same cloud, plus what its ranker pools (the PR-graph
+            // vertex rows = the leading cand_vertices.size() points, and the
+            // traditional main vertex).  Payload [x, y, z, score] in cm, raw
+            // reco frame; empty = no prediction.
+            std::vector<float> trad3(3, std::numeric_limits<float>::quiet_NaN());
+            auto trad_it = map_cluster_main_vertices.find(main_cluster);
+            if (trad_it != map_cluster_main_vertices.end() && trad_it->second) {
+                const auto& tv = trad_it->second;
+                const auto pt = tv->fit().valid() ? tv->fit().point : tv->wcpt().point;
+                trad3 = {static_cast<float>(pt.x() / units::cm), static_cast<float>(pt.y() / units::cm),
+                         static_cast<float>(pt.z() / units::cm)};
+            }
+            dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
+                                            static_cast<int>(cand_vertices.size()), trad3,
+                                            dQdx_scale, dQdx_offset, "float32");
+            if (dump_i >= 0) m_dlvtx_calls[dump_i].payload = dnn_vtx;   // ai-helper issue 35
+        } else if (dual_voxels && dual_hint->mode == "voxels") {
             dnn_vtx = dual_hint->voxels;
             SPDLOG_LOGGER_DEBUG(s_log, "dual_chain: voxels mode, {} OFF-pass voxels replace the ON inference",
                                 dnn_vtx.size() / 4);
@@ -4945,7 +4969,110 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             m_vtx_board.route = "dl-failed";   // overwritten at every real exit
         }
 
-        if (!flag_rerank) {
+        if (dv2) {
+            // ===================================================================
+            // DV2-MAX PATH: one point P.  Main vertex = the nearest PR-graph
+            // vertex if within m_dv2_split_dist of P, else a new vertex made by
+            // splitting the nearest segment at P.  The position itself is set
+            // later by dv2_place_main_vertex (after the vertex refinement).
+            // No composite score, no direction check, no dual-chain transfer.
+            // ===================================================================
+            if (dnn_vtx.size() != 4) {
+                // empty payload = the model made no prediction: keep the traditional vertex
+                if (dnn_vtx.size() != 0) {
+                    SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DV2 payload size {}", dnn_vtx.size());
+                }
+                if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 2;   // ai-helper issue 35
+                if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-prediction";
+                return false;
+            }
+            const WireCell::Point P(dnn_vtx[0] * units::cm, dnn_vtx[1] * units::cm, dnn_vtx[2] * units::cm);
+            const double score = dnn_vtx[3];
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 prediction ({:.2f}, {:.2f}, {:.2f}) cm, P(<1cm)={:.3f}",
+                                dnn_vtx[0], dnn_vtx[1], dnn_vtx[2], score);
+            if (!std::isfinite(P.x()) || !std::isfinite(P.y()) || !std::isfinite(P.z()) || score < m_dv2_min_score) {
+                if (m_vertex_scoreboard) m_vtx_board.route = "dv2-reject-score";
+                if (dump_i >= 0) m_dlvtx_calls[dump_i].accepted = false;
+                return false;
+            }
+
+            // nearest PR-graph vertex (same point convention as the cloud rows)
+            VertexPtr v_near = nullptr;
+            double d_near = 1e9 * units::cm;
+            for (auto vtx : cand_vertices) {
+                const auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+                const double d = (pt - P).magnitude();
+                if (d < d_near) { d_near = d; v_near = vtx; }
+            }
+            // nearest segment-interior fit point (break_segment refuses a
+            // segment's first/last fit point)
+            SegmentPtr s_near = nullptr;
+            double ds_near = 1e9 * units::cm;
+            if (d_near > m_dv2_split_dist) {
+                for (auto e : ordered_edges(graph)) {
+                    SegmentPtr sg = graph[e].segment;
+                    if (!sg || !sg->cluster() || !sg->descriptor_valid()) continue;
+                    const auto& fits = sg->fits();
+                    for (size_t i = 1; i + 1 < fits.size(); ++i) {
+                        const double d = (fits[i].point - P).magnitude();
+                        if (d < ds_near) { ds_near = d; s_near = sg; }
+                    }
+                }
+            }
+            const bool want_split = s_near && ds_near < d_near;
+
+            // pr/48 protected two-end-break vertex: optional for DV2-MAX
+            // (default off).  Checked BEFORE any split so a vetoed call leaves
+            // the graph untouched.
+            if (m_dv2_two_end_veto && m_two_end_break && main_cluster) {
+                auto trad_it = map_cluster_main_vertices.find(main_cluster);
+                if (trad_it != map_cluster_main_vertices.end() && trad_it->second &&
+                    trad_it->second->flags_any(VertexFlags::kProtectedBreak) &&
+                    (want_split || v_near != trad_it->second)) {
+                    if (dump_i >= 0) m_dlvtx_calls[dump_i].two_end_veto = true;   // ai-helper issue 35
+                    if (m_vertex_scoreboard) m_vtx_board.route = "dl-veto-protected";
+                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 keeps the protected two-end-break vertex (doc pr/48)");
+                    return false;
+                }
+            }
+
+            min_vertex = v_near;
+            min_dis = d_near;
+            bool did_split = false;
+            if (want_split) {
+                auto [ok, segs, vtx_new] = break_segment(graph, s_near, P, particle_data, recomb_model, dv,
+                                                         1e9 * units::cm, m_break_seg_orient);
+                (void) segs;
+                if (ok && vtx_new) {
+                    // Shield the deliberate split from the merge passes of
+                    // improve_vertex / examine_structure (pr/48 contract, as
+                    // snap_main_vertex_to_kink does for its split).
+                    vtx_new->set_flags(VertexFlags::kProtectedBreak);
+                    min_vertex = vtx_new;
+                    const auto pt = vtx_new->fit().valid() ? vtx_new->fit().point : vtx_new->wcpt().point;
+                    min_dis = (pt - P).magnitude();
+                    did_split = true;
+                } else {
+                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 break_segment declined, using the nearest vertex ({:.2f} cm)",
+                                        d_near / units::cm);
+                }
+            }
+            if (!min_vertex) {
+                if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-candidates";
+                return false;
+            }
+            flag_pass = true;
+            m_dv2_target = P;
+            m_dv2_score = score;
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 main vertex {} cluster {} at {:.2f} cm from P (nearest graph vertex {:.2f} cm)",
+                                did_split ? "SPLIT" : "reused",
+                                min_vertex->cluster() ? min_vertex->cluster()->get_cluster_id() : -1,
+                                min_dis / units::cm, d_near / units::cm);
+            if (m_vertex_scoreboard) {
+                m_vtx_board.route = did_split ? "dv2-accept-split" : "dv2-accept";
+                m_vtx_board.dl_best_score = score;
+            }
+        } else if (!flag_rerank) {
             // ===================================================================
             // LEGACY PATH: top-1 argmax + nearest-neighbor snap + hard gates
             // (identical to the original implementation; behaviour is unchanged)
@@ -5327,7 +5454,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         // cm; 0.00 cm is a real transfer).  Beyond it, production keeps its
         // own answer.  transfer=false (the probe) never enters here.
         bool dual_transferred = false;
-        if (dual_hint && dual_hint->transfer && dual_hint->mode == "snap" && dual_hint->has_vertex) {
+        // DV2-MAX: its own point decides; the OFF chain's snap is an SCN-era aid.
+        if (!dv2 && dual_hint && dual_hint->transfer && dual_hint->mode == "snap" && dual_hint->has_vertex) {
             std::vector<WireCell::Point> cpts; std::vector<int> ccid;
             cpts.reserve(cand_vertices.size()); ccid.reserve(cand_vertices.size());
             for (auto vtx : cand_vertices) {
@@ -5379,7 +5507,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         // junction and the DL snap lands on a Bragg tip).  A DL choice that
         // AGREES with the protected vertex still passes.  Inert unless
         // m_two_end_break (the flag is only ever set by that pass).
-        if (flag_pass && m_two_end_break && main_cluster) {
+        // DV2-MAX applies its own (optional) veto above, before any split.
+        if (!dv2 && flag_pass && m_two_end_break && main_cluster) {
             auto trad_it = map_cluster_main_vertices.find(main_cluster);
             if (trad_it != map_cluster_main_vertices.end() && trad_it->second &&
                 trad_it->second->flags_any(VertexFlags::kProtectedBreak) &&
@@ -5454,6 +5583,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         }
         if (flag_pass) {
             flag_change = true;
+            // DV2-MAX: the point dv2_place_main_vertex moves the final main vertex onto
+            if (dv2) m_dv2_target_valid = true;
             SPDLOG_LOGGER_TRACE(s_log,
                 "determine_overall_main_vertex_DL: switching to DL vertex (dis={:.2f} cm)",
                 min_dis / units::cm);
@@ -5533,6 +5664,50 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 #endif  // HAVE_PYTHON_INC
 
     return flag_change;
+}
+
+bool PatternAlgorithms::dv2_place_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex,
+                                              TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
+{
+    if (!is_dv2_engine() || !m_dv2_target_valid || !main_vertex) return false;
+    const WireCell::Point& P = m_dv2_target;
+    const auto cur = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
+    const double move = (P - cur).magnitude();
+    if (move > m_dv2_max_move) {
+        SPDLOG_LOGGER_DEBUG(s_log, "dv2_place_main_vertex: cluster {} move {:.2f} cm > max {:.2f} cm, vertex left at ({:.2f}, {:.2f}, {:.2f})",
+                            cluster.ident(), move / units::cm, m_dv2_max_move / units::cm,
+                            cur.x() / units::cm, cur.y() / units::cm, cur.z() / units::cm);
+        return false;
+    }
+    if (move < 0.001 * units::cm) return false;   // already there
+    if (!main_vertex->descriptor_valid()) return false;
+
+    std::vector<SegmentPtr> segs;
+    for (auto e : sorted_out_edges(main_vertex->get_descriptor(), graph)) {
+        SegmentPtr sg = graph[e].segment;
+        if (sg) segs.push_back(sg);
+    }
+    if (segs.empty()) return false;
+
+    // The vertex fit's own write (fit_vertex -> MyFCN::UpdateInfo): re-route
+    // every attached segment's path onto P through the steiner points, clear
+    // their fits, set the vertex fit point + wire coordinates + flag_fix (the
+    // track fitter then keeps the vertex where it is).  Same MyFCN settings
+    // as fit_vertex; FitVertex() is not called -- P replaces its answer.
+    MyFCN fcn(main_vertex, true, 0.43 * units::cm, 1.5 * units::cm, 0.9 * units::cm, 6 * units::cm);
+    for (auto sg : segs) fcn.AddSegment(sg);
+    if (!fcn.UpdateInfo(P, cluster, track_fitter, dv)) {
+        SPDLOG_LOGGER_WARN(s_log, "dv2_place_main_vertex: cluster {} UpdateInfo declined P=({:.2f}, {:.2f}, {:.2f}) cm; vertex left at ({:.2f}, {:.2f}, {:.2f})",
+                           cluster.ident(), P.x() / units::cm, P.y() / units::cm, P.z() / units::cm,
+                           cur.x() / units::cm, cur.y() / units::cm, cur.z() / units::cm);
+        return false;
+    }
+    // improve_vertex's refit after a vertex fit
+    track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
+    const auto now = main_vertex->fit().point;
+    SPDLOG_LOGGER_DEBUG(s_log, "dv2_place_main_vertex: cluster {} moved {:.2f} cm onto P, {} segment(s) re-routed; after refit {:.3f} cm from P",
+                        cluster.ident(), move / units::cm, segs.size(), (now - P).magnitude() / units::cm);
+    return true;
 }
 
 // doc sbnd_xin/docs/pr/112 sec 11 -- pure snap-and-guard arithmetic of the

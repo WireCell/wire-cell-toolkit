@@ -1082,6 +1082,32 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_dl_vtx_cloud_no_exclusion{false};
 
+        // DV2-MAX vertexer (dl_vtx_engine="dv2max").  The DL step calls
+        // m_dv2_py_module.DV2_Vertex on the same input cloud the SCN net gets
+        // and receives one point P (+ calibrated P(<1 cm)).
+        //   topology: the nearest PR-graph vertex if it lies within
+        //     m_dv2_split_dist of P, else the nearest segment is split at P
+        //     (break_segment; the new vertex is kProtectedBreak, exactly as
+        //     snap_main_vertex_to_kink marks its split).  That vertex becomes
+        //     the main vertex through the usual DL tail.
+        //   position: dv2_place_main_vertex() moves the final main vertex onto
+        //     P after the vertex refinement block (MyFCN::UpdateInfo + refit:
+        //     the same write the vertex fit itself makes), if the move is
+        //     <= m_dv2_max_move.
+        // Default engine "scn" => none of this runs => byte-identical.
+        std::string m_dl_vtx_engine{"scn"};
+        std::string m_dv2_py_module{"DV2_Vertex"};
+        double m_dv2_split_dist{1.5 * units::cm};   // reuse a graph vertex within this distance of P
+        double m_dv2_max_move{1e9 * units::cm};     // largest final move onto P (default: always)
+        double m_dv2_min_score{0.0};                // P(<1 cm) below this => keep the traditional vertex
+        bool   m_dv2_two_end_veto{false};           // honour the pr/48 protected two-end-break veto
+        // per-event state: set by determine_overall_main_vertex_DL when it
+        // accepts a DV2-MAX point, read by dv2_place_main_vertex.
+        bool   m_dv2_target_valid{false};
+        WireCell::Point m_dv2_target;
+        double m_dv2_score{-1.0};
+        bool is_dv2_engine() const { return m_dl_vtx_engine == "dv2max"; }
+
         // P8 -- endpoint-consistency check on PR::add_segment.
         // The prototype refuses a vertex/segment connection whose vertex wcpt
         // index is neither the segment's front nor its back
@@ -3565,6 +3591,14 @@ namespace WireCell::Clus::PR {
         // pr/51, 18255-506746) removed -- live A/B -36/1014 (pr/89 round 5).
         // See sbnd_xin/docs/77_knob-ledger.tsv.
         bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, const DualChainHint* dual_hint = nullptr);
+
+        // DV2-MAX (m_dl_vtx_engine == "dv2max"): move the final main vertex
+        // onto the point the DL step accepted (m_dv2_target), with the vertex
+        // fit's own write (MyFCN::UpdateInfo: segment paths re-routed, fit
+        // point + wire coordinates, flag_fix) and the same cluster refit
+        // improve_vertex runs after a vertex fit.  Call after the vertex
+        // refinement block.  Returns true if the vertex was moved.
+        bool dv2_place_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 
         // doc pr/112 sec 11 -- the OFF pass's SCN inference on its own graph:
         // builds the same cloud determine_overall_main_vertex_DL builds (vertex
