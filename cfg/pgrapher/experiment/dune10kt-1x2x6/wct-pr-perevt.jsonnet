@@ -52,6 +52,26 @@ function(
     // FLIPPED ON 2026-10-26 (owner: "flip knob by default for future batches"); -S <key>=false restores legacy.
     pr_alias_invalidate_old = true,
     pr_kine_skip_nonfinite = true,
+    // pr_ml doc 29 sec 6.3 (the ML-PR branch): the Steiner-stage retiler's retile_mode and the gapfill retile
+    // (see pr.jsonnet).  null / false => keys omitted, no model service, no WireCellPytorch => byte-identical
+    // compiled config.  retile_deghost needs retile_deghost_ml_levels (rows [name, width, superwire, threshold]).
+    retile_mode = null,
+    retile_deghost = false,
+    retile_deghost_ml_levels = null,
+    retile_deghost_model_dir = 'fm/dune10kt-1x2x6/deghost',
+    retile_deghost_model_suffix = '_v2',
+    retile_deghost_device = 'cpu',
+    retile_deghost_charge_scale = 0.25,
+    retile_deghost_repair_q_floor = null,
+    retile_deghost_nthreads = 4,
+    retile_deghost_dump_dir = null,
+    retile_deghost_residual = true,
+    retile_deghost_corridor_wires = 1,
+    retile_deghost_bridge_planes = 1,
+    retile_deghost_gap_min_slices = 2,
+    retile_deghost_gap_max_cm = 20,
+    retile_deghost_reach_cm = 20,
+    retile_deghost_writeback = null,
 )
 
 local anodes = [tools_all.anodes[i] for i in anode_indices];
@@ -69,7 +89,24 @@ local pr = pr_maker.pr(anodes, pds, pipeline_names, dump=true, tensor_outname=sa
                        pr_bee=pr_bee, trackfitting_config_file=trackfitting_config,
                        bee_detector=bee_detector,
                        pr_alias_invalidate_old=pr_alias_invalidate_old,
-                       pr_kine_skip_nonfinite=pr_kine_skip_nonfinite);
+                       pr_kine_skip_nonfinite=pr_kine_skip_nonfinite,
+                       retile_mode=retile_mode,   // pr_ml doc 29 sec 6.3
+                       retile_deghost=retile_deghost,
+                       retile_deghost_ml_levels=retile_deghost_ml_levels,
+                       retile_deghost_model_dir=retile_deghost_model_dir,
+                       retile_deghost_model_suffix=retile_deghost_model_suffix,
+                       retile_deghost_device=retile_deghost_device,
+                       retile_deghost_charge_scale=retile_deghost_charge_scale,
+                       retile_deghost_repair_q_floor=retile_deghost_repair_q_floor,
+                       retile_deghost_nthreads=retile_deghost_nthreads,
+                       retile_deghost_dump_dir=retile_deghost_dump_dir,
+                       retile_deghost_residual=retile_deghost_residual,
+                       retile_deghost_corridor_wires=retile_deghost_corridor_wires,
+                       retile_deghost_bridge_planes=retile_deghost_bridge_planes,
+                       retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                       retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
+                       retile_deghost_reach_cm=retile_deghost_reach_cm,
+                       retile_deghost_writeback=retile_deghost_writeback);
 
 local graph = g.pipeline([source, pr]);
 
@@ -78,7 +115,8 @@ local cmdline = {
     type: 'wire-cell',
     data: {
         plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
-                  'WireCellSigProc', 'WireCellImg', 'WireCellClus', 'WireCellRoot'],
+                  'WireCellSigProc', 'WireCellImg', 'WireCellClus', 'WireCellRoot']
+                 + (if retile_deghost then ['WireCellPytorch'] else []),   // pr_ml doc 29 sec 6.3
         apps: ['Pgrapher'],
     },
 };

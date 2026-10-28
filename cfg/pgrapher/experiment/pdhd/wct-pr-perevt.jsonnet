@@ -225,6 +225,27 @@ function(
     // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
     // null => key omitted => byte-identical.
     retile_deghost_writeback = null,
+    // pr_ml doc 29 sec 6.3 (the ML-PR branch, pr_ml doc 28 "combination 3"): a directory holding the deghosting
+    // cascade's image of the event (clusters-apa-anode<N>-ms-active.tar.gz of the d31 imaging fork with
+    // deghost_w9ft).  '' (default) => nothing is built, byte-identical compiled config.  Set => the cascade image
+    // joins the pctree as a third grouping 'deghost' (deghost_tree in pr.jsonnet, PointTreeConcat) and the pipeline
+    // name 'image_deghost' replaces the blobs of every live cluster.  image_deghost_anodes: anode idents with an
+    // archive in the directory (null => anode_indices).  The truth cloud on the cascade cells:
+    // image_deghost_truth_depos ('' => no labeler) with the clustering job's TruthPointLabeler values (offset,
+    // speed, truth table) and, as image_deghost_truth_extra, its other keys (every key of that node except anode /
+    // face / detector_volumes / speed / time_offset / inpath / truth_table), so replaced and kept blobs carry one
+    // key set.
+    image_deghost_dir = '',
+    image_deghost_anodes = null,
+    image_deghost_select = 'all',
+    image_deghost_fill_cluster_t0 = false,
+    image_deghost_strip_t0cor_leftover = false,
+    image_deghost_harmonize_3d_keys = false,
+    image_deghost_truth_depos = '',
+    image_deghost_truth_time_offset_us = 0,
+    image_deghost_truth_speed_mmus = null,
+    image_deghost_truth_table = '',
+    image_deghost_truth_extra = {},
     // doc pdvd/114: CreateSteinerGraph blank-plane admission policy for the Steiner terminal
     // candidates.  null => keys omitted => production (C++ "wcp"), byte-identical.  'prefer3' |
     // 'nearby' | 'prefer3+nearby', with the nearby radius in cm.  Set as code:
@@ -4228,6 +4249,11 @@ function(
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
+                             image_deghost=(image_deghost_dir != ''),   // pr_ml doc 29 sec 6.3
+                             image_deghost_select=image_deghost_select,
+                             image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
+                             image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
+                             image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
                              mip_dqdx_median=mip_dqdx_median,
                              pipeline_names=pipeline_names,
                              stm_michel_knobs=stm_michel_knobs + stm_michel_extra,   // doc pdhd/03; + doc pdvd/51 override bag
@@ -4363,10 +4389,35 @@ function(
                              fast_xgb_forest=fast_xgb_forest,
                              tcn_knobs=tcn_knobs);
 
-    local graph = g.intern(
+    // pr_ml doc 29 sec 6.3: with image_deghost_dir the pctree and the cascade image are joined (tensors
+    // concatenated, distinct datapaths) in front of the MABC, as the protodunevd job does for beam_deghost.
+    local dg_tree = clus_maker.deghost_tree(
+        if image_deghost_anodes == null then anodes
+        else [a for a in anodes if std.member(image_deghost_anodes, a.data.ident)],
+        image_deghost_dir,
+        truth=if image_deghost_truth_depos == '' then null else (
+            assert image_deghost_truth_speed_mmus != null : 'image_deghost_truth_depos needs image_deghost_truth_speed_mmus';
+            {
+                depos: image_deghost_truth_depos,
+                time_offset: image_deghost_truth_time_offset_us * wc.us,
+                speed: image_deghost_truth_speed_mmus * wc.mm / wc.us,
+                truth_table: image_deghost_truth_table,
+                extra: image_deghost_truth_extra,
+            }));
+    local dg_join = g.pnode({
+        type: 'PointTreeConcat',
+        name: 'pr_deghost',
+        data: { multiplicity: 2 },
+    }, nin=2, nout=1);
+    local graph = if image_deghost_dir == '' then g.intern(
         innodes=[source],
         outnodes=[pr],
         edges=[g.edge(source, pr, 0, 0)],
+    ) else g.intern(
+        innodes=[source, dg_tree],
+        centernodes=[dg_join],
+        outnodes=[pr],
+        edges=[g.edge(source, dg_join, 0, 0), g.edge(dg_tree, dg_join, 0, 1), g.edge(dg_join, pr, 0, 0)],
     );
 
     local app = {
@@ -4397,7 +4448,9 @@ function(
             plugins: ['WireCellGen', 'WireCellPgraph', 'WireCellAux', 'WireCellSio',
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
                      + (if needs_root then ['WireCellRoot'] else [])
-                     + (if retile_deghost then ['WireCellPytorch'] else []),   // pr_ml doc 28 step 2
+                     + (if retile_deghost then ['WireCellPytorch'] else [])   // pr_ml doc 28 step 2
+                     // pr_ml doc 29 sec 6.3: the cascade-tree TruthPointLabeler (image_deghost_truth_depos); '' => not loaded
+                     + (if image_deghost_dir != '' && image_deghost_truth_depos != '' then ['WireCellTruth'] else []),
             apps: ['Pgrapher'],
         },
     };

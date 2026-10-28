@@ -696,6 +696,17 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // (serialization throws, PDVD R3 beam10, or drops them); true erases them from those leftover cells.
               // C++ default false; key omitted when false => byte-identical compiled config.
               beam_deghost_strip_t0cor_leftover=false,
+              // pr_ml doc 29 sec 6.3 (the ML-PR branch, "combination 3" of pr_ml doc 28): image_deghost = the MABC
+              // also loads the 'deghost' grouping (as beam_deghost) and the pipeline name 'image_deghost'
+              // (ClusteringImageDeghost; after switch_scope, before steiner) replaces the blobs of every live
+              // cluster ('all'; 'main' = main clusters) by the overlapping cascade cells -- the SBND stage of pr_ml
+              // doc 28 sec 9.  fill_cluster_t0 / strip_t0cor_leftover / harmonize_3d_keys as there.  C++ defaults
+              // false; keys omitted when off => byte-identical compiled config.  R&D, not for production.
+              image_deghost=false,
+              image_deghost_select='all',
+              image_deghost_fill_cluster_t0=false,
+              image_deghost_strip_t0cor_leftover=false,
+              image_deghost_harmonize_3d_keys=false,
               // nu_skip_cosmic: tagger_check_neutrino skips in-window mains
               // already tagged cosmic upstream (flag_TGM, flag_STM, or Q/L
               // lm_flag>0), so neutrino PR runs only on untagged nu candidates.
@@ -1673,6 +1684,23 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                     [if beam_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
                 },
             },
+            // pr_ml doc 29 sec 6.3 (pr_ml doc 28 "combination 3", the SBND stage): replace the blobs of every
+            // live cluster (image_deghost_select 'all'; 'main' = main clusters) by the overlapping cells of the
+            // deghost grouping.  Needs image_deghost (the grouping).  Absent from pipeline_names => absent from
+            // the compiled config.
+            image_deghost: (assert image_deghost : "pipeline name 'image_deghost' needs image_deghost=true"; {
+                type: 'ClusteringImageDeghost',
+                name: 'pr',
+                data: {
+                    grouping: 'live',
+                    deghost_grouping: 'deghost',
+                    pc_transforms: wc.tn(pcts),
+                    select: image_deghost_select,
+                    [if image_deghost_fill_cluster_t0 then 'fill_cluster_t0']: true,
+                    [if image_deghost_strip_t0cor_leftover then 'strip_t0cor_leftover']: true,
+                    [if image_deghost_harmonize_3d_keys then 'harmonize_3d_keys']: true,
+                },
+            }),
             // PDVD (doc 25 M3): every flash-matched cluster becomes a main so the
             // taggers and the per-bundle neutrino PR evaluate it (QLMatching only
             // flags MicroBooNE-style decomposed mains, which PDVD never builds).
@@ -2450,8 +2478,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                 outpath: 'pointtrees/%d',
                 // doc pdvd/125.  C++ default groupings ['live', 'dead'].  Keys
                 // omitted when off => byte-identical pre-knob config.
-                [if beam_deghost then 'groupings']: ['live', 'dead', 'deghost'],
-                [if beam_deghost then 'insubpaths']: [{ name: 'deghost', subpath: '/dg/live' }],
+                [if beam_deghost || image_deghost then 'groupings']: ['live', 'dead', 'deghost'],
+                [if beam_deghost || image_deghost then 'insubpaths']: [{ name: 'deghost', subpath: '/dg/live' }],
                 perf: true,
                 bee_dir: bee_dir,
                 bee_zip: if pr_bee then bee_zip_path else '',  // doc 87

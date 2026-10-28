@@ -1901,6 +1901,25 @@ function(
     // the truth donor of truth/python/pr_truth.py --truth-donor, because the -beam gapfill retile rebuilds the
     // bundle's blobs after beam_deghost and the rebuilt blobs carry no truth cloud.
     beam_deghost_truth_dump = '',
+    // pr_ml doc 29 sec 6.3 (the ML-PR branch, pr_ml doc 28 "combination 3"): a directory holding the deghosting
+    // cascade's image of the event (clusters-apa-anode<N>-ms-active.tar.gz of the d121 imaging fork with
+    // deghost_w9ft, as beam_deghost_dir).  '' (default) => nothing is built, byte-identical compiled config.
+    // Set => the same deghost tree as beam_deghost (beam_deghost_anodes applies) joins the pctree and the
+    // pipeline name 'image_deghost' replaces the blobs of every live cluster.  Not together with beam_deghost_dir.
+    // The truth cloud on the cascade cells: image_deghost_truth_depos ('' => no labeler) with the clustering
+    // job's TruthPointLabeler values (offset, speed, truth table) and, as image_deghost_truth_extra, its other
+    // keys (every key of that node except anode / face / detector_volumes / speed / time_offset / inpath /
+    // truth_table), so replaced and kept blobs carry one key set.
+    image_deghost_dir = '',
+    image_deghost_select = 'all',
+    image_deghost_fill_cluster_t0 = false,
+    image_deghost_strip_t0cor_leftover = false,
+    image_deghost_harmonize_3d_keys = false,
+    image_deghost_truth_depos = '',
+    image_deghost_truth_time_offset_us = 0,
+    image_deghost_truth_speed_mmus = null,
+    image_deghost_truth_table = '',
+    image_deghost_truth_extra = {},
     // doc pdvd/120: the beam-particle PR stage (pipeline name
     // 'check_beam_particle'; runner mode run_pr_evt.sh -beam).  The per-event
     // beam window is derived HERE from the light stage's trigger metadata --
@@ -4834,6 +4853,11 @@ function(
                              beam_window=[t * wc.us for t in beam_window_eff_us],   // doc pdvd/120: == beam_window_us unless a beam trigger is given
                              beam_window_only=beam_window_only,
                              beam_deghost=(beam_deghost_dir != ''),   // doc pdvd/125
+                             image_deghost=(image_deghost_dir != ''),   // pr_ml doc 29 sec 6.3
+                             image_deghost_select=image_deghost_select,
+                             image_deghost_fill_cluster_t0=image_deghost_fill_cluster_t0,
+                             image_deghost_strip_t0cor_leftover=image_deghost_strip_t0cor_leftover,
+                             image_deghost_harmonize_3d_keys=image_deghost_harmonize_3d_keys,
                              beam_deghost_fill_cluster_t0=beam_deghost_fill_cluster_t0,   // pr_ml doc 24 sec 6
                              beam_deghost_strip_t0cor_leftover=beam_deghost_strip_t0cor_leftover,   // pr_ml doc 24 sec 6
                              beam_pr_knobs=beam_pr_knobs + (if beam_fill_scalars then { fill_beam_scalars: true } else {}),   // doc pdvd/120; pr_ml doc 24 sec 6
@@ -4965,11 +4989,24 @@ function(
 
     // doc pdvd/125: with beam_deghost_dir the pctree and the cascade image are
     // joined (tensors concatenated, distinct datapaths) in front of the MABC.
+    // pr_ml doc 29 sec 6.3: image_deghost_dir uses the same tree (and its own truth labeler values).
+    assert !(beam_deghost_dir != '' && image_deghost_dir != '') : 'beam_deghost_dir and image_deghost_dir are exclusive';
+    local dg_dir = if image_deghost_dir != '' then image_deghost_dir else beam_deghost_dir;
     local dg_tree = clus_maker.deghost_tree(
         if beam_deghost_anodes == null then anodes
         else [a for a in anodes if std.member(beam_deghost_anodes, a.data.ident)],
-        beam_deghost_dir,
-        truth=if beam_deghost_truth_depos == '' then null else (
+        dg_dir,
+        truth=if image_deghost_dir != '' then (
+            if image_deghost_truth_depos == '' then null else (
+                assert image_deghost_truth_speed_mmus != null : 'image_deghost_truth_depos needs image_deghost_truth_speed_mmus';
+                {
+                    depos: image_deghost_truth_depos,
+                    time_offset: image_deghost_truth_time_offset_us * wc.us,
+                    speed: image_deghost_truth_speed_mmus * wc.mm / wc.us,
+                    truth_table: image_deghost_truth_table,
+                    extra: image_deghost_truth_extra,
+                }))
+        else if beam_deghost_truth_depos == '' then null else (
             assert beam_deghost_truth_speed_mmus != null : 'beam_deghost_truth_depos needs beam_deghost_truth_speed_mmus';
             {
                 depos: beam_deghost_truth_depos,
@@ -5013,7 +5050,7 @@ function(
     local graph = if beam_deghost_truth_dump != '' then (
         assert beam_deghost_dir != '' : 'beam_deghost_truth_dump needs beam_deghost_dir';
         g.intern(innodes=[dg_tree], outnodes=[dg_dump], edges=[g.edge(dg_tree, dg_dump, 0, 0)])
-    ) else if beam_deghost_dir == '' then g.intern(
+    ) else if dg_dir == '' then g.intern(
         innodes=[source],
         outnodes=[pr],
         edges=[g.edge(source, pr, 0, 0)],
@@ -5053,7 +5090,7 @@ function(
                       'WireCellSigProc', 'WireCellImg', 'WireCellClus']
                      + (if needs_root then ['WireCellRoot'] else [])
                      // pr_ml doc 24 sec 6: the cascade-tree TruthPointLabeler (beam_deghost_truth_depos); '' => not loaded
-                     + (if beam_deghost_truth_depos != '' then ['WireCellTruth'] else [])
+                     + (if beam_deghost_truth_depos != '' || (image_deghost_dir != '' && image_deghost_truth_depos != '') then ['WireCellTruth'] else [])
                      + (if retile_deghost then ['WireCellPytorch'] else []),   // doc pdvd/130 phase 3
             apps: ['Pgrapher'],
         },

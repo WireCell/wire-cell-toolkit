@@ -309,7 +309,28 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
        bundle_t0=0.0,
        // pr_ml doc 26 sec 7.3: PR crash guards (wct-pr-perevt.jsonnet TLAs); keys omitted when off.
        pr_alias_invalidate_old=false,
-       pr_kine_skip_nonfinite=false) :: {
+       pr_kine_skip_nonfinite=false,
+       // pr_ml doc 29 sec 6.3 (the ML-PR branch): ImproveCluster_2 retile_mode of the Steiner-stage retiler (doc
+       // pdvd/113; C++ default "full"); null => key omitted => byte-identical compiled config.
+       retile_mode=null,
+       // pr_ml doc 29 sec 6.3: the Steiner-stage retile in the doc pdvd/131 GAPFILL mode (ImproveCluster_2
+       // "retile_deghost", C++ absent = off), as pdhd / protodunevd / sbnd: the cluster's blobs are the fixed base,
+       // gaps along its path are bridged by one-wire corridors at cell resolution, and the cascade model
+       // (retile_deghost_ml_levels = rows [name, width, superwire, threshold], models e2c_<name><suffix>.ts in
+       // retile_deghost_model_dir) decides the corridor cells on the residual charge.  Scope 'all'.  FD-HD's
+       // production imaging runs the doc 32 cascade with the doc 31 head-column final level (18 input columns),
+       // which the retile's plain cascade cannot feed: the default model set is the plain v2 cascade
+       // (fm/dune10kt-1x2x6/deghost, suffix _v2; ladder wcfm/img.jsonnet ml_levels).  repair_q_floor null =>
+       // key omitted (the C++ default, as the imaging cascade).  false => key omitted, no model service =>
+       // byte-identical compiled config.
+       retile_deghost=false, retile_deghost_ml_levels=null, retile_deghost_model_dir='fm/dune10kt-1x2x6/deghost',
+       retile_deghost_model_suffix='_v2', retile_deghost_device='cpu', retile_deghost_charge_scale=0.25,
+       retile_deghost_repair_q_floor=null, retile_deghost_nthreads=4, retile_deghost_dump_dir=null,
+       retile_deghost_residual=true, retile_deghost_corridor_wires=1, retile_deghost_bridge_planes=1,
+       retile_deghost_gap_min_slices=2, retile_deghost_gap_max_cm=20, retile_deghost_reach_cm=20,
+       // writeback: C++ true (CreateSteinerGraph replaces the cluster's blobs by the gapfill cells); false = the
+       // gapfill cloud feeds the Steiner graph only.  null => key omitted.
+       retile_deghost_writeback=null) :: {
         local dv = clus_maker.detector_volumes(anodes),
         local pcts = clus_maker.pc_transforms(dv),
         local cm_old = clus.clustering_methods(
@@ -344,7 +365,38 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
             anodes=anodes,
             samplers=[clus.sampler(clus_maker.live_sampler(a, f, strategy_name='charge_stepped'),
                                    apa=a.data.ident, face=f)
-                      for a in anodes for f in [0, 1]]),
+                      for a in anodes for f in [0, 1]])
+            // pr_ml doc 29 sec 6.3: keys omitted when null / false => byte-identical compiled config.
+            + { data+: { [if retile_mode != null then 'retile_mode']: retile_mode,
+                         [if retile_deghost then 'retile_deghost']: retile_deghost_data },
+                uses+: retile_deghost_services },
+        // pr_ml doc 29 sec 6.3: the gapfill retile's model services and step config (scope 'all', no beam window).
+        local retile_deghost_services = if retile_deghost then [{
+            type: "TorchTensorSetService",
+            name: "rd-e2c-%s" % lv[0],
+            data: { model: "%s/e2c_%s%s.ts" % [retile_deghost_model_dir, lv[0], retile_deghost_model_suffix],
+                    device: retile_deghost_device },
+        } for lv in retile_deghost_ml_levels] else [],
+        local retile_deghost_data = if retile_deghost then {
+            levels: [{ width: lv[1], superwire: lv[2], forward: "TorchTensorSetService:rd-e2c-%s" % lv[0], threshold: lv[3] }
+                     for lv in retile_deghost_ml_levels],
+            scope: 'all',
+            cut_max_depth: 10,
+            cut_min_length: 2,
+            repair: true,
+            [if retile_deghost_repair_q_floor != null then 'repair_q_floor']: retile_deghost_repair_q_floor,
+            policy: "uboone",
+            charge_scale: retile_deghost_charge_scale,
+            nthreads: retile_deghost_nthreads,
+            [if retile_deghost_dump_dir != null then 'dump_dir']: retile_deghost_dump_dir,
+            residual: retile_deghost_residual,
+            corridor_wires: retile_deghost_corridor_wires,
+            bridge_planes: retile_deghost_bridge_planes,
+            gap_min_slices: retile_deghost_gap_min_slices,
+            gap_max: retile_deghost_gap_max_cm * wc.cm,
+            reach: retile_deghost_reach_cm * wc.cm,
+            [if retile_deghost_writeback != null then 'writeback']: retile_deghost_writeback,
+        } else null,
         // SBND production steiner settings (doc sbnd_xin/118 flip: prefer3 / 0.5 / tree+path).
         local steiner_args = {
             retiler: improve2, perf: true, require_beam_flash: false,
