@@ -74,9 +74,11 @@ void Aux::FrameSync::flush(input_queues& iqs, output_queues& oqs)
 
 bool Aux::FrameSync::operator()(input_queues& iqs, output_queues& oqs)
 {
-    // concatenate input queues to buffer
+    // move input queues to buffer.  Consuming them matters: per the
+    // IHydraNode contract, input left in iqs is handed to us again.
     for (size_t ind=0; ind<m_iqs.size(); ++ind) {
         m_iqs[ind].insert(m_iqs[ind].end(), iqs[ind].begin(), iqs[ind].end());
+        iqs[ind].clear();
     }
     
     // try to flush
