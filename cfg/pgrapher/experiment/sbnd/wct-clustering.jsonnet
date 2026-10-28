@@ -33,6 +33,11 @@ function(
     subrun        = 0,
     event         = 0,
     reality       = 'sim',
+    // pr_ml doc 29 sec 6.5 / doc 30: forward `reality` to clus.jsonnet.  Historically this job never passed it, so
+    // the module ran with its own default 'data' (per-TPC pos_offset on) even for simulation; every S1 / R3 label set
+    // was clustered that way.  jsonnet default false => clus_mod gets 'data' as before => byte-identical compiled
+    // config.  true with reality=sim => pos_offset_on false (the MC campaign setting).
+    forward_reality = false,
     // DL/DT: sbndcode's production diffusion (wcsimsp_sbnd.fcl), restored
     // 2026-07-27, reverting the 6.5781/13.1349 retune of 2026-07-25 (docs/66).
     // These feed simparams.lar -> the sim Drifter; no reco component reads them.
@@ -133,6 +138,7 @@ function(
     local clus_mod = import 'clus.jsonnet';
     local clus_maker = clus_mod(
         output_dir=output_dir,
+        reality=(if forward_reality then reality else 'data'),
         runNo=run,
         subRunNo=subrun,
         eventNo=event,
