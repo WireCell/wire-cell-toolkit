@@ -7,6 +7,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/doctest.h"
 
+#include <algorithm>
 #include <random>
 
 using namespace WireCell;
@@ -221,6 +222,96 @@ TEST_CASE("drifter null face")
         auto depo = std::make_shared<DumbDepo>(pt);
         bool got = drifter.insert(depo);
         debug("test point x={} want={} got={}", x, want, got);
+        CHECK(got == want);
+    }
+}
+
+class TieDepo : public WireCell::IDepo {
+public:
+    TieDepo(double t, const WireCell::Point& pos, int id) : m_t(t), m_pos(pos), m_id(id) {};
+    virtual ~TieDepo() {};
+
+    virtual const WireCell::Point& pos() const { return m_pos; }
+    virtual double time() const { return m_t; }
+    virtual double charge() const { return -1000; }
+    virtual double energy() const { return 1000; }
+    virtual int id() const { return m_id; }
+    virtual int pdg() const { return 0; }
+    virtual WireCell::IDepo::pointer prior() const { return nullptr; }
+    virtual double extent_long() const { return 0; }
+    virtual double extent_tran() const { return 0; }
+
+private:
+    double m_t;
+    WireCell::Point m_pos;
+    int m_id;
+};
+
+// Drift depos that all reach the response plane at the same time (same t and x, different y) and return the output ids in
+// order.  The input order (and with it the allocation order of the drifted depos) is the permutation given.  A late depo
+// ripens the tied ones through flush_ripe(), a second tied group is left for the EOS flush().
+static std::vector<int> drift_tied(bool stable_order, const std::vector<int>& perm)
+{
+    Drifter drifter;
+    Configuration cfg = drifter.default_configuration();
+    cfg["xregions"][0]["cathode"] = 2*units::meter;
+    cfg["xregions"][0]["response"] = 10*units::cm;
+    cfg["xregions"][0]["anode"] = 0;
+    cfg["fluctuate"] = false;
+    if (stable_order) {
+        cfg["stable_order"] = true;
+    }
+    drifter.configure(cfg);
+
+    std::vector<int> ids;
+    auto take = [&](const IDrifter::output_queue& q) {
+        for (const auto& d : q) {
+            if (d) ids.push_back(d->id());
+        }
+    };
+    const double late = 10*units::ms;
+    for (double t0 : {0.0, late}) {
+        for (int k : perm) {
+            IDrifter::output_queue q;
+            drifter(std::make_shared<TieDepo>(t0, Point(1*units::meter, k*units::mm, 0), k + (t0 > 0 ? 100 : 0)), q);
+            take(q);
+        }
+    }
+    IDrifter::output_queue q;
+    drifter(nullptr, q);
+    take(q);
+    return ids;
+}
+
+TEST_CASE("drifter stable order of equal-time depos")
+{
+    common_setup();
+
+    {
+        Drifter drifter;
+        CHECK(drifter.default_configuration()["stable_order"].asBool() == false);
+    }
+
+    const int n = 20;
+    std::vector<int> up(n), down(n), shuffled(n);
+    for (int k = 0; k < n; ++k) {
+        up[k] = k;
+        down[k] = n - 1 - k;
+        shuffled[k] = (7 * k) % n;  // 7 and 20 are coprime
+    }
+
+    // stable_order=true: the output order is fixed by content (here y), whatever the input / allocation order.
+    std::vector<int> want;
+    for (int k = 0; k < n; ++k) want.push_back(k);
+    for (int k = 0; k < n; ++k) want.push_back(100 + k);
+    CHECK(drift_tied(true, up) == want);
+    CHECK(drift_tied(true, down) == want);
+    CHECK(drift_tied(true, shuffled) == want);
+
+    // default (legacy): the same depos come out, the order of ties is not specified.
+    for (const auto& perm : {up, down, shuffled}) {
+        auto got = drift_tied(false, perm);
+        std::sort(got.begin(), got.end());
         CHECK(got == want);
     }
 }

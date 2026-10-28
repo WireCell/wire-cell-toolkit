@@ -20,8 +20,34 @@ WIRECELL_FACTORY(Drifter, WireCell::Gen::Drifter,
 using namespace std;
 using namespace WireCell;
 
+// Lexicographic comparison of what a depo carries, then of its prior's: -1, 0 or +1.  Used
+// for the stable_order tie-break of equal-time depos (0 only for depos equal in all of it).
+static int depo_content_cmp(const IDepo& lhs, const IDepo& rhs)
+{
+    const double lv[] = {lhs.time(), lhs.pos().x(), lhs.pos().y(), lhs.pos().z(), lhs.charge(),
+                         lhs.extent_long(), lhs.extent_tran(), lhs.energy()};
+    const double rv[] = {rhs.time(), rhs.pos().x(), rhs.pos().y(), rhs.pos().z(), rhs.charge(),
+                         rhs.extent_long(), rhs.extent_tran(), rhs.energy()};
+    for (size_t ind = 0; ind < sizeof(lv) / sizeof(lv[0]); ++ind) {
+        if (lv[ind] < rv[ind]) return -1;
+        if (rv[ind] < lv[ind]) return +1;
+    }
+    if (lhs.id() != rhs.id()) return lhs.id() < rhs.id() ? -1 : +1;
+    if (lhs.pdg() != rhs.pdg()) return lhs.pdg() < rhs.pdg() ? -1 : +1;
+    const auto lp = lhs.prior(), rp = rhs.prior();
+    if (lp && rp) return depo_content_cmp(*lp, *rp);
+    if (lp) return +1;
+    if (rp) return -1;
+    return 0;
+}
+
 bool Gen::Drifter::DepoTimeCompare::operator()(const IDepo::pointer& lhs, const IDepo::pointer& rhs) const
 {
+    if (by_content) {
+        const int c = depo_content_cmp(*lhs, *rhs);
+        if (c) return c < 0;
+        return lhs.get() < rhs.get();  // equal in content: interchangeable
+    }
     if (lhs->time() == rhs->time()) {
         if (lhs->pos().x() == lhs->pos().x()) {
             return lhs.get() < rhs.get();  // break tie by pointer
@@ -33,12 +59,13 @@ bool Gen::Drifter::DepoTimeCompare::operator()(const IDepo::pointer& lhs, const 
 
 // Xregion helper
 
-Gen::Drifter::Xregion::Xregion(Configuration cfg)
+Gen::Drifter::Xregion::Xregion(Configuration cfg, bool stable_order)
     : anode(make_coordbounds(cfg["anode"]))
     , response(make_coordbounds(cfg["response"]))
     , cathode(make_coordbounds(cfg["cathode"]))
     , bulk(*response, *cathode)
     , near(*anode, *response)
+    , depos(DepoTimeCompare{stable_order})
 {
 }
 Gen::Drifter::Xregion::operator bool() const {
@@ -56,6 +83,7 @@ Gen::Drifter::Drifter()
   , m_speed(1.6 * units::mm / units::us)
   , m_toffset(0.0)
   , m_scale_factor(1.0)
+  , m_stable_order(false)
   , n_dropped(0)
   , n_drifted(0)
 {
@@ -73,6 +101,7 @@ WireCell::Configuration Gen::Drifter::default_configuration() const
     cfg["drift_speed"] = m_speed;
     cfg["time_offset"] = m_toffset;
     cfg["charge_scale"] = m_scale_factor;
+    cfg["stable_order"] = m_stable_order;  // see .h; default false = legacy order
 
     // see comments in .h file
     cfg["xregions"] = Json::arrayValue;
@@ -93,6 +122,7 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
     m_speed = get<double>(cfg, "drift_speed", m_speed);
     m_toffset = get<double>(cfg, "time_offset", m_toffset);
     m_scale_factor = get<double>(cfg, "charge_scale", m_scale_factor);
+    m_stable_order = get<bool>(cfg, "stable_order", m_stable_order);
 
     auto jxregions = cfg["xregions"];
     if (jxregions.empty()) {
@@ -101,7 +131,7 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
     }
     for (auto jone : jxregions) {
         if (!jone.isNull()) {
-          m_xregions.emplace_back(Xregion(jone));
+          m_xregions.emplace_back(Xregion(jone, m_stable_order));
           if (! m_xregions.back()) {
               raise<ValueError>("Incomplete Xregion from cfg: %s",
                                 Persist::dumps(jone));
@@ -194,7 +224,12 @@ void Gen::Drifter::flush(output_queue& outq)
         outq.insert(outq.end(), xr.depos.begin(), xr.depos.end());
         xr.depos.clear();
     }
-    std::sort(outq.begin(), outq.end(), by_time);
+    if (m_stable_order) {
+        std::sort(outq.begin(), outq.end(), DepoTimeCompare{true});
+    }
+    else {
+        std::sort(outq.begin(), outq.end(), by_time);
+    }
     outq.push_back(nullptr);
 }
 
@@ -226,7 +261,12 @@ void Gen::Drifter::flush_ripe(output_queue& outq, double now)
     if (outq.empty()) {
         return;
     }
-    std::sort(outq.begin(), outq.end(), by_time);
+    if (m_stable_order) {
+        std::sort(outq.begin(), outq.end(), DepoTimeCompare{true});
+    }
+    else {
+        std::sort(outq.begin(), outq.end(), by_time);
+    }
 }
 
 // always returns true because by hook or crook we consume the input.

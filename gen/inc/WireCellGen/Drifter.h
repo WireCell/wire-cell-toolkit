@@ -147,10 +147,18 @@ namespace WireCell {
 
 	    double m_scale_factor;
 
+            // Order of depos that reach the response plane at the same time.
+            // false (default, legacy): by pointer address, i.e. by the heap layout,
+            // since the x tie-break of DepoTimeCompare compares lhs with itself.
+            // true: by content (x, y, z, charge, extents, energy, id, pdg, then the
+            // prior depo's), reproducible across runs, hosts and thread counts.
+            bool m_stable_order;
+
             int n_dropped, n_drifted;
 
             // keep the depos sorted by time
             struct DepoTimeCompare {
+                bool by_content{false};
                 bool operator()(const IDepo::pointer& lhs, const IDepo::pointer& rhs) const;
             };
 
@@ -177,7 +185,7 @@ namespace WireCell {
             // The Xregion also buffers the depos that selected to reside in one
             // of its two sub regions prior to them being flushed to output.
             struct Xregion {
-                Xregion(Configuration cfg);
+                Xregion(Configuration cfg, bool stable_order = false);
 
                 std::unique_ptr<CoordBounds> anode, response, cathode;
                 CoordRegion bulk, near;
