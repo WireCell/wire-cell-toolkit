@@ -11,6 +11,9 @@
 
 #include "WireCellAux/DepoTools.h"
 
+#include <map>
+#include <mutex>
+
 WIRECELL_FACTORY(DepoFileSource, WireCell::Sio::DepoFileSource,
                  WireCell::INamed,
                  WireCell::IDepoSetSource, WireCell::IConfigurable)
@@ -53,6 +56,10 @@ WireCell::Configuration Sio::DepoFileSource::default_configuration() const
     // can be usfully set to -1 to accomodate diffierent conventions
     // for electron charge sign.
     cfg["scale"] = m_scale;
+
+    // pr_ml doc 33: one loaded copy for all sources of the same file
+    // and scale in this process (see the header).  Default false.
+    cfg["share_loaded"] = m_share;
     return cfg;
 }
 
@@ -60,6 +67,7 @@ void Sio::DepoFileSource::configure(const WireCell::Configuration& cfg)
 {
     m_inname = get(cfg, "inname", m_inname);
     m_scale = get(cfg, "scale", m_scale);
+    m_share = get(cfg, "share_loaded", m_share);
 
     m_in.clear();
     m_pending.reset();
@@ -321,9 +329,50 @@ IDepoSet::pointer Sio::DepoFileSource::next()
     return std::make_shared<Aux::SimpleDepoSet>(ident, idepos);
 }
 
+namespace {
+    // share_loaded: (inname, scale) -> the loaded sets, held only by the
+    // sources still emitting them and by their consumers
+    using shared_sets_t = std::vector<IDepoSet::pointer>;
+    std::mutex g_share_mutex;
+    std::map<std::pair<std::string, double>, std::weak_ptr<const shared_sets_t>> g_share;
+}
+
 bool Sio::DepoFileSource::operator()(IDepoSet::pointer& ds)
 {
     ds = nullptr;
+    if (m_share) {
+        if (m_eos_sent) {
+            ++m_count;
+            return false;
+        }
+        if (!m_all) {
+            std::lock_guard<std::mutex> lock(g_share_mutex);
+            auto& slot = g_share[std::make_pair(m_inname, m_scale)];
+            m_all = slot.lock();
+            if (m_all) {
+                log->debug("call={} sharing {} loaded set(s) of {}", m_count, m_all->size(), m_inname);
+            }
+            else {
+                auto sets = std::make_shared<shared_sets_t>();
+                while (auto one = next()) {
+                    sets->push_back(one);
+                }
+                m_all = sets;
+                slot = m_all;
+                log->debug("call={} loaded {} set(s) of {} to share", m_count, m_all->size(), m_inname);
+            }
+        }
+        if (m_index < m_all->size()) {
+            ds = (*m_all)[m_index++];
+        }
+        else {
+            m_all.reset();
+            m_eos_sent = true;
+            log->debug("EOS at call={}", m_count);
+        }
+        ++m_count;
+        return true;
+    }
     if (m_eos_sent) {
         ++m_count;
         return false;

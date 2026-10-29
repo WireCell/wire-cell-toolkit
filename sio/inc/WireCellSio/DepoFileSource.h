@@ -71,6 +71,18 @@ namespace WireCell::Sio {
         double m_scale{1.0};
         size_t m_count{0};
         bool m_eos_sent{false};
+
+        /// Configuration "share_loaded" (default false; pr_ml doc 33):
+        /// sources of one process that read the same inname with the
+        /// same scale hand out one loaded copy of its depo sets.  The
+        /// first of them to be called loads every set of the file (by
+        /// the same next() as without sharing), the others take the
+        /// same objects.  The copy lives while a source still has sets
+        /// to emit or a consumer holds them; after that a new source
+        /// loads the file again.  Off: one copy per source, as before.
+        bool m_share{false};
+        std::shared_ptr<const std::vector<IDepoSet::pointer>> m_all;
+        size_t m_index{0};
     };        
      
 }
