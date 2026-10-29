@@ -18,6 +18,50 @@ using WireCell::PointCloud::Array;
 using WireCell::PointCloud::Dataset;
 using node_t = WireCell::PointCloud::Tree::Points::node_t;
 
+size_t Truth::nearest_particle(const std::vector<std::shared_ptr<DepoPolyline>>& qs, const Point& p, DepoPolyline::Hit& hit)
+{
+    const size_t n = qs.size();
+    hit = DepoPolyline::Hit();
+    if (n == 0) return n;
+    // the bound: the hit of the particle with the nearest box
+    size_t first = n;
+    double lbmin = std::numeric_limits<double>::infinity();
+    for (size_t k = 0; k < n; ++k) {
+        const double lb = qs[k]->box_distance(p);
+        if (lb < lbmin) { lbmin = lb; first = k; }
+    }
+    DepoPolyline::Hit hfirst;
+    double bound = std::numeric_limits<double>::infinity();
+    if (first < n) {
+        hfirst = qs[first]->nearest(p);
+        if (hfirst.valid) bound = hfirst.dist;
+    }
+    // 1 nm above the bound: far above the rounding of the box distance and of the projected distance (~1e-13 mm)
+    const double skip_above = bound + 1e-6 * units::mm;
+    size_t best = n;
+    for (size_t k = 0; k < n; ++k) {
+        if (k != first && qs[k]->box_distance(p) > skip_above) continue;
+        const auto qhit = k == first ? hfirst : qs[k]->nearest(p);
+        if (qhit.valid && (best == n || qhit.dist < hit.dist)) {
+            best = k;
+            hit = qhit;
+        }
+    }
+    return best;
+}
+
+Truth::depo_position_f Truth::drift_position(const IAnodeFace::pointer& face, double reco_toff, double speed, double depo_toff)
+{
+    // as Aux::time2drift (SamplingHelpers.cxx): xorig + xsign * ((time + time_offset) * drift_speed)
+    const double xsign = face->dirx();
+    const double xorig = face->planes()[2]->wires().front()->center().x();
+    return [xsign, xorig, reco_toff, speed, depo_toff](const IDepo& d) {
+        const double time = d.time() + depo_toff;
+        const double drift = (time + reco_toff) * speed;
+        return Point(xorig + xsign * drift, d.pos().y(), d.pos().z());
+    };
+}
+
 std::map<int, std::shared_ptr<Truth::DepoPolyline>>
 Truth::build_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
                        const depo_position_f& position, bool tie_by_direction)
@@ -367,13 +411,8 @@ Truth::label_live_tree(node_t& root,
                         // the nearest of the key's particles; a tie keeps the lower particle id
                         auto qit = particles->find(tid);
                         if (qit != particles->end()) {
-                            for (const auto& q : qit->second) {
-                                auto qhit = q->nearest(p);
-                                if (qhit.valid && (!pl || qhit.dist < hit.dist)) {
-                                    pl = q.get();
-                                    hit = qhit;
-                                }
-                            }
+                            const size_t k = nearest_particle(qit->second, p, hit);
+                            if (k < qit->second.size()) pl = qit->second[k].get();
                         }
                     }
                     else {

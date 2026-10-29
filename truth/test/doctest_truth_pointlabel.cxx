@@ -28,6 +28,7 @@
 #include "WireCellAux/TensorDMpointtree.h"
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IConfigurable.h"
+#include <random>
 #include "WireCellIface/ITiling.h"
 #include "WireCellIface/IWirePlane.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -916,4 +917,33 @@ TEST_CASE("truth point labels: refine_min_frac -- refinement only among PF nodes
     for (int t = 0; t < 25; ++t) split[t] = {4.0, 0.0};
     CHECK(Truth::refine_eligible_tids(split, 100.0, [](int t) { return t; }, 0.05).empty());
     CHECK(Truth::refine_eligible_tids(split, 100.0, [](int t) { return t; }, 0.04).size() == 25);
+}
+
+TEST_CASE("truth point labeler: drift_position equals Aux::time2drift bit for bit (pr_ml doc 33 perf round 4)")
+{
+    // the labeler's depo position hoists the face's collection-wire x and drift sign out of the per-depo call; the x must be
+    // the same double as Aux::time2drift(face, reco_toff, speed, t + depo_toff), on both faces, for awkward times / offsets
+    auto s = make_setup();
+    std::mt19937 rng(20261029);
+    std::uniform_real_distribution<double> ut(-3000.0 * units::us, 6000.0 * units::us);
+    std::uniform_real_distribution<double> uo(-500.0 * units::us, 500.0 * units::us);
+    size_t nchk = 0;
+    for (const auto& face : s.anode->faces()) {
+        if (!face) continue;
+        for (int k = 0; k < 20; ++k) {
+            const double reco_toff = uo(rng), depo_toff = uo(rng), spd = speed * (1.0 + 1e-3 * k);
+            auto position = Truth::drift_position(face, reco_toff, spd, depo_toff);
+            for (int i = 0; i < 200; ++i) {
+                const Point p(ut(rng) * 1e-3, 12.345 + i, -67.89 - i);
+                Aux::SimpleDepo d(ut(rng), p, 1000.0);
+                const Point got = position(d);
+                const double want = Aux::time2drift(face, reco_toff, spd, d.time() + depo_toff);
+                REQUIRE(got.x() == want);
+                REQUIRE(got.y() == p.y());
+                REQUIRE(got.z() == p.z());
+                ++nchk;
+            }
+        }
+    }
+    CHECK(nchk >= 4000);
 }

@@ -47,6 +47,7 @@
 #include "WireCellTruth/DepoPolyline.h"
 #include "WireCellTruth/PFMerger.h"
 #include "WireCellTruth/TruthTable.h"
+#include "WireCellIface/IAnodeFace.h"
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/Units.h"
 
@@ -210,6 +211,13 @@ namespace WireCell::Truth {
     /// arrival time, as PointTreeBuilding places blobs).
     using depo_position_f = std::function<Point(const IDepo&)>;
 
+    /// The depo_position_f of TruthPointLabeler: x = Aux::time2drift(face,
+    /// reco_toff, speed, t + depo_toff), y / z unchanged, with the face's
+    /// collection-wire x and drift sign read once here instead of on every
+    /// depo (time2drift copies the face's plane vector per call; pr_ml doc 33
+    /// perf round 4).  Same floating-point expression as time2drift.
+    depo_position_f drift_position(const IAnodeFace::pointer& face, double reco_toff, double speed, double depo_toff);
+
     /// The polylines of every track key, built from the depos (one
     /// vertex per depo: the reco-frame position, ordered by the prior's
     /// time, energy of the key depo).  Keys follow the association's
@@ -226,6 +234,16 @@ namespace WireCell::Truth {
     /// particles is then a set of polylines instead of one time-ordered
     /// zigzag across them.
     using particle_polylines_t = std::map<int, std::vector<std::shared_ptr<DepoPolyline>>>;
+
+    /// The nearest of a key's particle polylines to p, as the per-particle
+    /// loop of label_live_tree defines it: the lowest index among the valid
+    /// hits at the smallest distance.  Returns that index (qs.size() when no
+    /// hit is valid) and its hit.  Only the particles whose bounding box can
+    /// hold a point closer than the bound from the particle with the nearest
+    /// box are searched (pr_ml doc 33 perf round 4: an SBND key holds up to
+    /// thousands of particles); a skipped particle is farther than the bound,
+    /// so the answer is the loop's.
+    size_t nearest_particle(const std::vector<std::shared_ptr<DepoPolyline>>& qs, const Point& p, DepoPolyline::Hit& hit);
     particle_polylines_t
     build_particle_polylines(const IDepo::vector& depos, const DepoBlobAssocParams& assoc,
                              const depo_position_f& position,

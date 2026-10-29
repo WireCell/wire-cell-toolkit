@@ -322,10 +322,7 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
         THROW(ValueError() << errmsg{"TruthPointLabeler: no face " + std::to_string(m_face)});
     }
     const double toff = m_reco_time_offset, speed = m_drift_speed, depo_toff = m_assoc.time_offset;
-    depo_position_f position = [face, toff, speed, depo_toff](const IDepo& d) {
-        const double x = Aux::time2drift(face, toff, speed, d.time() + depo_toff);
-        return Point(x, d.pos().y(), d.pos().z());
-    };
+    depo_position_f position = drift_position(face, toff, speed, depo_toff);
     // pr_ml doc 23 sec 7.4: the depos of the face's drift volume -- x
     // between its anode and cathode planes (the x extent of its sensitive
     // box, any y / z, so a track keeps its part over a neighbouring anode

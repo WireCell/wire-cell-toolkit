@@ -5,6 +5,7 @@
  */
 
 #include "WireCellTruth/DepoPolyline.h"
+#include "WireCellTruth/TruthPointLabel.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/doctest.h"
 
@@ -147,4 +148,65 @@ TEST_CASE("depo polyline: equal times ordered along the track (pr_ml doc 25 sec 
     for (const auto& k : fixed.keypoints(10 * units::mm, 15 * units::deg)) nk_fixed += k.kind == Truth::DepoPolyline::KeyKind::kink;
     CHECK(nk_plain > 0);
     CHECK(nk_fixed == 0);
+}
+
+TEST_CASE("nearest_particle == the per-particle loop it replaces, ties to the lower index (pr_ml doc 33 perf round 4)")
+{
+    // the loop of label_live_tree before round 4: every particle, first valid hit at the smallest distance wins
+    auto legacy = [](const std::vector<std::shared_ptr<DepoPolyline>>& qs, const Point& p, DepoPolyline::Hit& hit) {
+        size_t best = qs.size();
+        hit = DepoPolyline::Hit();
+        for (size_t k = 0; k < qs.size(); ++k) {
+            auto qhit = qs[k]->nearest(p);
+            if (qhit.valid && (best == qs.size() || qhit.dist < hit.dist)) { best = k; hit = qhit; }
+        }
+        return best;
+    };
+    std::mt19937 rng(20261029);
+    std::uniform_real_distribution<double> u(-100.0, 100.0), step(-3.0, 3.0);
+    std::uniform_int_distribution<int> nv(0, 40);
+    size_t nq = 0, nskip_case = 0;
+    for (int trial = 0; trial < 40; ++trial) {
+        std::vector<std::shared_ptr<DepoPolyline>> qs;
+        const int npart = 1 + trial * 5;
+        for (int k = 0; k < npart; ++k) {
+            if (k > 0 && k % 7 == 0) { qs.push_back(qs[k / 2]); continue; }   // the same polyline twice: an exact tie
+            auto pl = std::make_shared<DepoPolyline>();
+            Point x(u(rng), u(rng), u(rng));
+            const int n = (k % 11 == 5) ? 0 : (k % 13 == 3 ? 1 : nv(rng));   // empty and one-vertex particles too
+            for (int i = 0; i < n; ++i) {
+                pl->add(x, 0.1 * i, 1.0);
+                x = Point(x.x() + step(rng), x.y() + step(rng), x.z() + step(rng));
+            }
+            pl->build();
+            qs.push_back(pl);
+        }
+        for (int i = 0; i < 300; ++i) {
+            // queries anywhere and on the vertices themselves (zero distance, many ties)
+            Point p(u(rng), u(rng), u(rng));
+            if (i % 5 == 0 && qs[i % qs.size()]->nvertices()) p = qs[i % qs.size()]->vertices()[0].pos;
+            DepoPolyline::Hit h1, h2;
+            const size_t k1 = Truth::nearest_particle(qs, p, h1);
+            const size_t k2 = legacy(qs, p, h2);
+            REQUIRE(k1 == k2);
+            REQUIRE(h1.valid == h2.valid);
+            if (h2.valid) {
+                REQUIRE(h1.dist == h2.dist);
+                REQUIRE(h1.seg == h2.seg);
+                REQUIRE(h1.s == h2.s);
+                REQUIRE(h1.dedx == h2.dedx);
+                REQUIRE(h1.tangent.x() == h2.tangent.x());
+                REQUIRE(h1.closest.z() == h2.closest.z());
+                // the box distance bounds every particle's distance from below
+                for (const auto& q : qs) {
+                    auto qh = q->nearest(p);
+                    if (qh.valid) REQUIRE(q->box_distance(p) <= qh.dist + 1e-9);
+                    if (q->box_distance(p) > h2.dist + 1e-6) ++nskip_case;
+                }
+            }
+            ++nq;
+        }
+    }
+    CHECK(nq == 12000);
+    CHECK(nskip_case > 0);   // the test reaches the pruning
 }

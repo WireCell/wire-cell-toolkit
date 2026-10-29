@@ -165,7 +165,26 @@ namespace WireCell::Truth {
                 }
                 m_tree = std::make_unique<NFKDVec::Tree<double, NFKDVec::IndexStatic>>(mids);
             }
+            // the box of the vertices holds every segment (pr_ml doc 33 perf round 4: box_distance)
+            if (n > 0) {
+                m_lo = m_hi = m_verts[0].pos;
+                for (const auto& v : m_verts) {
+                    m_lo.set(std::min(m_lo.x(), v.pos.x()), std::min(m_lo.y(), v.pos.y()), std::min(m_lo.z(), v.pos.z()));
+                    m_hi.set(std::max(m_hi.x(), v.pos.x()), std::max(m_hi.y(), v.pos.y()), std::max(m_hi.z(), v.pos.z()));
+                }
+            }
             m_built = true;
+        }
+
+        /// Distance from p to the bounding box of the vertices: a lower
+        /// bound of nearest(p).dist (+inf when empty or not built).
+        double box_distance(const Point& p) const
+        {
+            if (m_verts.empty() || !m_built) return std::numeric_limits<double>::infinity();
+            const double dx = std::max({m_lo.x() - p.x(), 0.0, p.x() - m_hi.x()});
+            const double dy = std::max({m_lo.y() - p.y(), 0.0, p.y() - m_hi.y()});
+            const double dz = std::max({m_lo.z() - p.z(), 0.0, p.z() - m_hi.z()});
+            return std::sqrt(dx * dx + dy * dy + dz * dz);
         }
 
         /// Nearest point on the polyline; a one-vertex polyline answers
@@ -270,6 +289,7 @@ namespace WireCell::Truth {
         std::vector<double> m_s, m_seglen;
         std::vector<Vector> m_tan;
         std::unique_ptr<NFKDVec::Tree<double, NFKDVec::IndexStatic>> m_tree;
+        Point m_lo, m_hi;
         bool m_built{false};
         bool m_tie_by_direction{false};
     };
