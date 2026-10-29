@@ -162,7 +162,12 @@ class OwnerIndex:
         self.owner = np.concatenate(O)
 
     def _eval(self, Q, qi, oi, D, S, T, O):
-        pr = np.unique(np.column_stack([oi, qi]), axis=0)
+        # the unique (owner, query) rows in lexicographic order, as np.unique(np.column_stack([oi, qi]), axis=0) gave them, from one
+        # 1-D sort of the packed key owner * m + query (0 <= query < m): the same rows in the same order (pr_ml doc 33 perf round 1)
+        oi = np.asarray(oi, dtype=np.int64); qi = np.asarray(qi, dtype=np.int64)
+        m = int(qi.max()) + 1 if len(qi) else 1
+        key = np.unique(oi * m + qi)
+        pr = np.column_stack([key // m, key % m])
         st = np.r_[0, np.flatnonzero(np.diff(pr[:, 0])) + 1]
         en = np.r_[st[1:], len(pr)]
         for s0, e0 in zip(st, en):          # owners in ascending order: strict < keeps the lower owner on a tie
@@ -335,13 +340,22 @@ class Field:
 def true_vertices(trajs, lmin, dv):
     """starts of tracks (length >= lmin) that another such track passes within dv of."""
     keys = [k for k in sorted(trajs) if trajs[k].length >= lmin]
-    out = []
-    for k in keys:
-        c = trajs[k].start[None]
-        for k2 in keys:
-            if k2 != k and trajs[k2].nearest(c)[0][0] <= dv:
-                out.append((k, trajs[k].start)); break
-    return out
+    if not keys:
+        return []
+    # every start against every other track in one query per track (row results do not depend on the batch): the same set as
+    # testing the (k, k2) pairs one start at a time (pr_ml doc 33 perf round 1)
+    C = np.array([trajs[k].start for k in keys])
+    hit = np.zeros(len(keys), dtype=bool)
+    for j, k2 in enumerate(keys):
+        # only the starts inside the track's bounding box grown by dv can lie within dv of it (the others are farther than dv
+        # from every point of it); a 1 um margin keeps the cut conservative
+        V = trajs[k2].V
+        lo, hi = V.min(0) - dv - 1e-3, V.max(0) + dv + 1e-3
+        cand = np.flatnonzero(np.all((C >= lo) & (C <= hi), axis=1))
+        cand = cand[(cand != j) & ~hit[cand]]
+        if len(cand):
+            hit[cand] |= trajs[k2].nearest(C[cand])[0] <= dv
+    return [(k, trajs[k].start) for k, h in zip(keys, hit) if h]
 
 
 def nu_vertices(truth, trajs):
@@ -521,12 +535,17 @@ def main():
     if len(CP):
         lab = CT > 0
         dpy = np.full(len(CP), np.inf)
-        for k in np.unique(CT[lab]):
-            sel = np.flatnonzero(CT == k)
-            if int(k) in trajs:
-                dpy[sel] = trajs[int(k)].nearest(CP[sel])[0]
+        # the points of each key in ascending index order (a stable sort by key), as np.flatnonzero(CT == k) gave them, without one
+        # pass over all points per key; multi per unique key, spread back (pr_ml doc 33 perf round 1)
+        order = np.argsort(CT, kind="stable")
+        uk, first, cnt = np.unique(CT[order], return_index=True, return_counts=True)
+        for k, f0, c0 in zip(uk.tolist(), first.tolist(), cnt.tolist()):
+            if k > 0 and k in trajs:
+                sel = order[f0:f0 + c0]
+                dpy[sel] = trajs[k].nearest(CP[sel])[0]
         cap = a.d_cap_mm
-        multi = np.array([int(k) in trajs and len(trajs[int(k)].units) > 1 for k in CT], dtype=bool)
+        uk2, inv = np.unique(CT, return_inverse=True)
+        multi = np.array([int(k) in trajs and len(trajs[int(k)].units) > 1 for k in uk2], dtype=bool)[inv.reshape(-1)] if len(CT) else np.zeros(0, dtype=bool)
         res["cross_check_d_traj"] = {}
         # single-particle keys: the same polyline as the C++ labeler; folded keys: the C++ labeler orders all the
         # daughters' depos into one polyline (zigzag), so its d_traj is <= the per-particle distance
@@ -547,7 +566,8 @@ def main():
         sp, st = SP[cl], ST[cl]
         se = SE.get(cl)
         R, nodes, edges = label_cluster(sp, st, se, coords, ptrajs, field, prm, vtx, nuv)
-        nodes["key"] = np.array([pkey.get(int(p), -1) for p in nodes["kstar"]], dtype=np.int64)
+        uq, inv = np.unique(nodes["kstar"], return_inverse=True)   # per unique kstar, spread back (pr_ml doc 33 perf round 1)
+        nodes["key"] = np.array([pkey.get(int(p), -1) for p in uq], dtype=np.int64)[inv.reshape(-1)] if len(uq) else np.zeros(0, dtype=np.int64)
         if edges is not None:
             edges["same_key"] = (nodes["key"][edges["src"]] == nodes["key"][edges["dst"]]).astype(int)
         cpp = np.asarray(st["tid"]).astype(int)
@@ -583,14 +603,26 @@ def main():
         cp_kd = cKDTree(CP)
         tot, cov = 0.0, {0.5: 0.0, 1.0: 0.0, 2.0: 0.0}
         per_track = []
-        for k, tr in sorted(ptrajs.items()):
+        # the samples of every track in one k-d query per tree (row results do not depend on the batch), then the per-track
+        # sums on the slices exactly as before (pr_ml doc 33 perf round 1)
+        tracks = sorted(ptrajs.items())
+        SW = []
+        for k, tr in tracks:
             sw = [sample_traj(un, prm["step"]) for un in tr.units]
-            S, w = np.concatenate([x for x, _ in sw]), np.concatenate([y for _, y in sw])
-            dcp, _ = cp_kd.query(S)
-            ins = dcp <= 2 * CM
+            SW.append((np.concatenate([x for x, _ in sw]), np.concatenate([y for _, y in sw])))
+        toff = np.r_[0, np.cumsum([len(x) for x, _ in SW])]
+        SA = np.concatenate([x for x, _ in SW]) if SW else np.zeros((0, 3))
+        # the 2 cm scope test only needs neighbours within 2 cm: the bounded search returns the same distance below it, inf above
+        DCP = cp_kd.query(SA, distance_upper_bound=2 * CM * (1 + 1e-9))[0] if len(SA) else np.zeros(0)
+        INS = DCP <= 2 * CM
+        DS = np.full(len(SA), np.inf)
+        if INS.any():
+            DS[INS] = sk_kd.query(SA[INS])[0]
+        for (k, tr), (S, w), t0, t1 in zip(tracks, SW, toff[:-1], toff[1:]):
+            ins = INS[t0:t1]
             if not ins.any():
                 continue
-            ds, _ = sk_kd.query(S[ins])
+            ds = DS[t0:t1][ins]
             L = float(w[ins].sum()); tot += L
             row = {"tid": k, "length_in_scope_cm": L / CM}
             for d in cov:
