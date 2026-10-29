@@ -1082,31 +1082,54 @@ namespace WireCell::Clus::PR {
         // byte-identical.
         bool   m_dl_vtx_cloud_no_exclusion{false};
 
-        // DV2-MAX vertexer (dl_vtx_engine="dv2max").  The DL step calls
-        // m_dv2_py_module.DV2_Vertex on the same input cloud the SCN net gets
-        // and receives one point P (+ calibrated P(<1 cm)).
-        //   topology: the nearest PR-graph vertex if it lies within
-        //     m_dv2_split_dist of P, else the nearest segment is split at P
-        //     (break_segment; the new vertex is kProtectedBreak, exactly as
-        //     snap_main_vertex_to_kink marks its split).  That vertex becomes
-        //     the main vertex through the usual DL tail.
-        //   position: dv2_place_main_vertex() moves the final main vertex onto
-        //     P after the vertex refinement block (MyFCN::UpdateInfo + refit:
-        //     the same write the vertex fit itself makes), if the move is
-        //     <= m_dv2_max_move.
-        // Default engine "scn" => none of this runs => byte-identical.
-        std::string m_dl_vtx_engine{"scn"};
+        // Neutrino vertexing method (TaggerCheckNeutrino "vertex_method").
+        //   original        the production chain: SCN net + re-rank, dual
+        //                   chain, kink/junction snaps, improve_vertex, main-
+        //                   vertex graph audit, conn3 stitch.  Default =>
+        //                   byte-identical.
+        //   dv2_snap        DV2-MAX point P -> the nearest PR-graph vertex.
+        //   dv2_split       DV2-MAX point P -> the nearest PR-graph vertex or
+        //                   segment-interior fit point, whichever is nearer;
+        //                   a fit point splits its segment there
+        //                   (break_segment: the new vertex sits exactly on it).
+        //   dv2_split_move  the nearest PR-graph vertex if within
+        //                   kDv2MoveReuseDistCm of P, else as dv2_split; then
+        //                   move that vertex onto P (dv2_place_main_vertex).
+        // Candidates are every PR-graph vertex / fit point of the event (the
+        // main cluster switches if the pick is in another cluster, as in the
+        // legacy SCN path).  dv2_snap / dv2_split do not refit trajectories:
+        // the fits are those the DL step saw.  dv2_split can split a track one
+        // fit spacing (~0.6 cm) from an existing vertex, leaving a short stub.
+        // The three dv2 methods use only the DV2-MAX point and this placement:
+        // none of the original chain's vertex steps run for them (see
+        // TaggerCheckNeutrino::visit).  If DV2-MAX makes no prediction, the
+        // traditional vertex is kept, with the original refinement.
+        enum class VertexMethod { original, dv2_snap, dv2_split, dv2_split_move };
+        static constexpr double kDv2MoveReuseDistCm = 1.5;   // cm; = MyFCN's vertex move limit
+        static bool parse_vertex_method(const std::string& s, VertexMethod& m) {
+            if (s == "original")       { m = VertexMethod::original;       return true; }
+            if (s == "dv2_snap")       { m = VertexMethod::dv2_snap;       return true; }
+            if (s == "dv2_split")      { m = VertexMethod::dv2_split;      return true; }
+            if (s == "dv2_split_move") { m = VertexMethod::dv2_split_move; return true; }
+            return false;
+        }
+        static const char* vertex_method_name(VertexMethod m) {
+            switch (m) {
+                case VertexMethod::dv2_snap:       return "dv2_snap";
+                case VertexMethod::dv2_split:      return "dv2_split";
+                case VertexMethod::dv2_split_move: return "dv2_split_move";
+                default:                           return "original";
+            }
+        }
+        VertexMethod m_vertex_method{VertexMethod::original};
         std::string m_dv2_py_module{"DV2_Vertex"};
-        double m_dv2_split_dist{1.5 * units::cm};   // reuse a graph vertex within this distance of P
-        double m_dv2_max_move{1e9 * units::cm};     // largest final move onto P (default: always)
-        double m_dv2_min_score{0.0};                // P(<1 cm) below this => keep the traditional vertex
-        bool   m_dv2_two_end_veto{false};           // honour the pr/48 protected two-end-break veto
+        bool is_dv2() const { return m_vertex_method != VertexMethod::original; }
         // per-event state: set by determine_overall_main_vertex_DL when it
-        // accepts a DV2-MAX point, read by dv2_place_main_vertex.
+        // accepts a DV2-MAX point, read by TaggerCheckNeutrino::visit and
+        // dv2_place_main_vertex.
         bool   m_dv2_target_valid{false};
         WireCell::Point m_dv2_target;
         double m_dv2_score{-1.0};
-        bool is_dv2_engine() const { return m_dl_vtx_engine == "dv2max"; }
 
         // P8 -- endpoint-consistency check on PR::add_segment.
         // The prototype refuses a vertex/segment connection whose vertex wcpt
@@ -3592,12 +3615,11 @@ namespace WireCell::Clus::PR {
         // See sbnd_xin/docs/77_knob-ledger.tsv.
         bool determine_overall_main_vertex_DL(Graph& graph, ClusterVertexMap& map_cluster_main_vertices, Facade::Cluster*& main_cluster, std::vector<Facade::Cluster*>& other_clusters, IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon, TrackFitting& track_fitter, IDetectorVolumes::pointer dv, const Clus::ParticleDataSet::pointer& particle_data, const IRecombinationModel::pointer& recomb_model, const std::string& dl_weights, double dl_vtx_cut, double dQdx_scale = 0.1, double dQdx_offset = -1000.0, bool flag_rerank = false, int dl_vtx_top_k = 5, double dl_vtx_min_accept_score = 4.0, double dl_vtx_score_scale = 1000.0, const DualChainHint* dual_hint = nullptr);
 
-        // DV2-MAX (m_dl_vtx_engine == "dv2max"): move the final main vertex
-        // onto the point the DL step accepted (m_dv2_target), with the vertex
-        // fit's own write (MyFCN::UpdateInfo: segment paths re-routed, fit
-        // point + wire coordinates, flag_fix) and the same cluster refit
-        // improve_vertex runs after a vertex fit.  Call after the vertex
-        // refinement block.  Returns true if the vertex was moved.
+        // vertex_method dv2_split_move: move the main vertex onto the point
+        // the DL step accepted (m_dv2_target), with the vertex fit's own write
+        // (MyFCN::UpdateInfo: segment paths re-routed, fit point + wire
+        // coordinates, flag_fix) and a cluster refit.  No-op for the other
+        // methods.  Returns true if the vertex was moved.
         bool dv2_place_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 
         // doc pr/112 sec 11 -- the OFF pass's SCN inference on its own graph:

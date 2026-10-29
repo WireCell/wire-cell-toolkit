@@ -1006,16 +1006,22 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // but does not configure the writer's sce_field / dl_vtx_dump (the
               // dl_vtx_dump argument does both); T_dlvtx_call.truth_sce_applied says which.
               tcn_overrides={},
-              // DV2-MAX vertexer.  dl_vtx_engine='dv2max' makes the DL step use a
-              // DV2-MAX bundle (dl_weights must then name its manifest, e.g.
-              // 'dv2max/r7_cloud/bundle.json'); the main vertex is placed on
-              // DV2-MAX's point (split a segment when no PR-graph vertex is within
-              // dv2_split_dist, then move the final main vertex onto the point).
-              // dv2_knobs: optional TaggerCheckNeutrino dv2_* keys (dv2_split_dist,
-              // dv2_max_move, dv2_min_score, dv2_two_end_veto, dv2_py_module).
-              // Default 'scn' => every key omitted => byte-identical config.
-              dl_vtx_engine='scn',
-              dv2_knobs={},
+              // Neutrino vertexing method (TaggerCheckNeutrino vertex_method):
+              //   'original'        the production chain (SCN net + re-rank, dual
+              //                     chain, kink/junction snaps, improve_vertex,
+              //                     graph audit, conn3 stitch)
+              //   'dv2_snap'        DV2-MAX point -> nearest PR-graph vertex
+              //   'dv2_split'       DV2-MAX point -> nearest PR-graph vertex or
+              //                     trajectory-fit point (a fit point splits its segment)
+              //   'dv2_split_move'  as dv2_split (reusing a graph vertex within
+              //                     1.5 cm), then the vertex is moved onto the point
+              // The dv2_* methods run only the DV2-MAX model (dv2_bundle) and that
+              // placement; none of the original vertex steps.  Default 'original'
+              // => both keys omitted => byte-identical config.  A vertex_method /
+              // dv2_bundle in tcn_overrides wins (as it does in the C++ config);
+              // the name check and the Trun provenance read that effective value.
+              vertex_method='original',
+              dv2_bundle='dv2max/r7_cloud/bundle.json',
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -2384,6 +2390,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
         local beam_gate = beam_window_only && beam_window[1] > beam_window[0],
+        // The vertexing method TaggerCheckNeutrino really gets: tcn_overrides is
+        // merged last into its config, so an override wins over the argument.
+        local vm_eff = if std.objectHas(tcn_overrides, 'vertex_method') then tcn_overrides.vertex_method else vertex_method,
+        local dv2_bundle_eff = if std.objectHas(tcn_overrides, 'dv2_bundle') then tcn_overrides.dv2_bundle else dv2_bundle,
+        assert std.member(['original', 'dv2_snap', 'dv2_split', 'dv2_split_move'], vm_eff) :
+            "vertex_method must be 'original', 'dv2_snap', 'dv2_split' or 'dv2_split_move', got '%s'" % vm_eff,
         local dv = detector_volumes(anodes, '', pos_offset_on),
         local pcts = pctransforms(dv),
         // DetectorVolumes implements IFiducial -- used by MakeFiducialUtils / the
@@ -2895,9 +2907,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
-                  [if dl_vtx_engine != 'scn' then 'dl_vtx_engine']: dl_vtx_engine,   // DV2-MAX
-              } + (if dl_vtx_engine != 'scn' then dv2_knobs else {})
-                + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
+                  [if vm_eff != 'original' then 'vertex_method']: vm_eff,   // checked by the pr() object assert
+                  [if vm_eff != 'original' then 'dv2_bundle']: dv2_bundle_eff,
+              } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
             // uBooNE-TRAINED XMLs from wire-cell-data uboone/weights/ -- the same
@@ -2990,7 +3002,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         bdt_weights_dir: bdt_weights_dir,
                         numu_xgboost_xml: numu_xgboost_xml,
                         nue_xgboost_xml: nue_xgboost_xml,
-                        dl_weights: dl_weights,
+                        // the vertex model that ran: the SCN weights (original),
+                        // else '<vertex_method>:<dv2_bundle>'
+                        dl_weights: if vm_eff == 'original' then dl_weights
+                                    else vm_eff + ':' + dv2_bundle_eff,
                         trackfitting_config: trackfitting_config_file,
                     } + provenance_extra,
                 },

@@ -8,6 +8,43 @@ top-1 vertex in the raw reco frame plus a calibrated P(< 1 cm).
 - Nothing is imported from sbnd-vertexer.
 - Model bundle: `cfg/dv2max/r7_cloud/` (`bundle.json` and the files it lists, each with its sha256).
 
+## Choosing the vertexing method
+
+One option, `vertex_method`, on every SBND PR job: `wct-pr-perevt.jsonnet`, `wct-pr.jsonnet`, the LArSoft
+library `wcls-img-clus-matching-pr-lib.jsonnet`, or `pr()` in `clus.jsonnet`:
+
+```
+wire-cell ... --tla-str vertex_method=dv2_split_move -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet
+```
+
+| `vertex_method` | main neutrino vertex |
+|---|---|
+| `original` (default) | the production chain: SCN net + re-rank, dual chain, kink/junction snaps, `improve_vertex`, main-vertex graph audit, conn3 stitch |
+| `dv2_snap` | the DV2-MAX point, snapped to the nearest PR-graph vertex |
+| `dv2_split` | the nearest PR-graph vertex or trajectory-fit point, whichever is nearer; a fit point splits its segment there |
+| `dv2_split_move` | the nearest PR-graph vertex if within 1.5 cm, else as `dv2_split`; then the vertex is moved onto the DV2-MAX point |
+
+- The `dv2_*` methods run the DV2-MAX model and that placement only. None of the original vertex steps run:
+  no SCN, re-rank, dual chain, kink/junction snap, `improve_vertex`, graph audit or conn3 stitch.
+- Everything before the vertex step is unchanged, because it builds the model's input cloud. Everything after
+  it is unchanged too: clustering, directions, showers, taggers and the output trees.
+- If DV2-MAX makes no prediction, the event keeps the traditional vertex, with the original refinement, and the
+  log has a WARN line. Set `DV2_STRICT=1` in validation runs to make a Python error fail the job instead.
+- Each placement is logged at INFO: `vertex_method <m>: main vertex = split|graph vertex at (x, y, z) cm, d cm
+  from the DV2-MAX point ...`, plus one line per move for `dv2_split_move`.
+- Known behaviour, by design:
+  - candidates are every PR-graph vertex and fit point of the event, so the main cluster can switch, as in the
+    legacy SCN path;
+  - `dv2_snap` and `dv2_split` do not refit trajectories; the fits are those the vertex step saw;
+  - `dv2_split` can split a track one fit spacing (about 0.6 cm) from an existing vertex, which leaves a short
+    stub segment between the two;
+  - a split long-muon segment stays the long muon: its two halves replace it.
+- `dv2_bundle` (default `dv2max/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
+  `dl_weights` stays the SCN net of `original`.
+- `original` compiles to the same configuration as master, byte for byte.
+- The dv2 methods need this directory and `DV2_Vertex.py` on `PYTHONPATH`, a Python with numpy, scipy,
+  torch and lightgbm, and libpython preloaded, as the SCN net does.
+
 ## Entry point
 
 ```python
