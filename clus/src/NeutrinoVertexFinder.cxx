@@ -4727,9 +4727,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
     // DV2-MAX: per-event state, set below only when a DV2-MAX point is accepted.
     m_dv2_target_valid = false;
     m_dv2_score = -1.0;
-    const bool dv2 = is_dv2_engine();
 
 #ifdef HAVE_PYTHON_INC
+    const bool dv2 = is_dv2();   // vertex_method dv2_snap / dv2_split / dv2_split_move
     using Clock = std::chrono::steady_clock;
     using MS = std::chrono::duration<double, std::milli>;
     auto t_total = Clock::now();
@@ -4971,17 +4971,26 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 
         if (dv2) {
             // ===================================================================
-            // DV2-MAX PATH: one point P.  Main vertex = the nearest PR-graph
-            // vertex if within m_dv2_split_dist of P, else a new vertex made by
-            // splitting the nearest segment at P.  The position itself is set
-            // later by dv2_place_main_vertex (after the vertex refinement).
-            // No composite score, no direction check, no dual-chain transfer.
+            // DV2-MAX PATH (vertex_method dv2_*): one point P, then only the
+            // method's placement.
+            //   dv2_snap        the nearest PR-graph vertex
+            //   dv2_split       the nearest PR-graph vertex or segment-interior
+            //                   fit point; a fit point splits its segment there
+            //   dv2_split_move  the nearest PR-graph vertex if within
+            //                   kDv2MoveReuseDistCm of P, else as dv2_split;
+            //                   TaggerCheckNeutrino::visit then moves the
+            //                   vertex onto P (dv2_place_main_vertex)
+            // No re-rank, composite score, direction check, two-end-break veto
+            // or dual-chain transfer.
             // ===================================================================
             if (dnn_vtx.size() != 4) {
                 // empty payload = the model made no prediction: keep the traditional vertex
                 if (dnn_vtx.size() != 0) {
                     SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DV2 payload size {}", dnn_vtx.size());
                 }
+                SPDLOG_LOGGER_WARN(s_log, "vertex_method {}: no DV2-MAX prediction for this call ({} cloud points; a Python error "
+                                   "is printed on stderr by DV2_Vertex) -- keeping the traditional vertex with the original refinement",
+                                   vertex_method_name(m_vertex_method), vec_xyzq[0].size());
                 if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 2;   // ai-helper issue 35
                 if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-prediction";
                 return false;
@@ -4990,8 +4999,8 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             const double score = dnn_vtx[3];
             SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 prediction ({:.2f}, {:.2f}, {:.2f}) cm, P(<1cm)={:.3f}",
                                 dnn_vtx[0], dnn_vtx[1], dnn_vtx[2], score);
-            if (!std::isfinite(P.x()) || !std::isfinite(P.y()) || !std::isfinite(P.z()) || score < m_dv2_min_score) {
-                if (m_vertex_scoreboard) m_vtx_board.route = "dv2-reject-score";
+            if (!std::isfinite(P.x()) || !std::isfinite(P.y()) || !std::isfinite(P.z())) {
+                if (m_vertex_scoreboard) m_vtx_board.route = "dv2-reject-nonfinite";
                 if (dump_i >= 0) m_dlvtx_calls[dump_i].accepted = false;
                 return false;
             }
@@ -5005,10 +5014,14 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 if (d < d_near) { d_near = d; v_near = vtx; }
             }
             // nearest segment-interior fit point (break_segment refuses a
-            // segment's first/last fit point)
+            // segment's first/last fit point).  Searched only when the method
+            // may split: dv2_split always, dv2_split_move when no graph vertex
+            // is within kDv2MoveReuseDistCm of P, dv2_snap never.
             SegmentPtr s_near = nullptr;
             double ds_near = 1e9 * units::cm;
-            if (d_near > m_dv2_split_dist) {
+            const bool may_split = m_vertex_method == VertexMethod::dv2_split ||
+                (m_vertex_method == VertexMethod::dv2_split_move && d_near > kDv2MoveReuseDistCm * units::cm);
+            if (may_split) {
                 for (auto e : ordered_edges(graph)) {
                     SegmentPtr sg = graph[e].segment;
                     if (!sg || !sg->cluster() || !sg->descriptor_valid()) continue;
@@ -5021,33 +5034,28 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             }
             const bool want_split = s_near && ds_near < d_near;
 
-            // pr/48 protected two-end-break vertex: optional for DV2-MAX
-            // (default off).  Checked BEFORE any split so a vetoed call leaves
-            // the graph untouched.
-            if (m_dv2_two_end_veto && m_two_end_break && main_cluster) {
-                auto trad_it = map_cluster_main_vertices.find(main_cluster);
-                if (trad_it != map_cluster_main_vertices.end() && trad_it->second &&
-                    trad_it->second->flags_any(VertexFlags::kProtectedBreak) &&
-                    (want_split || v_near != trad_it->second)) {
-                    if (dump_i >= 0) m_dlvtx_calls[dump_i].two_end_veto = true;   // ai-helper issue 35
-                    if (m_vertex_scoreboard) m_vtx_board.route = "dl-veto-protected";
-                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 keeps the protected two-end-break vertex (doc pr/48)");
-                    return false;
-                }
-            }
-
             min_vertex = v_near;
             min_dis = d_near;
             bool did_split = false;
             if (want_split) {
                 auto [ok, segs, vtx_new] = break_segment(graph, s_near, P, particle_data, recomb_model, dv,
                                                          1e9 * units::cm, m_break_seg_orient);
-                (void) segs;
                 if (ok && vtx_new) {
-                    // Shield the deliberate split from the merge passes of
-                    // improve_vertex / examine_structure (pr/48 contract, as
-                    // snap_main_vertex_to_kink does for its split).
+                    // break_segment puts the new vertex exactly on the nearest
+                    // fit point.  Shield the deliberate split from any later
+                    // vertex-merge pass (pr/48 contract, as
+                    // snap_main_vertex_to_kink marks its split).
                     vtx_new->set_flags(VertexFlags::kProtectedBreak);
+                    // A split long-muon segment stays the long muon: its two
+                    // halves (and the vertex between them) replace it in the
+                    // long-muon sets, which the taggers, shower clustering and
+                    // MCS read.  Otherwise the sets keep the removed segment.
+                    if (segments_in_long_muon.find(s_near) != segments_in_long_muon.end()) {
+                        segments_in_long_muon.erase(s_near);
+                        if (segs.first) segments_in_long_muon.insert(segs.first);
+                        if (segs.second) segments_in_long_muon.insert(segs.second);
+                        vertices_in_long_muon.insert(vtx_new);
+                    }
                     min_vertex = vtx_new;
                     const auto pt = vtx_new->fit().valid() ? vtx_new->fit().point : vtx_new->wcpt().point;
                     min_dis = (pt - P).magnitude();
@@ -5064,10 +5072,15 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             flag_pass = true;
             m_dv2_target = P;
             m_dv2_score = score;
-            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 main vertex {} cluster {} at {:.2f} cm from P (nearest graph vertex {:.2f} cm)",
-                                did_split ? "SPLIT" : "reused",
-                                min_vertex->cluster() ? min_vertex->cluster()->get_cluster_id() : -1,
-                                min_dis / units::cm, d_near / units::cm);
+            {
+                const auto pt = min_vertex->fit().valid() ? min_vertex->fit().point : min_vertex->wcpt().point;
+                SPDLOG_LOGGER_INFO(s_log, "vertex_method {}: main vertex = {} at ({:.4f}, {:.4f}, {:.4f}) cm, {:.4f} cm from the "
+                                   "DV2-MAX point ({:.4f}, {:.4f}, {:.4f}) cm, P(<1cm) {:.3f}, cluster {}, nearest graph vertex {:.4f} cm",
+                                   vertex_method_name(m_vertex_method), did_split ? "split" : "graph vertex",
+                                   pt.x() / units::cm, pt.y() / units::cm, pt.z() / units::cm, min_dis / units::cm,
+                                   P.x() / units::cm, P.y() / units::cm, P.z() / units::cm, score,
+                                   min_vertex->cluster() ? min_vertex->cluster()->get_cluster_id() : -1, d_near / units::cm);
+            }
             if (m_vertex_scoreboard) {
                 m_vtx_board.route = did_split ? "dv2-accept-split" : "dv2-accept";
                 m_vtx_board.dl_best_score = score;
@@ -5507,7 +5520,7 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         // junction and the DL snap lands on a Bragg tip).  A DL choice that
         // AGREES with the protected vertex still passes.  Inert unless
         // m_two_end_break (the flag is only ever set by that pass).
-        // DV2-MAX applies its own (optional) veto above, before any split.
+        // Not for vertex_method dv2_* (no veto: the DV2-MAX placement stands).
         if (!dv2 && flag_pass && m_two_end_break && main_cluster) {
             auto trad_it = map_cluster_main_vertices.find(main_cluster);
             if (trad_it != map_cluster_main_vertices.end() && trad_it->second &&
@@ -5669,16 +5682,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
 bool PatternAlgorithms::dv2_place_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex,
                                               TrackFitting& track_fitter, IDetectorVolumes::pointer dv)
 {
-    if (!is_dv2_engine() || !m_dv2_target_valid || !main_vertex) return false;
+    if (m_vertex_method != VertexMethod::dv2_split_move || !m_dv2_target_valid || !main_vertex) return false;
     const WireCell::Point& P = m_dv2_target;
     const auto cur = main_vertex->fit().valid() ? main_vertex->fit().point : main_vertex->wcpt().point;
     const double move = (P - cur).magnitude();
-    if (move > m_dv2_max_move) {
-        SPDLOG_LOGGER_DEBUG(s_log, "dv2_place_main_vertex: cluster {} move {:.2f} cm > max {:.2f} cm, vertex left at ({:.2f}, {:.2f}, {:.2f})",
-                            cluster.ident(), move / units::cm, m_dv2_max_move / units::cm,
-                            cur.x() / units::cm, cur.y() / units::cm, cur.z() / units::cm);
-        return false;
-    }
     if (move < 0.001 * units::cm) return false;   // already there
     if (!main_vertex->descriptor_valid()) return false;
 
@@ -5702,11 +5709,14 @@ bool PatternAlgorithms::dv2_place_main_vertex(Graph& graph, Facade::Cluster& clu
                            cur.x() / units::cm, cur.y() / units::cm, cur.z() / units::cm);
         return false;
     }
-    // improve_vertex's refit after a vertex fit
+    // refit the cluster's trajectories and dQ/dx around the fixed vertex
+    // (the same call improve_vertex makes after a vertex fit)
     track_fitter.do_multi_tracking(true, true, true, m_fit_exclusion, false, &cluster);
     const auto now = main_vertex->fit().point;
-    SPDLOG_LOGGER_DEBUG(s_log, "dv2_place_main_vertex: cluster {} moved {:.2f} cm onto P, {} segment(s) re-routed; after refit {:.3f} cm from P",
-                        cluster.ident(), move / units::cm, segs.size(), (now - P).magnitude() / units::cm);
+    SPDLOG_LOGGER_INFO(s_log, "vertex_method dv2_split_move: main vertex moved {:.4f} cm onto the DV2-MAX point ({:.4f}, {:.4f}, {:.4f}) cm, "
+                       "{} segment(s) re-routed, {:.4f} cm from it after the refit, cluster {}",
+                       move / units::cm, P.x() / units::cm, P.y() / units::cm, P.z() / units::cm, segs.size(),
+                       (now - P).magnitude() / units::cm, cluster.ident());
     return true;
 }
 
