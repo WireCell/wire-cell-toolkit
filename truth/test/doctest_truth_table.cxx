@@ -202,3 +202,43 @@ TEST_CASE("truth table loads a file written by truth_table.py when given")
     CHECK(tt.gen_labels == std::vector<std::string>{"generator"});
     CHECK(tt.meta["detector"].asString() == "selftest");
 }
+
+// pr_ml doc 33 perf round 3: assoc_configure keeps ONE id / energy map per truth file for all labelers of a job (the PDVD clustering
+// and PR jobs configure 16 TruthPointLabelers on the same file: 16 copies of the per-step maps, ~0.4 GB of the PR job's heap peak).
+// The maps are read-only (shared_ptr<const vector>); the content is the file's, as before.
+#include "WireCellTruth/BlobDepoLabel.h"
+TEST_CASE("truth assoc_configure shares one id map per truth file")
+{
+    const auto fname = write_file();
+    Configuration cfg;
+    cfg["speed"] = 1.6 * units::mm / units::us;
+    cfg["truth_table"] = fname;
+    Truth::DepoBlobAssocParams a, b;
+    Truth::assoc_configure(a, cfg);
+    Truth::assoc_configure(b, cfg);
+    REQUIRE(a.id_map);
+    REQUIRE(b.id_map);
+    CHECK(a.id_map.get() == b.id_map.get());
+    CHECK(*a.id_map == std::vector<int>({1, 2, 2}));
+    // the same name rewritten with other content is a different map
+    {
+        const auto& nuc = Truth::truth_nu_columns();
+        std::vector<double> nu(nuc.size(), 0.0);
+        cnpy::npz_save<double>(fname, Truth::truth_file_nu, nu.data(), {1, nuc.size()}, "w");
+        const auto& pfc = Truth::truth_pf_columns();
+        std::vector<double> pf(pfc.size(), 0.0);
+        pf[Truth::column_index(pfc, "trackid")] = 5;
+        cnpy::npz_save<double>(fname, Truth::truth_file_pf, pf.data(), {1, pfc.size()}, "a");
+        std::vector<int32_t> sed = {5, 5, 5, 9, 5, 8, 5, 1};
+        cnpy::npz_save<int32_t>(fname, Truth::truth_file_sed_ids, sed.data(), {4, 2}, "a");
+        save_strings(fname, "columns_nu", nuc, "a");
+        save_strings(fname, "columns_pf", pfc, "a");
+        save_strings(fname, "process_names", {"unknown", "primary"}, "a");
+    }
+    Truth::DepoBlobAssocParams c;
+    Truth::assoc_configure(c, cfg);
+    REQUIRE(c.id_map);
+    CHECK(*c.id_map == std::vector<int>({5, 5, 5, 5}));
+    CHECK(*a.id_map == std::vector<int>({1, 2, 2}));    // the first job's map is untouched
+    boost::filesystem::remove(fname);
+}

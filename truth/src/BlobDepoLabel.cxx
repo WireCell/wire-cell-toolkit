@@ -4,6 +4,11 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/NamedFactory.h"
 
+#include <boost/filesystem.hpp>
+#include <map>
+#include <mutex>
+#include <tuple>
+
 WIRECELL_FACTORY(BlobDepoLabel, WireCell::Truth::BlobDepoLabel,
                  WireCell::INamed,
                  WireCell::IBlobDepoFill, WireCell::IConfigurable)
@@ -74,15 +79,49 @@ void Truth::assoc_configure(DepoBlobAssocParams& p, const Configuration& cfg)
     p.point_zero_width = get(cfg, "point_zero_width", p.point_zero_width);
     const std::string tfile = get<std::string>(cfg, "truth_table", "");
     if (!tfile.empty()) {
-        auto tt = TruthTable::load(tfile);
-        if (!tt.sed_ids.empty()) {
-            auto map = std::make_shared<std::vector<int>>();
-            map->reserve(tt.sed_ids.size());
-            for (const auto& [tid, orig] : tt.sed_ids) map->push_back(tid);
-            p.id_map = map;
+        // pr_ml doc 33: one id / energy map per truth file (name, size, mtime) for all the labelers of a job -- they are read-only;
+        // the PDVD clustering and PR jobs configure 16 labelers on one file.  Weak references: a map lives while a labeler holds it.
+        struct Maps {
+            std::weak_ptr<const std::vector<int>> id;
+            std::weak_ptr<const std::vector<float>> energy;
+            bool has_id{false}, has_energy{false};
+        };
+        static std::mutex cache_mutex;
+        static std::map<std::tuple<std::string, uintmax_t, std::time_t>, Maps> cache;
+        boost::system::error_code ec1, ec2;
+        const auto fsize = boost::filesystem::file_size(tfile, ec1);
+        const auto mtime = boost::filesystem::last_write_time(tfile, ec2);
+        const bool cacheable = !ec1 && !ec2;
+        const auto key = std::make_tuple(tfile, cacheable ? fsize : 0, cacheable ? mtime : 0);
+        std::lock_guard<std::mutex> lock(cache_mutex);
+        bool shared = false;
+        if (cacheable) {
+            auto it = cache.find(key);
+            if (it != cache.end()) {
+                auto id = it->second.id.lock();
+                auto energy = it->second.energy.lock();
+                if ((id || !it->second.has_id) && (energy || !it->second.has_energy)) {
+                    if (it->second.has_id) p.id_map = id;            // as a load: a file without the column leaves p's map as it was
+                    if (it->second.has_energy) p.energy_map = energy;
+                    shared = true;
+                }
+            }
         }
-        if (!tt.sed_energy.empty()) {
-            p.energy_map = std::make_shared<std::vector<float>>(tt.sed_energy);
+        if (!shared) {
+            auto tt = TruthTable::load(tfile);
+            Maps maps;
+            if (!tt.sed_ids.empty()) {
+                auto map = std::make_shared<std::vector<int>>();
+                map->reserve(tt.sed_ids.size());
+                for (const auto& [tid, orig] : tt.sed_ids) map->push_back(tid);
+                p.id_map = map;
+                maps.id = p.id_map; maps.has_id = true;
+            }
+            if (!tt.sed_energy.empty()) {
+                p.energy_map = std::make_shared<std::vector<float>>(tt.sed_energy);
+                maps.energy = p.energy_map; maps.has_energy = true;
+            }
+            if (cacheable) cache[key] = maps;
         }
     }
     if (p.speed <= 0.0) {
