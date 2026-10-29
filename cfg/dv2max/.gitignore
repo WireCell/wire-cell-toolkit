@@ -1,0 +1,5 @@
+# DV2-MAX model bundles are committed on purpose: re-include the file types the
+# top-level .gitignore excludes (*.json manifests, *.pt weights, *.txt LightGBM model).
+!*.json
+!*.pt
+!*.txt
