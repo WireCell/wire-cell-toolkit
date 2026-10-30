@@ -2,12 +2,24 @@
 
 Examined: 2026-04-12
 Scope: All headers in `inc/WireCellPgraph/` and sources in `src/`
+Updated: 2026-10-30 for the rank-ordered scheduler now in `Graph::execute()`
+(E1 resolved, E7 revised).  The former TopoGrapher scheduler replaced the rescan
+loop and TopoGrapher was removed.  Line numbers in sections not revised
+are from the original examination.
 
 ---
 
-## E1. Graph::execute — Restart-from-Bottom Strategy (Impact: Medium-High)
+## E1. Graph::execute — Restart-from-Bottom Strategy (Impact: Medium-High) — RESOLVED
 
-**File:** `src/Graph.cxx:111-148`
+**Resolved 2026-10-30.**  `Graph::execute()` now keeps a rank-ordered ready
+set and, after each firing, offers only the fired node and its neighbors (see
+`algorithm.md` section 5.1).  Scheduling costs O(log V) per set operation,
+O((V+E) log V) overall, and the firing sequence is unchanged.  The analysis
+below describes the original code.  In practice the rescan was the dominant
+cost for wide fan-out graphs: at 10^3 fan leaves the per-event routing time
+fell by about 100x.
+
+**File (original):** `src/Graph.cxx:111-148`
 
 The main execution loop in `Graph::execute()` uses a restart-from-bottom
 approach:
@@ -185,12 +197,14 @@ multiple places.
 
 ## E7. Graph::execute — std::clock for Timing (Impact: Low)
 
-**File:** `src/Graph.cxx:127-131`
+**File:** `src/Graph.cxx:183-190`
 
 ```cpp
-auto start = std::clock();
+auto core = std::clock();
+auto wall = std::chrono::high_resolution_clock::now();
 bool ok = call_node(node);
-m_nodes_timer[node] += (std::clock() - start) / (double) CLOCKS_PER_SEC;
+m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+// ... and the same for wall time
 ```
 
 `std::clock()` measures CPU time, not wall time. This is actually correct for
@@ -205,6 +219,10 @@ accumulation is only meaningful for `ok == true` calls, but the clock overhead
 is paid for every attempt. Moving the clock calls inside the `if (ok)` block
 would reduce overhead, though it would slightly misattribute time spent in
 failed readiness checks.
+
+(2026-10-30: the ready-set scheduler makes far fewer failed attempts than the
+original rescan loop, so this overhead is smaller, but the timers still run
+on every attempt.)
 
 ---
 
