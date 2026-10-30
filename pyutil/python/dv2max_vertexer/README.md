@@ -11,18 +11,22 @@ top-1 vertex in the raw reco frame plus a calibrated P(< 1 cm).
 ## Choosing the vertexing method
 
 One option, `vertex_method`, on every SBND PR job: `wct-pr-perevt.jsonnet`, `wct-pr.jsonnet`, the LArSoft
-library `wcls-img-clus-matching-pr-lib.jsonnet`, or `pr()` in `clus.jsonnet`:
+library `wcls-img-clus-matching-pr-lib.jsonnet`, or `pr()` in `clus.jsonnet`. The SBND jobs default to
+`dv2_split_move`; pass another value to change it:
 
 ```
-wire-cell ... --tla-str vertex_method=dv2_split_move -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet
+wire-cell ... -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet                               # dv2_split_move
+wire-cell ... --tla-str vertex_method=dv2_snap -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet  # snap
+wire-cell ... --tla-str vertex_method=dv2_split -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet # split
+wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-pr-perevt.jsonnet  # old chain
 ```
 
 | `vertex_method` | main neutrino vertex |
 |---|---|
-| `original` (default) | the production chain: SCN net + re-rank, dual chain, kink/junction snaps, `improve_vertex`, main-vertex graph audit, conn3 stitch |
+| `original` | the pre-DV2-MAX production chain: SCN net + re-rank, dual chain, kink/junction snaps, `improve_vertex`, main-vertex graph audit, conn3 stitch |
 | `dv2_snap` | the DV2-MAX point, snapped to the nearest PR-graph vertex |
 | `dv2_split` | the nearest PR-graph vertex or trajectory-fit point, whichever is nearer; a fit point splits its segment there |
-| `dv2_split_move` | the nearest PR-graph vertex if within 1.5 cm, else as `dv2_split`; then the vertex is moved onto the DV2-MAX point |
+| `dv2_split_move` (default) | the nearest PR-graph vertex if within 1.5 cm, else as `dv2_split`; then the vertex is moved onto the DV2-MAX point |
 
 - The `dv2_*` methods run the DV2-MAX model and that placement only. None of the original vertex steps run:
   no SCN, re-rank, dual chain, kink/junction snap, `improve_vertex`, graph audit or conn3 stitch.
@@ -41,7 +45,8 @@ wire-cell ... --tla-str vertex_method=dv2_split_move -c pgrapher/experiment/sbnd
   - a split long-muon segment stays the long muon: its two halves replace it.
 - `dv2_bundle` (default `dv2max/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
   `dl_weights` stays the SCN net of `original`.
-- `original` compiles to the same configuration as master, byte for byte.
+- `original` compiles to the same configuration as master (b7bd2a1a), byte for byte. The C++ default of
+  `TaggerCheckNeutrino` stays `original`, so detectors other than SBND are unchanged.
 - The dv2 methods need this directory and `DV2_Vertex.py` on `PYTHONPATH`, a Python with numpy, scipy,
   torch and lightgbm, and libpython preloaded, as the SCN net does.
 

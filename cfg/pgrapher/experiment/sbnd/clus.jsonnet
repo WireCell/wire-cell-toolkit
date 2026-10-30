@@ -1016,11 +1016,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               //   'dv2_split_move'  as dv2_split (reusing a graph vertex within
               //                     1.5 cm), then the vertex is moved onto the point
               // The dv2_* methods run only the DV2-MAX model (dv2_bundle) and that
-              // placement; none of the original vertex steps.  Default 'original'
-              // => both keys omitted => byte-identical config.  A vertex_method /
-              // dv2_bundle in tcn_overrides wins (as it does in the C++ config);
-              // the name check and the Trun provenance read that effective value.
-              vertex_method='original',
+              // placement; none of the original vertex steps.  SBND default:
+              // 'dv2_split_move'.  'original' => both keys omitted => the compiled
+              // config is byte-identical to the pre-DV2-MAX production config.
+              // (The C++ default stays 'original', so other detectors are
+              // unchanged.)  A vertex_method / dv2_bundle in tcn_overrides wins (as
+              // it does in the C++ config); the name check and the Trun provenance
+              // read that effective value.
+              vertex_method='dv2_split_move',
               dv2_bundle='dv2max/r7_cloud/bundle.json',
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,

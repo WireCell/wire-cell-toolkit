@@ -38,10 +38,10 @@ function(input='qlpctree.tar.gz',
          // ai-helper issue 35: TaggerCheckNeutrino keys merged over the production
          // operating point, for experiments, e.g. --tla-code 'pr_knobs={dl_vtx_dual_chain: false}'.
          pr_knobs={},
-         // Neutrino vertexing method (clus.jsonnet pr()): 'original' (production),
-         // 'dv2_snap', 'dv2_split' or 'dv2_split_move', e.g.
-         // --tla-str vertex_method=dv2_split_move.  dv2_bundle: the DV2-MAX model.
-         vertex_method='original',
+         // Neutrino vertexing method (clus.jsonnet pr()): 'dv2_split_move' (default),
+         // 'dv2_snap', 'dv2_split', or 'original' (the pre-DV2-MAX production chain),
+         // e.g. --tla-str vertex_method=original.  dv2_bundle: the DV2-MAX model.
+         vertex_method='dv2_split_move',
          dv2_bundle='dv2max/r7_cloud/bundle.json')
 
 local g = import 'pgraph.jsonnet';
