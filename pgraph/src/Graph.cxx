@@ -125,50 +125,9 @@ int Graph::execute_upstream(Node* node)
     return count;
 }
 
-// this bool indicates exception, and is probably ignored
-bool Graph::execute()
-{
-    auto nodes = sort_kahn();
-    l->debug("executing with {} nodes", nodes.size());
-
-    while (true) {
-        int count = 0;
-        bool did_something = false;
-
-        for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
-            Node* node = *nit;
-            NVTX_SCOPED_RANGE((node->instance_name()).c_str());
-            auto core = std::clock();
-            auto wall = std::chrono::high_resolution_clock::now();
-
-            bool ok = call_node(node);
-
-            m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
-
-            auto delta = std::chrono::high_resolution_clock::now() - wall;
-            const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
-            m_nodes_timer[node].wall += wall_ms / 1000.0;
-
-            if (ok) {
-                if (m_enable_em) {
-                  m_em(String::format("called %d: %s", count, node->ident()));
-                }
-                SPDLOG_LOGGER_TRACE(l, "ran node {}: {}", count, node->ident());
-                did_something = true;
-                break;  // start again from bottom of graph
-            }
-        }
-
-        if (!did_something) {
-            return true;  // it's okay to do nothing.
-        }
-    }
-    return true;  // shouldn't reach
-}
-
-// Same policy as execute() -- always fire the sink-most runnable node so
-// no more than one datum sits on any edge -- but discover the runnable
-// node incrementally instead of rescanning the whole topological order.
+// Always fire the sink-most runnable node so no more than one datum sits
+// on any edge, discovering the runnable node incrementally instead of
+// rescanning the whole topological order after every firing.
 //
 // Each node's topological index is its fixed "rank" (sink-most = highest).
 // A node's runnability can change ONLY when a neighbor fires: a child
@@ -176,14 +135,16 @@ bool Graph::execute()
 // run while output pending" guard), and a parent producing fills a child's
 // input.  So after each successful firing we re-offer just that node plus
 // its parents and children to a rank-ordered ready set, and pop the
-// highest rank.  This fires the identical node sequence as execute() (rank
-// is a total order, so "highest-rank runnable" == execute()'s reverse-scan
-// pick) in O((V+E) log V) instead of O(V^2).
-bool Graph::execute_drain()
+// highest rank.  Rank is a total order, so this fires the same node
+// sequence as a reverse scan of the topological order restarted after each
+// firing (the original algorithm), but in O((V+E) log V) instead of O(V^2).
+//
+// The returned bool indicates exception, and is probably ignored.
+bool Graph::execute()
 {
     auto nodes = sort_kahn();
     const size_t nnodes = nodes.size();
-    l->debug("executing (drain) with {} nodes", nnodes);
+    l->debug("executing with {} nodes", nnodes);
 
     std::unordered_map<Node*, size_t> rank;
     rank.reserve(nnodes);
@@ -218,6 +179,7 @@ bool Graph::execute_drain()
         queued[r] = 0;
         Node* node = nodes[r];
 
+        NVTX_SCOPED_RANGE((node->instance_name()).c_str());
         auto core = std::clock();
         auto wall = std::chrono::high_resolution_clock::now();
 
@@ -237,7 +199,7 @@ bool Graph::execute_drain()
         if (m_enable_em) {
             m_em(String::format("called: %s", node->ident()));
         }
-        SPDLOG_LOGGER_TRACE(l, "ran node (drain): {}", node->ident());
+        SPDLOG_LOGGER_TRACE(l, "ran node: {}", node->ident());
 
         // Only this node and its immediate neighbors can have become runnable.
         enqueue(node);
