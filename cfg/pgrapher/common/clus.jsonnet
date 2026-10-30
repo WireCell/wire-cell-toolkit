@@ -1625,6 +1625,7 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 beam_window_only=false, beam_window_low=0, beam_window_high=0, replace=null,
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
                 edge_charge_forward_dead_mix=false, terminal_min_separation=0,
+                path_filter_own_wpid=false,
                 skip_flags=[],
                 // doc pdvd/114: blank-plane admission policy for the terminal
                 // candidates.  C++ default "wcp" (no policy).  null => keys
@@ -1691,6 +1692,9 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // byte-identical pre-knob config.  This is a SHARED function:
                 // SBND, uBooNE and ICARUS bind it too and are left at 0.
                 [if terminal_min_separation != 0 then 'terminal_min_separation']: terminal_min_separation,
+                // pr_ml doc 34 sec 8.18.  C++ default false.  true = the Steiner path filter reads the terminal's own wire plane and
+                // an empty path tree is not close.  Key omitted when false => byte-identical pre-knob config.
+                [if path_filter_own_wpid then 'path_filter_own_wpid']: true,
                 // doc pdvd/114.  C++ default "wcp".  "prefer3" drops a blob's
                 // two-plane candidates when the blob holds a three-plane one;
                 // "nearby" drops them when a three-plane candidate of the

@@ -874,6 +874,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               // pdvd/wct-pr-perevt.jsonnet, exactly as wire_tol/adjacent_slice
               // do -- a bare pr.jsonnet run is NOT the PDVD operating point.
               steiner_terminal_min_separation=0,
+              // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
+              steiner_path_filter_own_wpid=false,
               // bundle_truth_iids (pr_ml doc 24 sec 6, decision 2A option (a); as sbnd/clus.jsonnet, doc 23
               // sec 11.9): truth_nu rows whose clusters form the bundle_no_light bundle (light-less simulation:
               // the truth-picked beam bundle as the perfect-Q/L stand-in of the -beam chain; needs the per-point
@@ -1817,6 +1819,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                path_filter_own_wpid=steiner_path_filter_own_wpid,
                                 terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
                                 base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116
@@ -1853,6 +1856,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
                                 // only the clusters protect_bundle purged and
                                 // they must be built like their peers.
                                 terminal_min_separation=steiner_terminal_min_separation,
+                                path_filter_own_wpid=steiner_path_filter_own_wpid,
                                 terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,   // doc pdvd/114; FLIPPED by doc pdvd/116 (owner 2026-09-18)
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
                                 base_weight_blank_alpha=if steiner_base_weight_blank_alpha == null then 0.5 else steiner_base_weight_blank_alpha,   // doc pdvd/115; FLIPPED by doc pdvd/116

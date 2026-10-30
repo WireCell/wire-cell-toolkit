@@ -113,6 +113,11 @@ namespace WireCell::Clus::Steiner {
             /// already-kept terminal lies strictly within it.
             double terminal_min_separation{0.0};
 
+            /// pr_ml doc 34 sec 8.18.  The path filter (filter_by_path_constraints) reads each terminal's own wire plane, and an empty
+            /// (plane, face, apa) path tree does not count as close in 2-D.  false (the default) = the historical behaviour, bit for bit:
+            /// a wrong wire plane and a -1 that passes as close, which deletes terminals in whole anodes of a multi-anode cluster.
+            bool path_filter_own_wpid{false};
+
             /// doc pdvd/114.  Blank-plane admission policy for the Phase-1
             /// terminal candidates of one blob, applied BEFORE the per-blob
             /// peak search (see WireCellClus/SteinerBlankPlane.h).

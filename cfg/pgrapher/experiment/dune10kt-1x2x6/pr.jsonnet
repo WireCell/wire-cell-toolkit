@@ -331,6 +331,8 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
        // writeback: C++ true (CreateSteinerGraph replaces the cluster's blobs by the gapfill cells); false = the
        // gapfill cloud feeds the Steiner graph only.  null => key omitted.
        retile_deghost_writeback=null,
+       // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
+       steiner_path_filter_own_wpid=false,
        // pr_ml doc 32 sec C.3: skip_base_subcells, C++ true since doc 32 sec C.4 (a kept cell inside a base cell is skipped); false adds it (doc 131).  null => key omitted.
        retile_deghost_skip_base_subcells=null) :: {
         local dv = clus_maker.detector_volumes(anodes),
@@ -430,6 +432,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
                                 beam_window_low=steiner_args.beam_window_low,
                                 beam_window_high=steiner_args.beam_window_high,
                                 terminal_wire_tol=steiner_args.terminal_wire_tol,
+                                path_filter_own_wpid=steiner_path_filter_own_wpid,
                                 terminal_adjacent_slice=steiner_args.terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_args.edge_charge_forward_dead_mix,
                                 terminal_blank_plane_mode=steiner_args.terminal_blank_plane_mode,
@@ -459,6 +462,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1)
                                 beam_window_low=steiner_args.beam_window_low,
                                 beam_window_high=steiner_args.beam_window_high,
                                 terminal_wire_tol=steiner_args.terminal_wire_tol,
+                                path_filter_own_wpid=steiner_path_filter_own_wpid,
                                 terminal_adjacent_slice=steiner_args.terminal_adjacent_slice,
                                 edge_charge_forward_dead_mix=steiner_args.edge_charge_forward_dead_mix,
                                 terminal_blank_plane_mode=steiner_args.terminal_blank_plane_mode,

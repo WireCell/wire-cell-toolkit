@@ -81,6 +81,11 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     // the prototype constant => byte-identical when the key is absent).
     m_grapher_config.terminal_charge_threshold =
         get(cfg, "terminal_charge_threshold", m_grapher_config.terminal_charge_threshold);
+    // pr_ml doc 34 sec 8.18: the path filter reads the terminal's own wire plane and
+    // an empty path tree is not close.  C++ default false = the historical path.
+    m_grapher_config.path_filter_own_wpid =
+        get(cfg, "path_filter_own_wpid", m_grapher_config.path_filter_own_wpid);
+    if (m_grapher_config.path_filter_own_wpid) log->debug("configure: path_filter_own_wpid on");
     // doc pdvd/37 R1: cross-blob minimum-separation thinning of the terminal
     // set, in the WCT system of units.  C++ default 0 = no thinning, so a
     // config without the key runs bit-for-bit as before.
@@ -180,6 +185,8 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     // doc pdvd/37 R1: minimum spacing enforced across blob boundaries on the
     // terminal set, before the extreme points are added.  0 = legacy (none).
     cfg["terminal_min_separation"] = m_grapher_config.terminal_min_separation;
+    // pr_ml doc 34 sec 8.18: false = the historical path filter.
+    cfg["path_filter_own_wpid"] = m_grapher_config.path_filter_own_wpid;
     // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.

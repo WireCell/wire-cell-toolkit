@@ -1,5 +1,6 @@
 #include "WireCellUtil/Exceptions.h"
 #include "SteinerGrapher.h"
+#include "WireCellClus/SteinerPathFilter.h"
 
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
@@ -764,7 +765,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
 
     for (auto terminal_idx : terminals) {
         Point point = m_cluster.point3d(terminal_idx);
-        auto wpid = m_cluster.wpid(terminal_idx);
+        const auto wpid = path_filter_terminal_wpid(m_cluster, terminal_idx, m_config.path_filter_own_wpid);   // pr_ml doc 34 sec 8.18
 
         // Calculate distances similar to prototype's logic
 
@@ -780,9 +781,7 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
         
         // Apply prototype's filtering logic:
         // Remove if close in 2D projections but far in 3D
-        bool close_in_2d = (dis_2d[0] < distance_2d_threshold && dis_2d[1] < distance_2d_threshold) ||
-                          (dis_2d[0] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold) ||
-                          (dis_2d[1] < distance_2d_threshold && dis_2d[2] < distance_2d_threshold);
+        const bool close_in_2d = path_filter_close_in_2d(dis_2d, distance_2d_threshold, m_config.path_filter_own_wpid);
         bool should_remove = close_in_2d && (dis_3d > distance_3d_threshold);
 
         // std::cout << "Test1: " << point << " " << dis_3d << " " << dis_2d[0] << " " << dis_2d[1] << " " << dis_2d[2] << std::endl;
@@ -797,9 +796,9 @@ Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(
         // dis_3d > 6 cm cut.  A negative value in this line is that sentinel.
         if (steiner_phase_dump_enabled()) {
             SPDLOG_LOGGER_DEBUG(log,
-                "steiner_p3_dis: dis3d={:.2f} du={:.3f} dv={:.3f} dw={:.3f} close2d={} remove={}",
+                "steiner_p3_dis: dis3d={:.2f} du={:.3f} dv={:.3f} dw={:.3f} close2d={} remove={} apa={} face={}",
                 dis_3d / units::cm, dis_2d[0] / units::cm, dis_2d[1] / units::cm,
-                dis_2d[2] / units::cm, (int) close_in_2d, (int) should_remove);
+                dis_2d[2] / units::cm, (int) close_in_2d, (int) should_remove, wpid.apa(), wpid.face());
         }
 
         if (!should_remove) {

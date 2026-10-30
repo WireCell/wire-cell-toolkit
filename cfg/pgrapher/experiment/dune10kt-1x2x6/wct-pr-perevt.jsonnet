@@ -72,6 +72,8 @@ function(
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
     retile_deghost_writeback = null,
+    // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
+    steiner_path_filter_own_wpid = false,
     // pr_ml doc 32 sec C.3: gapfill skips kept cells inside a base cell (C++ true since doc 32 sec C.4; false = doc 131).  null => key omitted.
     retile_deghost_skip_base_subcells = null,
 )
@@ -109,6 +111,7 @@ local pr = pr_maker.pr(anodes, pds, pipeline_names, dump=true, tensor_outname=sa
                        retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                        retile_deghost_reach_cm=retile_deghost_reach_cm,
                        retile_deghost_writeback=retile_deghost_writeback,
+                       steiner_path_filter_own_wpid=steiner_path_filter_own_wpid,
                        retile_deghost_skip_base_subcells=retile_deghost_skip_base_subcells);
 
 local graph = g.pipeline([source, pr]);
