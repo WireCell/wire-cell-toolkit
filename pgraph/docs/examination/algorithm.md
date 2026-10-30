@@ -2,6 +2,10 @@
 
 Examined: 2026-04-12
 Scope: All headers in `inc/WireCellPgraph/` and sources in `src/`
+Updated: 2026-10-30 for the rank-ordered scheduler now in `Graph::execute()`
+(sections 5.1, 7.3 and 8 revised).  The former TopoGrapher scheduler replaced the rescan
+loop and TopoGrapher was removed.  Line numbers in sections not revised
+are from the original examination.
 
 ---
 
@@ -147,38 +151,54 @@ across runs, which is important for reproducible scientific computations.
 
 ## 5. Execution Model
 
-**File:** `src/Graph.cxx:111-148`
+**File:** `src/Graph.cxx:143-211`
 
 ### 5.1 Main Execution Loop
 
-The execution follows a "demand-driven, bottom-up" strategy:
+The execution follows a "demand-driven, bottom-up" strategy: always fire the
+sink-most node that can run.  The runnable node is found from a rank-ordered
+ready set:
 
 ```
-sorted = sort_kahn()  // source → ... → sink order
+sorted = sort_kahn()            // source → ... → sink order
+rank[node] = index in sorted    // sink-most = highest rank
+ready = { sources }             // a set of ranks, each node at most once
 
-loop forever:
-    for each node in REVERSE sorted order (sinks first):
-        if call_node(node) succeeds:
-            break and restart from sinks
-    if no node fired:
-        done
+while ready is not empty:
+    node = pop highest rank from ready
+    if call_node(node) succeeds:
+        add node, its children and its parents to ready
 ```
 
 Key design choices:
 
-1. **Reverse iteration (sinks first)**: The loop iterates from sinks toward
-   sources. This is demand-driven: it tries to drain data from the bottom of
-   the pipeline first, which keeps memory usage low by consuming buffered data
-   before producing more.
+1. **Sink-most first**: Popping the highest rank drains data from the bottom
+   of the pipeline first, which keeps memory usage low by consuming buffered
+   data before producing more.  With the node wrappers' guards (section 5.2)
+   no edge holds more than one datum.
 
-2. **Single-fire-then-restart**: When any node successfully fires (returns
-   true), the loop immediately restarts from the sinks. This ensures that
-   downstream consumers get a chance to drain data as soon as it's produced,
-   preventing queue buildup.
+2. **Event-driven candidates**: A node's runnability can change only when a
+   neighbor fires: a child consuming empties the parent's output edge, and a
+   parent producing fills the child's input.  So after each successful firing
+   only that node and its immediate neighbors are offered to the ready set.
+   Seeding with the sources is sufficient because every other change follows
+   from a firing.  A node popped that cannot fire is simply dropped; it is
+   offered again when a neighbor next fires.
 
-3. **Termination**: When a full scan from sinks to sources finds no node that
-   can fire, the graph has quiesced — all sources are exhausted and all
-   queues are drained.
+3. **Termination**: When the ready set is empty no node can fire: the graph
+   has quiesced, all sources are exhausted and all queues are drained.
+
+4. **Cost**: O(log V) per set operation and O(degree) offers per firing,
+   O((V+E) log V) overall, instead of an O(V) rescan per firing.
+
+The original algorithm (before 2026-10) reverse-scanned the whole sorted list
+after every firing and restarted from the sinks, O(V^2).  Because rank is a
+total order, "highest-rank runnable node" is exactly that scan's pick, so both
+fire the identical sequence of nodes and give identical output.  The original
+loop is kept as `reference_execute()` in `test/doctest_pgraph_execute.cxx`,
+which checks this equivalence.  A TopoGrapher application briefly offered the
+new scheduler alongside Pgrapher; Pgrapher now uses it and TopoGrapher was
+removed.
 
 ### 5.2 Node Firing Semantics
 
@@ -325,7 +345,8 @@ node typename and optional port index (default 0).
 `Pgrapher::execute()`:
 1. Calls `m_graph.execute()` which:
    a. Topologically sorts the graph (Kahn's algorithm)
-   b. Runs the main execution loop (demand-driven, bottom-up)
+   b. Runs the main execution loop (sink-most runnable node first, from a
+      rank-ordered ready set; section 5.1)
 2. Prints timing information based on verbosity level
 
 ---
@@ -341,19 +362,24 @@ TrackDepos:beam ────(port 1)──/
 
 Execution proceeds as follows:
 
-1. **Sort**: Kahn's algorithm produces: [cosmics, beam, merger, dump]
-2. **Execute** (reverse order iteration):
-   - Try DumpDepos (sink) — input empty → false
-   - Try DepoMerger (join) — both inputs empty → false
-   - Try beam (source) — output empty → produces depo → **true** → restart
-   - Try DumpDepos — input empty → false
-   - Try DepoMerger — only one input has data → false (needs both)
-   - Try cosmics (source) — output empty → produces depo → **true** → restart
-   - Try DumpDepos — input empty → false
-   - Try DepoMerger — both inputs have data → merges, produces output → **true**
-   - Try DumpDepos — input has data → consumes → **true**
+1. **Sort**: Kahn's algorithm produces: [cosmics, beam, merger, dump], so the
+   ranks are cosmics 0, beam 1, merger 2, dump 3.
+2. **Execute** (ready set seeded with the sources {cosmics, beam}):
+   - Pop beam — output empty → produces depo → **true** → offer beam, merger
+   - Pop merger — only one input has data → false (needs both)
+   - Pop beam — output still full → false
+   - Pop cosmics — output empty → produces depo → **true** → offer cosmics, merger
+   - Pop merger — both inputs have data → merges, produces output → **true** →
+     offer merger, dump, cosmics, beam
+   - Pop dump — input has data → consumes → **true** → offer dump, merger
+   - Pop dump — input empty → false
+   - Pop merger — inputs empty → false
+   - Pop beam — output empty → produces depo → **true** → ...
    - ... (continues until sources are exhausted)
-3. **Terminate**: When no node can fire, execution ends.
+3. **Terminate**: When the ready set is empty, execution ends.
+
+The successful firings (beam, cosmics, merger, dump, beam, ...) are the same
+as the original reverse-scan algorithm's; only the failed attempts differ.
 
 This demand-driven approach naturally handles backpressure: sources only produce
 when their output queue is empty, preventing unbounded memory growth.
