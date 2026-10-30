@@ -30,8 +30,12 @@ void Img::GridTiling::configure(const WireCell::Configuration& cfg)
         THROW(ValueError() << errmsg{"APA lacks face"});
     }
     m_threshold = get(cfg, "threshold", m_threshold);
+    m_exact_center = get(cfg, "exact_center", m_exact_center);
     log->debug("configured with anode={} face={}",
                m_anode->ident(), m_face->ident());
+    if (m_exact_center) {
+        log->debug("exact_center on: nudge {} toward the corners' true center", m_nudge);
+    }
 }
 
 WireCell::Configuration Img::GridTiling::default_configuration() const
@@ -42,6 +46,7 @@ WireCell::Configuration Img::GridTiling::default_configuration() const
     // activity must be bigger than this much to consider.
     cfg["threshold"] = m_threshold;
     cfg["nudge"] = m_nudge;
+    cfg["exact_center"] = m_exact_center;
     return cfg;
 }
 
@@ -170,7 +175,7 @@ bool Img::GridTiling::operator()(const input_pointer& slice, output_pointer& out
 
     // SPDLOG_LOGGER_TRACE(log, "anode={} face={} slice={} making blobs",
     //                     anodeid, faceid, slice->ident());
-    auto blobs = make_blobs(m_face->raygrid(), activities, m_nudge);
+    auto blobs = make_blobs(m_face->raygrid(), activities, m_nudge, m_exact_center);
     /// TODO: remove debug code
     // int start_tick = std::round(slice->start()/(0.5*WireCell::units::us));
     // if (start_tick == 1024) {

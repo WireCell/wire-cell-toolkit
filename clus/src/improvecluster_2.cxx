@@ -223,6 +223,8 @@ namespace WireCell::Clus {
         rp.cut.max_depth = get(j, "cut_max_depth", rp.cut.max_depth);
         rp.cut.min_length = get(j, "cut_min_length", rp.cut.min_length);
         rp.cut.nudge = get(j, "cut_nudge", rp.cut.nudge);
+        // pr_ml doc 34 sec 8.9: RayGrid::Blob::add's exact_center in the retile cut; default false = legacy
+        rp.cut.exact_center = get(j, "cut_exact_center", rp.cut.exact_center);
         rp.guard = get(j, "guard", rp.guard);
         rp.max_level_nodes = get(j, "max_level_nodes", rp.max_level_nodes);
         rp.repair = get(j, "repair", rp.repair);

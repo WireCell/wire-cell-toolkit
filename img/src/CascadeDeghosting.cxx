@@ -39,6 +39,7 @@ WireCell::Configuration Img::CascadeDeghosting::default_configuration() const
     cfg["cut_max_depth"] = m_cut_max_depth;
     cfg["cut_min_length"] = m_cut_min_length;
     cfg["cut_nudge"] = m_cut_nudge;
+    cfg["cut_exact_center"] = m_cut_exact_center;
     cfg["guard"] = m_guard;
     cfg["max_level_nodes"] = m_max_level_nodes;
     cfg["repair"] = m_repair;
@@ -65,6 +66,7 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     m_cut_max_depth = get(cfg, "cut_max_depth", m_cut_max_depth);
     m_cut_min_length = get(cfg, "cut_min_length", m_cut_min_length);
     m_cut_nudge = get(cfg, "cut_nudge", m_cut_nudge);
+    m_cut_exact_center = get(cfg, "cut_exact_center", m_cut_exact_center);
     m_guard = get(cfg, "guard", m_guard);
     m_max_level_nodes = get(cfg, "max_level_nodes", m_max_level_nodes);
     m_repair = get(cfg, "repair", m_repair);
@@ -128,6 +130,9 @@ void Img::CascadeDeghosting::configure(const WireCell::Configuration& cfg)
     log->debug("levels:{} cut max_depth={} min_length={} guard={} max_level_nodes={} repair={} budget={:.4f} policy={} charge_scale={} nthreads={}", desc,
                m_cut_max_depth, m_cut_min_length, m_guard, m_max_level_nodes, m_repair, m_repair_budget, m_policy, m_charge_scale,
                m_nthreads);
+    if (m_cut_exact_center) {
+        log->debug("cut_exact_center on: the bisection nudges toward the corners' true center");
+    }
     // wcfm doc 53 W7: the G + D columns of the pooled model from a file (test path), read once per configure
     m_xdet_columns_file = get(cfg, "xdet_columns_file", m_xdet_columns_file);
     m_xdet.reset();
@@ -221,6 +226,7 @@ bool Img::CascadeDeghosting::operator()(const input_tuple_type& intup, output_po
     // ---- the level loop: Aux::Cascade::run_cascade (pdvd doc 130 phase 2; the body moved as it was)
     Cascade::RunParams rp;
     rp.cut.nudge = m_cut_nudge;
+    rp.cut.exact_center = m_cut_exact_center;
     rp.cut.max_depth = m_cut_max_depth;
     rp.cut.min_length = m_cut_min_length;
     rp.guard = m_guard;

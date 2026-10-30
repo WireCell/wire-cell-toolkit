@@ -124,6 +124,10 @@ namespace WireCell::Clus {
        // Sensitive: the extra removal runs 12 % -> 74 % of survivors as this
        // goes 1 -> 8 cm, and at 5 cm it demonstrably fuses two objects.
        double m_hack_max_bridge{0.0};
+       // pr_ml doc 34 sec 8.9: RayGrid::make_blobs's exact_center in the retile tiling
+       // (make_iblobs_improved): the nudge points to the corners' true center (FD-VD
+       // 30 degree wires).  Default false: the legacy tiling, bit-for-bit.
+       bool m_tiling_exact_center{false};
        double m_bad_blob_run_merge{0.0};
 
     private:

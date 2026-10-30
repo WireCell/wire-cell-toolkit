@@ -39,6 +39,8 @@ namespace WireCell::Clus {
         // keys runs bit-for-bit as before.
         m_hack_max_bridge = get(cfg, "hack_max_bridge", m_hack_max_bridge);
         m_bad_blob_run_merge = get(cfg, "bad_blob_run_merge", m_bad_blob_run_merge);
+        // pr_ml doc 34 sec 8.9.  Default false = the legacy tiling, bit-for-bit.
+        m_tiling_exact_center = get(cfg, "tiling_exact_center", m_tiling_exact_center);
     }
 
     Configuration ImproveCluster_1::default_configuration() const
@@ -48,6 +50,7 @@ namespace WireCell::Clus {
         cfg["bad_blob_report"] = m_bad_blob_report;
         cfg["hack_max_bridge"] = m_hack_max_bridge;
         cfg["bad_blob_run_merge"] = m_bad_blob_run_merge;
+        cfg["tiling_exact_center"] = m_tiling_exact_center;
         return cfg;
     }
 
@@ -1094,7 +1097,8 @@ std::vector<IBlob::pointer> ImproveCluster_1::make_iblobs_improved(std::map<std:
     for (auto it = map_slices_measures.begin(); it != map_slices_measures.end(); it++){
         // Do the actual tiling.
         WRG::activities_t activities = RayGrid::make_activities(m_face.at(apa).at(face)->raygrid(), it->second);
-        auto bshapes = WRG::make_blobs(coords, activities);
+        auto bshapes = m_tiling_exact_center ? WRG::make_blobs(coords, activities, 1e-3, true)
+                                             : WRG::make_blobs(coords, activities);
 
     
         // {

@@ -139,6 +139,7 @@ namespace WireCell::Aux::Cascade {
         double nudge{0.01};
         int max_depth{10};    // bisections from the uncut blob (BlobCutting max_depth of the direct cut)
         int min_length{2};
+        bool exact_center{false};   // RayGrid::Blob::add's exact_center (pr_ml doc 34 sec 8.9); false = legacy cut
     };
     bool needs_cutting(const RayGrid::Blob& blob, int length_threshold);
     /// Leaves (shape, depth) of the bisection of `blob` (at `depth`) until no strip is wider than `width`.

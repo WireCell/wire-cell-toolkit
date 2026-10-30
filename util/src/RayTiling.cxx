@@ -295,6 +295,89 @@ void Blob::add(const Coordinates& coords, const Strip& strip, double nudge)
     m_strips.push_back(strip);
 }
 
+// The pitch location of a corner in a layer, exact also in the corner's own two layers, where
+// Coordinates::pitch_location() returns 0 (its tensors skip in == il / in == im): the corner lies on its
+// own ray, whose pitch from ray 0 is grid * pitch.
+static double corner_pitch(const Coordinates& coords, const crossing_t& c, layer_index_t layer)
+{
+    if (c.first.layer == layer) {
+        return c.first.grid * coords.pitch_mags()[layer];
+    }
+    if (c.second.layer == layer) {
+        return c.second.grid * coords.pitch_mags()[layer];
+    }
+    return coords.pitch_location(c.first, c.second, layer);
+}
+
+void Blob::add(const Coordinates& coords, const Strip& strip, double nudge, bool exact_center)
+{
+    if (!exact_center) {
+        add(coords, strip, nudge);
+        return;
+    }
+
+    // The legacy add() above with the two centers from corner_pitch().
+    const size_t nstrips = m_strips.size();
+
+    if (nstrips == 0) {
+        m_strips.push_back(strip);
+        return;
+    }
+
+    if (nstrips == 1) {
+        m_strips.push_back(strip);
+        m_corners = find_corners(m_strips.front(), m_strips.back());
+        return;
+    }
+
+    double center_in_new = 0;
+    for (const auto& c : m_corners) {
+        center_in_new += corner_pitch(coords, c, strip.layer);
+    }
+    center_in_new /= m_corners.size();
+
+    crossings_t surviving;
+    for (const auto& c : m_corners) {
+        const int pind = in_strip(coords, c, strip, center_in_new, nudge);
+        if (pind < 0) {
+            continue;
+        }
+        surviving.push_back(c);
+    }
+
+    std::unordered_map<layer_index_t, double> center_in_old;
+    for (auto& old_strip : m_strips) {
+        double center = 0;
+        for (const auto& c : m_corners) {
+            center += corner_pitch(coords, c, old_strip.layer);
+        }
+        center_in_old[old_strip.layer] = center / m_corners.size();
+    }
+
+    for (size_t si1 = 0; si1 < nstrips; ++si1) {
+        auto corners = find_corners(m_strips[si1], strip);
+        for (const auto& c : corners) {
+            bool miss = false;
+            for (size_t si2 = 0; si2 < nstrips; ++si2) {
+                if (si1 == si2) {
+                    continue;
+                }
+                const auto& s2 = m_strips[si2];
+                const int pind = in_strip(coords, c, s2, center_in_old[s2.layer], nudge);
+                if (pind < 0) {
+                    miss = true;
+                    break;
+                }
+            }
+            if (!miss) {
+                surviving.push_back(c);
+            }
+        }
+    }
+    m_corners = surviving;
+    m_strips.push_back(strip);
+}
+
 const crossings_t& Blob::corners() const { return m_corners; }
 
 std::vector<size_t> Blob::ordered(const std::set<size_t>& ignore_layers) const
@@ -325,9 +408,10 @@ std::vector<size_t> Blob::ordered(const std::set<size_t>& ignore_layers) const
     return strip_indices;
 }
 
-Tiling::Tiling(const Coordinates& coords, double nudge)
+Tiling::Tiling(const Coordinates& coords, double nudge, bool exact_center)
   : m_coords(coords)
   , m_nudge(nudge)
+  , m_exact_center(exact_center)
 {
 }
 
@@ -337,7 +421,7 @@ blobs_t Tiling::operator()(const Activity& activity)
     const size_t nstrips = strips.size();
     blobs_t ret(nstrips);
     for (size_t ind = 0; ind < nstrips; ++ind) {
-        ret[ind].add(m_coords, strips[ind], m_nudge);
+        ret[ind].add(m_coords, strips[ind], m_nudge, m_exact_center);
     }
     return ret;
 }
@@ -427,7 +511,7 @@ blobs_t Tiling::operator()(const blobs_t& prior_blobs, const Activity& activity)
         auto strips = proj.make_strips();
         for (auto strip : strips) {
             Blob newblob = blob;  // copy
-            newblob.add(m_coords, strip, m_nudge);
+            newblob.add(m_coords, strip, m_nudge, m_exact_center);
             if (newblob.corners().empty()) {
                 continue;
             }
@@ -503,9 +587,9 @@ void WireCell::RayGrid::prune(const Coordinates& coords, blobs_t& blobs, double 
 
 blobs_t WireCell::RayGrid::make_blobs(const Coordinates& coords,
                                       const activities_t& activities, 
-                                      double nudge)
+                                      double nudge, bool exact_center)
 {
-    Tiling rc(coords, nudge);
+    Tiling rc(coords, nudge, exact_center);
     blobs_t blobs;
     const size_t nlayers = activities.size();
 

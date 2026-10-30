@@ -49,6 +49,14 @@ namespace WireCell {
                 fights floating-point imprecision in wire geometry.
             */
             double m_nudge{1e-3};
+            /** Config: exact_center
+
+                RayGrid::Blob::add's exact_center: the center the nudge points to is taken from the corners'
+                true positions.  The legacy center is 0 in a corner's own layers, so the nudge can push a real
+                corner just inside a low strip edge out, and prune() then cuts the blob short (FD-VD 30 degree
+                wires, pr_ml doc 34 sec 8.9).  Default false = the legacy tiling, unchanged.
+            */
+            bool m_exact_center{false};
 
             // Count blobs in each contiguous stream to assign blob
             // ident numbers.  Reset at EOS and, for a multi-event process,

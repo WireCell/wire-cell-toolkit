@@ -33,6 +33,9 @@
                         wires), forward: "<type>:<name>" of an ITensorForward, threshold: logit}
       cut_max_depth, cut_min_length, cut_nudge (10, 2, 0.01) the bisection (BlobCutting's max_depth,
                         counted from the uncut blob, min_length, nudge)
+      cut_exact_center  (bool, false) RayGrid::Blob::add's exact_center in the bisection: the nudge points to
+                        the corners' true center, not the legacy one that is 0 in a corner's own layers (pr_ml
+                        doc 34 sec 8.9, FD-VD).  false = the legacy cut, unchanged.
       guard             (bool, true) coverage guard on the coarse levels
       max_level_nodes   (int, 0 = off) cap on a level's blob count: survivors are cut in descending logit
                         and the lowest-logit survivors are dropped once the next level would exceed the cap
@@ -116,6 +119,7 @@ namespace WireCell::Img {
         int m_cut_max_depth{10};
         int m_cut_min_length{2};
         double m_cut_nudge{0.01};
+        bool m_cut_exact_center{false};
         bool m_guard{true};
         int m_max_level_nodes{0};
         bool m_repair{true};

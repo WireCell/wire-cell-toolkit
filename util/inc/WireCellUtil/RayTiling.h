@@ -122,6 +122,15 @@ namespace WireCell {
             void add(const Coordinates& coords, const Strip& strip,
                      double nudge = 0);
 
+            // As add() above, with exact_center choosing the "center" the nudge points to.  add() takes the
+            // mean over the old corners of Coordinates::pitch_location(), which is 0 in a corner's own two
+            // layers, so in a blob whose corners are all crossings of the same two layers those centers are
+            // 0 and the nudge points to ray 0: a corner just inside a low edge is rejected (pr_ml doc 34 sec
+            // 8.9, FD-VD 30 degree wires).  exact_center=true puts a corner at its own ray (grid * pitch) in
+            // its own layers.  exact_center=false is add() above, unchanged.
+            void add(const Coordinates& coords, const Strip& strip,
+                     double nudge, bool exact_center);
+
             const strips_t& strips() const { return m_strips; }
             strips_t& strips() { return m_strips; }
 
@@ -165,7 +174,7 @@ namespace WireCell {
         class Tiling {
            public:
             // Create a tiling with coordintes.
-            Tiling(const Coordinates& coords, double nudge=0);
+            Tiling(const Coordinates& coords, double nudge=0, bool exact_center=false);
 
             // Return a new activity which is shrunk to fall into the shadow of the blob.
             Activity projection(const Blob& blob, const Activity& activity);
@@ -179,6 +188,7 @@ namespace WireCell {
           private:
             const Coordinates& m_coords;
             const double m_nudge;
+            const bool m_exact_center;   // Blob::add's exact_center
         };
 
         /// free functions
@@ -207,9 +217,11 @@ namespace WireCell {
         // crossing point breakage.  Note, if the ideal crossing
         // pattern actually has crossing points w/in this distance,
         // they will be effectively coalesced.
+        //
+        // exact_center: Blob::add's exact_center (default false = the legacy tiling).
         blobs_t make_blobs(const Coordinates& coords,
                            const activities_t& activities,
-                           double nudge = 1e-3);
+                           double nudge = 1e-3, bool exact_center = false);
 
         inline std::ostream& operator<<(std::ostream& os, const WireCell::RayGrid::Strip& s)
         {

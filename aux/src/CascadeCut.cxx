@@ -30,9 +30,9 @@ namespace {
         return RayGrid::surrounding(big_ref, small_ref);
     }
 
-    // BlobCutting.cxx split_blob_once, verbatim
+    // BlobCutting.cxx split_blob_once, verbatim but for exact_center (RayGrid::Blob::add's; false = BlobCutting's add)
     std::vector<RayGrid::Blob> split_blob_once(const RayGrid::Coordinates& coords, const RayGrid::Blob& original_blob,
-                                               double nudge, int min_length)
+                                               double nudge, int min_length, bool exact_center)
     {
         std::vector<RayGrid::Blob> result;
 
@@ -67,12 +67,12 @@ namespace {
         RayGrid::Blob second_blob;
         for (int i = 0; i < (int) strips.size(); ++i) {
             if (i != longest_strip_index) {
-                first_blob.add(coords, strips[i], nudge);
-                second_blob.add(coords, strips[i], nudge);
+                first_blob.add(coords, strips[i], nudge, exact_center);
+                second_blob.add(coords, strips[i], nudge, exact_center);
             }
             else {
-                first_blob.add(coords, first_half_strip, nudge);
-                second_blob.add(coords, second_half_strip, nudge);
+                first_blob.add(coords, first_half_strip, nudge, exact_center);
+                second_blob.add(coords, second_half_strip, nudge, exact_center);
             }
         }
 
@@ -105,7 +105,7 @@ namespace {
             out.emplace_back(blob, depth);
             return;
         }
-        auto split_result = split_blob_once(coords, blob, par.nudge, par.min_length);
+        auto split_result = split_blob_once(coords, blob, par.nudge, par.min_length, par.exact_center);
         if (split_result.size() <= 1) {
             out.emplace_back(blob, depth);
             return;
