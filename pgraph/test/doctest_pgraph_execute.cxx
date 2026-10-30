@@ -1,8 +1,8 @@
-// Test that Graph::execute_drain() (used by the TopoGrapher application) is a
-// faithful, deadlock-free reimplementation of Graph::execute() (used by
-// Pgrapher): for the same graph it must fire the identical sequence of nodes
-// and deliver the identical data to every sink -- it only changes the
-// scheduling algorithm (O((V+E) log V) vs O(V^2)), not the execution policy.
+// Test that Graph::execute() (used by Pgrapher) is a faithful, deadlock-free
+// reimplementation of the original Pgrapher scheduler, kept here as
+// reference_execute(): for the same graph it must fire the identical sequence
+// of nodes and deliver the identical data to every sink -- only the scheduling
+// algorithm changed (O((V+E) log V) vs O(V^2)), not the execution policy.
 
 #include "WireCellPgraph/Graph.h"
 #include "WireCellUtil/doctest.h"
@@ -109,14 +109,31 @@ namespace {
         }
     };
 
-    // Build source -> func -> fanout(W) -> W sinks, run with either engine,
+    // The original Graph::execute(): reverse-scan the topological order,
+    // fire the first (sink-most) runnable node, restart from the sinks.
+    void reference_execute(Graph& g)
+    {
+        auto nodes = g.sort_kahn();
+        bool did_something = true;
+        while (did_something) {
+            did_something = false;
+            for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit) {
+                if (g.call_node(*nit)) {
+                    did_something = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Build source -> func -> fanout(W) -> W sinks, run with either scheduler,
     // and return the firing log plus each sink's received values.
     struct Result {
         std::vector<int> fires;
         std::vector<std::vector<int>> got;
     };
 
-    Result run(size_t W, int nvals, bool drain)
+    Result run(size_t W, int nvals, bool reference)
     {
         Rec rec;
         std::vector<std::vector<int>> got(W);
@@ -137,8 +154,8 @@ namespace {
             g.connect(fan.get(), sinks[ind].get(), ind, 0);
         }
 
-        if (drain) {
-            g.execute_drain();
+        if (reference) {
+            reference_execute(g);
         }
         else {
             g.execute();
@@ -149,13 +166,13 @@ namespace {
 
 }  // namespace
 
-TEST_CASE("pgraph drain matches execute on a fanout tree")
+TEST_CASE("pgraph execute matches reference on a fanout tree")
 {
     const size_t W = 7;
     const int nvals = 5;
 
-    auto a = run(W, nvals, /*drain=*/false);  // Pgrapher's execute()
-    auto b = run(W, nvals, /*drain=*/true);   // TopoGrapher's execute_drain()
+    auto a = run(W, nvals, /*reference=*/true);   // original rescan scheduler
+    auto b = run(W, nvals, /*reference=*/false);  // Graph::execute()
 
     // Identical sequence of successful node firings: same policy, same order.
     CHECK(a.fires == b.fires);
@@ -171,11 +188,11 @@ TEST_CASE("pgraph drain matches execute on a fanout tree")
     }
 }
 
-TEST_CASE("pgraph drain terminates and matches for several fan widths")
+TEST_CASE("pgraph execute terminates and matches reference for several fan widths")
 {
     for (size_t W : {1u, 2u, 3u, 10u, 25u}) {
-        auto a = run(W, 3, false);
-        auto b = run(W, 3, true);
+        auto a = run(W, 3, true);
+        auto b = run(W, 3, false);
         CHECK(a.fires == b.fires);
         CHECK(a.got == b.got);
     }
