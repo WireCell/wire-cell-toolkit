@@ -35,6 +35,9 @@ namespace WireCell {
          * "response" and vice versa and at least one must be specified.
          * A "cathode" value must be specified.
          *
+         * Instead of "xregions", the "drift_planes" parameter may name
+         * an IDriftPlanes component which then provides the list.
+         *
          * Any depo not falling between "anode" and "cathode" will be
          * dropped.
          *
