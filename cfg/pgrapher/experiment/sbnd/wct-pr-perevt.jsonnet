@@ -944,17 +944,17 @@ function(
     // SBND_DL_VTX_RERANK=false).
     dl_vtx_rerank = true,
     // Neutrino vertexing method (clus.jsonnet pr() vertex_method):
-    //     --tla-str vertex_method=original         production (default)
+    //     --tla-str vertex_method=dv2_split_move   split, then move the vertex onto the point (default)
     //     --tla-str vertex_method=dv2_snap         DV2-MAX point -> nearest PR-graph vertex
     //     --tla-str vertex_method=dv2_split        ... or nearest trajectory-fit point (split there)
-    //     --tla-str vertex_method=dv2_split_move   split, then move the vertex onto the point
+    //     --tla-str vertex_method=original         the pre-DV2-MAX production chain
     // The dv2_* methods run the DV2-MAX model (dv2_bundle, a WIRECELL_PATH-
     // relative manifest; dl_weights is not used) and only that placement: no
     // re-rank, dual chain, kink/junction snap, improve_vertex, graph audit or
     // conn3 stitch.  They need pyutil/python (DV2_Vertex.py) and its torch /
     // LightGBM env on PYTHONPATH and libpython preloaded, like the SCN net.
-    // Default 'original' => byte-identical compiled config.
-    vertex_method = 'original',
+    // 'original' => compiled config byte-identical to the pre-DV2-MAX production.
+    vertex_method = 'dv2_split_move',
     dv2_bundle = 'dv2max/r7_cloud/bundle.json',
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then

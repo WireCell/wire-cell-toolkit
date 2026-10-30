@@ -45,9 +45,10 @@
 //                         wct-pr.jsonnet, runs the SAME PR stage (sbnd-pr-stage.jsonnet) on it.
 //                         Top-level job: wcls-img-clus-matching.jsonnet.
 function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step',
-         // neutrino vertexing method (clus.jsonnet pr()); the dv2_* methods need the
-         // DV2-MAX Python env (pyutil/python, torch, lightgbm) in the art job
-         vertex_method='original', dv2_bundle='dv2max/r7_cloud/bundle.json')
+         // neutrino vertexing method (clus.jsonnet pr()), default 'dv2_split_move';
+         // the dv2_* methods need the DV2-MAX Python env (pyutil/python, torch,
+         // lightgbm) in the art job; 'original' = the pre-DV2-MAX production chain
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/r7_cloud/bundle.json')
 assert stage == '1step' || stage == 'ql' : "stage must be '1step' or 'ql'";
 local g = import "pgraph.jsonnet";
 local wc = import "wirecell.jsonnet";
