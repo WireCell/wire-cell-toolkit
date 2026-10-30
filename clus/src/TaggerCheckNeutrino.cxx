@@ -4,6 +4,8 @@
 #include "WireCellClus/NuBundleCensus.h"      // sbnd_xin/docs/109 selection census
 
 #include "WireCellUtil/Persist.h"
+#include "WireCellUtil/BuildConfig.h"   // HAVE_PYTHON_INC: the DV2-MAX vertex methods need the embedded Python
+#include <filesystem>   // vertex_method dv2_*: the bundle must exist at configure time
 #include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
 #include <iterator>   // sbnd_xin/docs/128 probe: std::back_inserter
 #include <cmath>      // sbnd_xin/docs/109: std::nan
@@ -447,6 +449,32 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     // doc sbnd_xin/docs/pr/51 (18255-506746): cross-cluster DL swap guard.
     // doc sbnd_xin/docs/pr/106 sec 10: exclusion-free charge cloud for the DL vertex net.
     m_dl_vtx_cloud_no_exclusion = get(config, "dl_vtx_cloud_no_exclusion", m_dl_vtx_cloud_no_exclusion);
+    // Neutrino vertexing method.  Default "original" => none of the DV2-MAX
+    // code runs => byte-identical.
+    m_vertex_method = get(config, "vertex_method", m_vertex_method);
+    {
+        PatternAlgorithms::VertexMethod vm = PatternAlgorithms::VertexMethod::original;
+        if (!PatternAlgorithms::parse_vertex_method(m_vertex_method, vm)) {
+            raise<ValueError>("TaggerCheckNeutrino: vertex_method must be original, dv2_snap, dv2_split or dv2_split_move, got \"%s\"",
+                              m_vertex_method.c_str());
+        }
+        m_vertex_is_dv2 = vm != PatternAlgorithms::VertexMethod::original;
+    }
+    m_dv2_py_module = get(config, "dv2_py_module", m_dv2_py_module);
+    if (m_vertex_is_dv2) {
+#ifndef HAVE_PYTHON_INC
+        raise<ValueError>("TaggerCheckNeutrino: vertex_method %s needs the embedded Python (WCPPyUtil), which this build lacks",
+                          m_vertex_method.c_str());
+#endif
+        const std::string raw = get(config, "dv2_bundle", m_dv2_bundle);
+        m_dv2_bundle = raw.empty() ? std::string() : Persist::resolve(raw);
+        if (m_dv2_bundle.empty() || !std::filesystem::is_regular_file(m_dv2_bundle)) {
+            raise<ValueError>("TaggerCheckNeutrino: vertex_method %s needs a DV2-MAX bundle, dv2_bundle \"%s\" not found on WIRECELL_PATH",
+                              m_vertex_method.c_str(), raw.c_str());
+        }
+        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: vertex_method {}, DV2-MAX bundle {}, module {}",
+                           m_vertex_method, m_dv2_bundle, m_dv2_py_module);
+    }
     // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
     // suggests the neutrino vertex).  All defaults = legacy.
     m_dl_vtx_dual_chain            = get(config, "dl_vtx_dual_chain",            m_dl_vtx_dual_chain);
@@ -1067,6 +1095,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dl_vtx_min_accept_score"] = 4.0;     // min composite score to accept a re-ranked DL vertex (empirical; correct uncertain-regime picks score 8-12, failure cases 3-5)
     cfg["dl_vtx_score_scale"]      = 1000.0;  // scale factor on raw DL score in composite re-rank (1.0 = unscaled)
     cfg["dl_vtx_cloud_no_exclusion"] = m_dl_vtx_cloud_no_exclusion;  // doc pr/106 sec 10: false = legacy (net sees the exclusion fit's charge)
+    cfg["vertex_method"]           = m_vertex_method;      // original | dv2_snap | dv2_split | dv2_split_move
+    cfg["dv2_bundle"]              = m_dv2_bundle;         // dv2_* methods: DV2-MAX bundle manifest (WIRECELL_PATH-relative)
+    cfg["dv2_py_module"]           = m_dv2_py_module;      // dv2_* methods: Python module holding DV2_Vertex()
     cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
     cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
     cfg["dual_chain_transfer"]     = m_dual_chain_transfer;     // doc pr/112 sec 11: false = probe (pass runs, nothing moves)
@@ -3249,6 +3280,9 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
         pattern_algos.m_fit_exclusion            = m_fit_exclusion;
         pattern_algos.m_dl_vtx_cloud_no_exclusion = m_dl_vtx_cloud_no_exclusion;   // doc pr/106 sec 10
+        // neutrino vertexing method (validated in configure)
+        PatternAlgorithms::parse_vertex_method(m_vertex_method, pattern_algos.m_vertex_method);
+        pattern_algos.m_dv2_py_module     = m_dv2_py_module;
         pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
         pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
         pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
@@ -3642,7 +3676,14 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // and fitter, and hands production a DualChainHint.  Knob off => the
         // hint stays empty and a nullptr reaches determine_overall_main_vertex_DL.
         PR::DualChainHint dual_hint;
-        if (m_dl_vtx_dual_chain && m_dl_weights.empty()) {
+        if (m_dl_vtx_dual_chain && m_vertex_is_dv2) {
+            // The dv2_* vertex methods decide from the DV2-MAX point alone and
+            // never read the hint (no snap transfer, no SCN voxels), so -- by
+            // the same argument as the no-weights case below -- the OFF pass
+            // cannot change any output.
+            SPDLOG_LOGGER_INFO(log, "dual_chain: OFF pass skipped for cluster {} -- vertex_method {} does not use the hint",
+                               main_cluster ? main_cluster->get_cluster_id() : -1, m_vertex_method);
+        } else if (m_dl_vtx_dual_chain && m_dl_weights.empty()) {
             // doc pdvd/28 round 3: every consumer of the hint -- the snap
             // transfer, the voxels/union re-rank and the scoreboard's
             // dual_chain block -- lives inside determine_overall_main_vertex_DL,
@@ -3778,7 +3819,17 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // DL path updates map_cluster_main_vertices[main_cluster] directly (by-ref parameter).
         // Traditional path returns the chosen vertex; capture it and sync to the map.
  
-        if (!m_dl_weights.empty()) {
+        // vertex_method dv2_*: the DL step runs the DV2-MAX bundle (dl_weights
+        // is the SCN net of the original method and is not used).
+        if (m_vertex_is_dv2) {
+            flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
+                *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
+                vertices_in_long_muon, segments_in_long_muon,
+                *track_fitter, m_dv, particle_data(), m_recomb_model,
+                m_dv2_bundle, m_dl_vtx_cut, m_dQdx_scale, m_dQdx_offset,
+                false, m_dl_vtx_top_k, m_dl_vtx_min_accept_score,
+                m_dl_vtx_score_scale, nullptr);
+        } else if (!m_dl_weights.empty()) {
             flag_dl_changed = pattern_algos.determine_overall_main_vertex_DL(
                 *pr_graph, map_cluster_main_vertices, main_cluster, other_clusters,
                 vertices_in_long_muon, segments_in_long_muon,
@@ -3907,14 +3958,30 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
 
   
 
+        // vertex_method dv2_* and DV2-MAX gave a point this call: the main
+        // vertex is the DV2-MAX placement (determine_overall_main_vertex_DL),
+        // and none of the original method's vertex refinement below runs for
+        // it -- no kink / junction snap, no improve_vertex (vertex fits,
+        // vertex-activity search, vertex merges), no main-vertex graph audit,
+        // no conn3 stitch.  Only dv2_split_move then moves the vertex onto the
+        // point.  Without a DV2-MAX point (no prediction) the traditional
+        // vertex keeps the original refinement.
+        const bool dv2_placed = pattern_algos.is_dv2() && pattern_algos.m_dv2_target_valid;
+        if (final_main_vertex && dv2_placed &&
+            pattern_algos.dv2_place_main_vertex(*pr_graph, *main_cluster, final_main_vertex, *track_fitter, m_dv)) {
+            std::cout << "After DV2-MAX placement:" << final_main_vertex->fit().point << std::endl; pattern_algos.print_segs_info(*pr_graph, *main_cluster, 0);
+            detg_dump("dv2_place_main_vertex", *pr_graph);
+            dup_stage_census("dv2_place_main_vertex", *pr_graph, *main_cluster);
+        }
         if (final_main_vertex) {
+          if (!dv2_placed) {   // vertex refinement of the original method
             // doc sbnd_xin/docs/pr/50: main-vertex kink-consistency snap --
             // inert unless vertex_kink_snap.  Runs after the overall main
             // vertex is final (either DL or fallback path) and BEFORE the
             // final improve_vertex, so the local optimizer polishes a
             // corner-anchored trajectory.
             if (pattern_algos.snap_main_vertex_to_kink(*pr_graph, *main_cluster, final_main_vertex,
-                                                       *track_fitter, m_dv, particle_data(), m_recomb_model)) {
+                                                   *track_fitter, m_dv, particle_data(), m_recomb_model)) {
                 map_cluster_main_vertices[main_cluster] = final_main_vertex;
                 detg_dump("snap_main_vertex_to_kink", *pr_graph);
                 dup_stage_census("snap_main_vertex_to_kink", *pr_graph, *main_cluster);
@@ -3970,6 +4037,7 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 detg_dump("conn3_stitch", *pr_graph);
                 dup_stage_census("conn3_stitch", *pr_graph, *main_cluster);
             }
+          }   // !dv2_placed
 
             // doc sbnd_xin/docs/pr/51 round 4: diagnostic-only rough-path probe
             // -- inert unless rough_path_probe.  Runs right after the audit
@@ -4756,6 +4824,10 @@ void TaggerCheckNeutrino::run_dual_chain_off_pass(const PR::PatternAlgorithms& p
 
     // Own PatternAlgorithms: identical configuration, exclusion off, quiet.
     PR::PatternAlgorithms pattern_algos = prod_algos;
+    // The OFF pass is an SCN-era aid of the original method (visit() skips it
+    // for vertex_method dv2_*); its DL call passes the SCN weights, so it must
+    // never take the DV2-MAX path.
+    pattern_algos.m_vertex_method = PR::PatternAlgorithms::VertexMethod::original;
     // WCT_DUAL_CHAIN_OFF_EXCL=1: duplicate-fidelity debug switch (sec 5.7.3) --
     // the OFF pass keeps production's exclusion setting, so its vertex must
     // equal production's event by event.  Never a cfg key.

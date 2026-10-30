@@ -52,8 +52,13 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // dl_vtx_dump (ai-helper issue 35): record the DL-vertex network calls into
     // tracking-pr.root (T_dlvtx_call / T_dlvtx_cloud); recording only, default off.
     // pr_knobs: TaggerCheckNeutrino keys merged over the production bag (experiments only).
-    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={})::
+    // vertex_method / dv2_bundle: the neutrino vertexing method, see clus.jsonnet pr()
+    // ('dv2_split_move' = default; 'dv2_snap' | 'dv2_split'; 'original' = the
+    // pre-DV2-MAX production chain).
+    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/r7_cloud/bundle.json')::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
+                      vertex_method=vertex_method, dv2_bundle=dv2_bundle,
                       pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee),
                       particle_dataset=pds.particle_dataset, extra_uses=pds.all,
                       beam_window=$.beam_window),

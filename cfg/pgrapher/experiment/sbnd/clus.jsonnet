@@ -1006,6 +1006,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // but does not configure the writer's sce_field / dl_vtx_dump (the
               // dl_vtx_dump argument does both); T_dlvtx_call.truth_sce_applied says which.
               tcn_overrides={},
+              // Neutrino vertexing method (TaggerCheckNeutrino vertex_method):
+              //   'original'        the production chain (SCN net + re-rank, dual
+              //                     chain, kink/junction snaps, improve_vertex,
+              //                     graph audit, conn3 stitch)
+              //   'dv2_snap'        DV2-MAX point -> nearest PR-graph vertex
+              //   'dv2_split'       DV2-MAX point -> nearest PR-graph vertex or
+              //                     trajectory-fit point (a fit point splits its segment)
+              //   'dv2_split_move'  as dv2_split (reusing a graph vertex within
+              //                     1.5 cm), then the vertex is moved onto the point
+              // The dv2_* methods run only the DV2-MAX model (dv2_bundle) and that
+              // placement; none of the original vertex steps.  SBND default:
+              // 'dv2_split_move'.  'original' => both keys omitted => the compiled
+              // config is byte-identical to the pre-DV2-MAX production config.
+              // (The C++ default stays 'original', so other detectors are
+              // unchanged.)  A vertex_method / dv2_bundle in tcn_overrides wins (as
+              // it does in the C++ config); the name check and the Trun provenance
+              // read that effective value.
+              vertex_method='dv2_split_move',
+              dv2_bundle='dv2max/r7_cloud/bundle.json',
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -2374,6 +2393,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
         local beam_gate = beam_window_only && beam_window[1] > beam_window[0],
+        // The vertexing method TaggerCheckNeutrino really gets: tcn_overrides is
+        // merged last into its config, so an override wins over the argument.
+        local vm_eff = if std.objectHas(tcn_overrides, 'vertex_method') then tcn_overrides.vertex_method else vertex_method,
+        local dv2_bundle_eff = if std.objectHas(tcn_overrides, 'dv2_bundle') then tcn_overrides.dv2_bundle else dv2_bundle,
+        assert std.member(['original', 'dv2_snap', 'dv2_split', 'dv2_split_move'], vm_eff) :
+            "vertex_method must be 'original', 'dv2_snap', 'dv2_split' or 'dv2_split_move', got '%s'" % vm_eff,
         local dv = detector_volumes(anodes, '', pos_offset_on),
         local pcts = pctransforms(dv),
         // DetectorVolumes implements IFiducial -- used by MakeFiducialUtils / the
@@ -2885,6 +2910,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
+                  [if vm_eff != 'original' then 'vertex_method']: vm_eff,   // checked by the pr() object assert
+                  [if vm_eff != 'original' then 'dv2_bundle']: dv2_bundle_eff,
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
@@ -2978,7 +3005,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         bdt_weights_dir: bdt_weights_dir,
                         numu_xgboost_xml: numu_xgboost_xml,
                         nue_xgboost_xml: nue_xgboost_xml,
-                        dl_weights: dl_weights,
+                        // the vertex model that ran: the SCN weights (original),
+                        // else '<vertex_method>:<dv2_bundle>'
+                        dl_weights: if vm_eff == 'original' then dl_weights
+                                    else vm_eff + ':' + dv2_bundle_eff,
                         trackfitting_config: trackfitting_config_file,
                     } + provenance_extra,
                 },
