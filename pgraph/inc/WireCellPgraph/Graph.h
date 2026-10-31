@@ -48,7 +48,11 @@ namespace WireCell {
             // return a topological sort of the graph as per Kahn algorithm.
             std::vector<Node*> sort_kahn();
 
-            // Excute the graph until nodes stop delivering
+            // Excute the graph until nodes stop delivering.  The
+            // sink-most runnable node is always fired next ("drain
+            // toward sinks"), minimizing data held on edges.  It is
+            // found from an event-driven, rank-ordered ready set,
+            // O((V+E) log V) overall.
             bool execute();
 
             // Excute parents of node or if any parent is not ready,

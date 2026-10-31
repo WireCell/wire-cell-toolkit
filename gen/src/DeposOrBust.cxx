@@ -40,7 +40,9 @@ class EmptyFrame : public IFrame {
         return dummy;
     }
     virtual ITrace::shared_vector traces() const {
-        return nullptr;
+        // Empty, not null: frame consumers dereference this.
+        static ITrace::shared_vector dummy = std::make_shared<ITrace::vector>();
+        return dummy;
     }
 
     virtual int ident() const { return _ident; }

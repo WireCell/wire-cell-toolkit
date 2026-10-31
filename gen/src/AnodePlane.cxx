@@ -7,6 +7,7 @@
 #include "WireCellUtil/Exceptions.h"
 
 #include "WireCellIface/IFieldResponse.h"
+#include "WireCellIface/IDriftPlanes.h"
 #include "WireCellIface/IWireSchema.h"
 #include "WireCellAux/SimpleWire.h"
 #include "WireCellAux/SimpleChannel.h"
@@ -64,6 +65,9 @@ WireCell::Configuration Gen::AnodePlane::default_configuration() const
     // - response will be used instead.  Along with wires, these
     // - determine the sensitive bounding box of the AnodeFaces.
     //
+    // Instead of "faces", "drift_planes" may name an IDriftPlanes
+    // component which then provides them.
+    //
     // eg: faces: [
     //       {response: 10*wc.cm - 6*wc.mm, 2.5604*wc.m},
     //       null,
@@ -71,6 +75,9 @@ WireCell::Configuration Gen::AnodePlane::default_configuration() const
 
     cfg["faces"][0] = Json::nullValue;
     cfg["faces"][1] = Json::nullValue;
+
+    // Name of an IDriftPlanes to provide the faces instead of "faces".
+    put(cfg, "drift_planes", "");
 
     return cfg;
 }
@@ -120,6 +127,15 @@ void Gen::AnodePlane::configure(const WireCell::Configuration& cfg)
     }
 
     auto jfaces = cfg["faces"];
+    const string dp_tn = get<string>(cfg, "drift_planes", "");
+    if (!dp_tn.empty()) {
+        for (const auto& jface : jfaces) {
+            if (!jface.isNull()) {
+                raise<ValueError>("AnodePlane: give \"faces\" or \"drift_planes\", not both");
+            }
+        }
+        jfaces = Factory::find_tn<IDriftPlanes>(dp_tn)->faces(m_ident);
+    }
     if (jfaces.isNull() or jfaces.empty() or (jfaces[0].isNull() and jfaces[1].isNull())) {
         log->critical("at least two faces need to be defined, got:\n{}", jfaces);
         THROW(ValueError() << errmsg{"AnodePlane: error in configuration"});

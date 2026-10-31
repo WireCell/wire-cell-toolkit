@@ -51,6 +51,7 @@
 #include "WireCellIface/IDiffuser.h"
 #include "WireCellIface/IDiffusion.h"
 #include "WireCellIface/IDrifter.h"
+#include "WireCellIface/IDriftPlanes.h"
 #include "WireCellIface/IDuctor.h"
 #include "WireCellIface/IFaninNode.h"
 #include "WireCellIface/IFanoutNode.h"
@@ -161,6 +162,7 @@ IDepoSource::~IDepoSource() {}
 IDiffuser::~IDiffuser() {}
 IDiffusion::~IDiffusion() {}
 IDrifter::~IDrifter() {}
+IDriftPlanes::~IDriftPlanes() {}
 IDuctor::~IDuctor() {}
 IFaninNodeBase::~IFaninNodeBase() {}
 IFanoutNodeBase::~IFanoutNodeBase() {}

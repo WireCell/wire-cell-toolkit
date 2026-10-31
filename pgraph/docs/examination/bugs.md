@@ -2,6 +2,10 @@
 
 Examined: 2026-04-12
 Scope: All headers in `inc/WireCellPgraph/` and sources in `src/`
+Updated: 2026-10-30 for the rank-ordered scheduler now in `Graph::execute()`
+(B9 resolved, B7 note added).  The former TopoGrapher scheduler replaced the rescan
+loop and TopoGrapher was removed.  Line numbers in sections not revised
+are from the original examination.
 
 ---
 
@@ -204,6 +208,9 @@ partial ordering missing the cycle participants. The `execute()` method would
 then run only the non-cyclic nodes, producing silently incorrect/incomplete
 results without any error or warning.
 
+(2026-10-30: still true of the ready-set `execute()`: a node with no rank,
+because `sort_kahn()` dropped it, is never offered to the ready set.)
+
 ---
 
 ## B8. Graph::sort_kahn — Only Considers Edge-Connected Nodes (Severity: Low)
@@ -226,9 +233,13 @@ connectivity checking where `sort_kahn()` could silently drop nodes.
 
 ---
 
-## B9. Graph::execute — Unreachable Return Statement (Severity: Cosmetic)
+## B9. Graph::execute — Unreachable Return Statement (Severity: Cosmetic) — RESOLVED
 
-**File:** `src/Graph.cxx:147`
+**Resolved 2026-10-30.**  The `while (true)` loop was replaced by the ready-set
+loop `while (!ready.empty())`, whose trailing `return true` is reached.  The
+text below describes the original code.
+
+**File (original):** `src/Graph.cxx:147`
 
 ```cpp
 while (true) {
