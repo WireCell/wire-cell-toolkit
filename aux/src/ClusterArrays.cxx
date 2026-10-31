@@ -15,6 +15,8 @@
 
 #include "WireCellAux/ClusterArrays.h"
 #include "WireCellUtil/Exceptions.h"
+#include "WireCellUtil/Logging.h"
+#include "WireCellUtil/Units.h"
 #include "WireCellUtil/GraphTools.h"
 
 // for cluster reconstitution
@@ -326,6 +328,8 @@ static void init_wire(const cluster_graph_t& graph,
     wrow[++col] = p2.z();
 }
 
+static const size_t max_stored_corners = 12;   // the 2*12 corner columns of a blob row, below
+
 static void init_blob(const cluster_graph_t& graph,
                       node_row_t brow, cluster_vertex_t bvtx)
 {
@@ -373,12 +377,53 @@ static void init_blob(const cluster_graph_t& graph,
     //// N with columns (rowid, y, z).
 
     const auto& corners = shape.corners();
+    if (corners.size() > max_stored_corners) { // pr_ml doc 40 sec 10: writing them all overruns the row
+        std::vector<Point> pos;
+        pos.reserve(corners.size());
+        for (const auto& c : corners) {
+            pos.push_back(coords.ray_crossing(c.first, c.second));
+        }
+        const auto kept = ClusterArrays::stored_corners(pos);
+        Log::logger("ClusterArrays")->warn("blob ident {} slice {}: {} corners, storing {}",
+                                           ident, islice->ident(), corners.size(), kept.size());
+        brow[col++] = kept.size();
+        for (const auto& p : kept) {
+            brow[col++] = p[1];
+            brow[col++] = p[2];
+        }
+        return;
+    }
     brow[col++] = corners.size();
     for (const auto& c : corners) {
         auto pos = coords.ray_crossing(c.first, c.second);
         brow[col++] = pos[1];
         brow[col++] = pos[2];
     }
+}
+
+std::vector<Point> ClusterArrays::stored_corners(const std::vector<Point>& corners)
+{
+    if (corners.size() <= max_stored_corners) {
+        return corners;
+    }
+    const double tol = 0.1 * units::mm;
+    std::vector<Point> kept;
+    for (const auto& p : corners) {
+        bool dup = false;
+        for (const auto& q : kept) {
+            if ((p - q).magnitude() < tol) {
+                dup = true;
+                break;
+            }
+        }
+        if (!dup) {
+            kept.push_back(p);
+        }
+    }
+    if (kept.size() > max_stored_corners) {
+        kept.resize(max_stored_corners);
+    }
+    return kept;
 }
 
 void ClusterArrays::to_arrays(const cluster_graph_t& cin_graph,

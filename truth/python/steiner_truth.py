@@ -483,6 +483,8 @@ def main():
     ap.add_argument("--tau-off-pitch", type=float, default=None, help="tau_off in wire pitches instead (doc 12: 5)")
     ap.add_argument("--d-cap-mm", type=float, default=25.0, help="the C++ labeler's d_traj cap (cross-check)")
     ap.add_argument("--tie-order", action="store_true", help="order equal-time depos along the track (pr_ml doc 25 sec 7; default off)")
+    ap.add_argument("--xcheck-skip-near-x", type=float, default=None, help="leave points within --xcheck-skip-mm of this x (mm; the cathode: the C++ polylines stop there, this one crosses it, pr_ml doc 33 sec 8.15 / doc 37 sec 9) out of the d_traj cross-check; labels unchanged; default off")
+    ap.add_argument("--xcheck-skip-mm", type=float, default=15.0)
     ap.add_argument("--event", required=True)
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -551,6 +553,8 @@ def main():
         # daughters' depos into one polyline (zigzag), so its d_traj is <= the per-particle distance
         for nm, sel0 in (("single", ~multi), ("folded", multi)):
             both = lab & np.isfinite(dpy) & sel0
+            if a.xcheck_skip_near_x is not None:
+                both = both & (np.abs(CP[:, 0] - a.xcheck_skip_near_x) > a.xcheck_skip_mm)
             dd = np.abs(np.minimum(dpy[both], cap) - np.minimum(CD[both], cap))
             res["cross_check_d_traj"][nm] = {
                 "npoints": int(both.sum()), "frac_within_0.1mm": float((dd <= 0.1).mean()) if both.any() else None,

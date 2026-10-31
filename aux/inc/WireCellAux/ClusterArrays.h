@@ -94,6 +94,13 @@ namespace WireCell::Aux::ClusterArrays {
 
 
     // Fill array sets from cluster.
+    // The corners a blob row stores: the input when it has room (at most 12),
+    // else the input with points within 0.1 mm of an earlier one merged, cut to
+    // the first 12 if that is still too many.  At the corner of an anode the
+    // grid lines meet almost at one point and a blob can have more crossings
+    // than a convex shape of its strips has corners (FD-VD, pr_ml doc 40 sec 10).
+    std::vector<Point> stored_corners(const std::vector<Point>& corners);
+
     void to_arrays(const cluster_graph_t& cgraph,
                    node_array_set_t& nas, edge_array_set_t& eas);
 

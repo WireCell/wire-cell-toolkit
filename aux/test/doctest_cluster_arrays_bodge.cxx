@@ -123,3 +123,34 @@ TEST_CASE("to_arrays leaves its input intact and is repeatable")
     REQUIRE(nas1.count('a'));
     CHECK(nas1.at('a').shape()[0] == 7);
 }
+
+// pr_ml doc 40 sec 10: a blob at the corner of an FD-VD anode has 13 corners, many coincident (the grid lines
+// meet almost at one point there), and the blob row holds 12: to_arrays aborted, a whole anode's imaging was lost.
+// The corners of the first such blob seen, numu_b11019_e5 anode 49, in mm: 3 distinct points within 0.1 mm.
+TEST_CASE("stored_corners: at most 12, near-duplicates merged only when over 12")
+{
+    const std::vector<Point> blob13 = {
+        {0, -5071.6931, 9013.7252}, {0, -5071.6879, 9013.7252}, {0, -5062.8545, 9013.7252}, {0, -5071.6931, 9013.7343},
+        {0, -5071.6931, 9029.0342}, {0, -5062.8223, 9013.7252}, {0, -5071.6931, 9028.9604}, {0, -5071.6718, 9028.9973},
+        {0, -5071.6931, 9013.7252}, {0, -5071.6931, 9013.7252}, {0, -5071.6931, 9029.0247}, {0, -5071.6876, 9029.0247},
+        {0, -5071.6560, 9029.0247}};
+    const auto kept = ClusterArrays::stored_corners(blob13);
+    CHECK(kept.size() == 3);
+    CHECK(kept[0].y() == blob13[0].y());   // first of each group, in order
+    CHECK(kept[0].z() == blob13[0].z());
+    CHECK(kept[1].y() == blob13[2].y());
+    CHECK(kept[2].z() == blob13[4].z());
+
+    // 12 or fewer: returned as they are, coincident or not: such a blob's output does not change
+    std::vector<Point> blob12(12, Point(0, 1, 2));
+    const auto kept12 = ClusterArrays::stored_corners(blob12);
+    REQUIRE(kept12.size() == 12);
+    for (const auto& p : kept12) { CHECK(p.y() == 1); }
+
+    // more than 12 distinct points: the first 12
+    std::vector<Point> far;
+    for (int i = 0; i < 20; ++i) { far.push_back(Point(0, 10.0 * i, 0)); }
+    const auto kept20 = ClusterArrays::stored_corners(far);
+    REQUIRE(kept20.size() == 12);
+    CHECK(kept20[11].y() == 110.0);
+}
