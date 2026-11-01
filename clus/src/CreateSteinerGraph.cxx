@@ -86,6 +86,22 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
     m_grapher_config.path_filter_own_wpid =
         get(cfg, "path_filter_own_wpid", m_grapher_config.path_filter_own_wpid);
     if (m_grapher_config.path_filter_own_wpid) log->debug("configure: path_filter_own_wpid on");
+    // pr_ml doc 36 sec 2.2, all three C++ default off: absent keys => nothing is opened, read or skipped => byte-identical.
+    m_grapher_config.path_filter_skip = get(cfg, "path_filter_skip", m_grapher_config.path_filter_skip);
+    if (m_grapher_config.path_filter_skip) log->info("configure: path_filter_skip on");
+    m_terminals_inject_file = get(cfg, "terminals_inject_file", m_terminals_inject_file);
+    if (!m_terminals_inject_file.empty()) {
+        std::ifstream fin(m_terminals_inject_file);
+        if (!fin) raise<IOError>("CreateSteinerGraph: cannot read terminals_inject_file %s", m_terminals_inject_file);
+        m_terminal_injection = parse_terminal_injection(fin);
+        log->info("configure: terminals_inject_file {}: {} clusters", m_terminals_inject_file, m_terminal_injection.size());
+    }
+    m_terminals_dump_file = get(cfg, "terminals_dump_file", m_terminals_dump_file);
+    if (!m_terminals_dump_file.empty()) {
+        m_terminals_dump = std::make_shared<std::ofstream>(m_terminals_dump_file);
+        if (!*m_terminals_dump) raise<IOError>("CreateSteinerGraph: cannot write terminals_dump_file %s", m_terminals_dump_file);
+        log->info("configure: terminals_dump_file {}", m_terminals_dump_file);
+    }
     // doc pdvd/37 R1: cross-blob minimum-separation thinning of the terminal
     // set, in the WCT system of units.  C++ default 0 = no thinning, so a
     // config without the key runs bit-for-bit as before.
@@ -187,6 +203,9 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["terminal_min_separation"] = m_grapher_config.terminal_min_separation;
     // pr_ml doc 34 sec 8.18: false = the historical path filter.
     cfg["path_filter_own_wpid"] = m_grapher_config.path_filter_own_wpid;
+    cfg["path_filter_skip"] = m_grapher_config.path_filter_skip;
+    cfg["terminals_inject_file"] = m_terminals_inject_file;
+    cfg["terminals_dump_file"] = m_terminals_dump_file;
     // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.
@@ -382,6 +401,14 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         t0 = Clock::now();
         Steiner::Grapher sg(new_cluster, m_grapher_config, log);
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] Grapher construction took {} ms", tag, MS(Clock::now() - t0).count());
+        if (m_terminals_dump || !m_terminal_injection.empty()) {   // pr_ml doc 36 sec 2.2
+            const int tkey = src->get_cluster_id();
+            const auto inj = m_terminal_injection.find(tkey);
+            sg.set_terminal_io(inj == m_terminal_injection.end() ? nullptr : &inj->second, m_terminals_dump.get(), tkey);
+            if (m_terminals_dump) {
+                *m_terminals_dump << "C " << tkey << ' ' << src->ident() << ' ' << (is_main ? 1 : 0) << ' ' << new_cluster.npoints() << '\n';
+            }
+        }
 
         auto& graph = sg.get_graph("ctpc_ref_pid");
         SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
@@ -536,6 +563,7 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         }
     }
 
+    if (m_terminals_dump) m_terminals_dump->flush();
     if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: visit() TOTAL took {} ms", MS(Clock::now() - t_visit_start).count());
 
 }

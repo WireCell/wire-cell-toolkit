@@ -16,6 +16,7 @@
 #include "make_graphs.h"
 #include "connect_graphs.h"
 #include <cstdio>
+#include <iomanip>
 #include <iostream>
 // for Grouping::get_nticks_per_slice() -- the adjacent-slice step (doc pr/29 D12)
 #include "WireCellClus/Facade_Grouping.h"
@@ -446,6 +447,22 @@ void Steiner::Grapher::create_steiner_tree(
     vertex_set steiner_terminals = find_steiner_terminals(graph_name, disable_dead_mix_cell);
     SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: found {} initial steiner terminals", steiner_terminals.size());
     dump_terminals("P1_find", steiner_terminals);
+    // pr_ml doc 36 sec 2.2: with neither set (the default) nothing below runs and the rule's path is untouched.
+    terminal_dump_cluster();
+    terminal_dump_phase("P1", steiner_terminals);
+    if (m_terminal_inject) {
+        vertex_set injected;
+        for (const auto& [idx, score] : m_terminal_inject->score) {
+            (void) score;
+            if (idx >= (size_t) m_cluster.npoints()) {
+                raise<ValueError>("create_steiner_tree: injected terminal %d of cluster %d, which has %d points",
+                                  idx, m_terminal_key, m_cluster.npoints());
+            }
+            injected.insert(idx);
+        }
+        steiner_terminals.swap(injected);
+        terminal_dump_phase("P1i", steiner_terminals);
+    }
 
     // std::cout << "Test1: " << steiner_terminals.size() << std::endl;
 
@@ -466,19 +483,21 @@ void Steiner::Grapher::create_steiner_tree(
                    original_size.size(), steiner_terminals.size(),
                    m_config.terminal_wire_tol, m_config.terminal_adjacent_slice);
         dump_terminals("P2_refcluster", steiner_terminals);
+        terminal_dump_phase("P2", steiner_terminals);
     }
 
     // std::cout << "Test2: " << steiner_terminals.size() << std::endl;
 
 
     // Phase 3: Apply path-based filtering if path is provided
-    if (!path_point_indices.empty()) {
+    if (!path_point_indices.empty() && !m_config.path_filter_skip) {
         vertex_set pre_path_size = steiner_terminals;
         steiner_terminals = filter_by_path_constraints(steiner_terminals, path_point_indices);
         SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: path filtering: {} -> {} terminals",
                    pre_path_size.size(), steiner_terminals.size());
         dump_terminals("P3_path", steiner_terminals);
     }
+    terminal_dump_phase("P3", steiner_terminals);
 
     // std::cout << "Test3: " << steiner_terminals.size() << std::endl;
 
@@ -503,10 +522,17 @@ void Steiner::Grapher::create_steiner_tree(
                             m_config.terminal_min_separation / units::cm);
         dump_terminals("P3b_thin", steiner_terminals);
     }
+    terminal_dump_phase("P3b", steiner_terminals);
+    // pr_ml doc 36 sec 2.2: the count is matched last, on the set the router gets before the extreme points of Phase 4.
+    if (m_terminal_inject) {
+        steiner_terminals = keep_best_terminals(steiner_terminals, *m_terminal_inject);
+        terminal_dump_phase("P3n", steiner_terminals);
+    }
 
     // Phase 4: Add extreme points
     vertex_set extreme_points = get_extreme_points_for_reference(reference_cluster);
     steiner_terminals.insert(extreme_points.begin(), extreme_points.end());
+    terminal_dump_phase("P4", steiner_terminals);
     SPDLOG_LOGGER_TRACE(log, "create_steiner_tree: added {} extreme points, total terminals: {}",
                extreme_points.size(), steiner_terminals.size());
 
@@ -703,6 +729,32 @@ int Steiner::Grapher::nticks_per_slice_or_1(int apa, int face) const
     // A degenerate 0 or negative span would make the +-offset loop test the
     // point's own slice twice; 1 is the historical no-op.
     return face_it->second > 0 ? face_it->second : 1;
+}
+
+// pr_ml doc 36 sec 2.2: every point of the retiled cluster, which is not persisted, at full precision.
+void Steiner::Grapher::terminal_dump_cluster() const
+{
+    if (!m_terminal_dump) return;
+    auto& os = *m_terminal_dump;
+    os << std::setprecision(17);
+    const int npts = m_cluster.npoints();
+    for (int i = 0; i < npts; ++i) {
+        const auto p = m_cluster.point3d(i);
+        const auto wpid = m_cluster.wire_plane_id(i);
+        const auto* blob = m_cluster.blob_with_point(i);
+        os << "P " << m_terminal_key << ' ' << i << ' ' << p.x() << ' ' << p.y() << ' ' << p.z() << ' '
+           << wpid.apa() << ' ' << wpid.face() << ' ' << (blob ? blob->slice_index_min() : -1);
+        for (int plane = 0; plane < 3; ++plane) os << ' ' << m_cluster.charge_value(i, plane);
+        os << '\n';
+    }
+}
+
+void Steiner::Grapher::terminal_dump_phase(const char* phase, const vertex_set& terminals) const
+{
+    if (!m_terminal_dump) return;
+    for (const auto idx : terminals) {
+        *m_terminal_dump << "T " << m_terminal_key << ' ' << phase << ' ' << idx << '\n';
+    }
 }
 
 Steiner::Grapher::vertex_set Steiner::Grapher::filter_by_path_constraints(

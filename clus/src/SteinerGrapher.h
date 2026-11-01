@@ -19,7 +19,9 @@
 #include "WireCellIface/IPCTreeMutate.h"
 
 #include "WireCellUtil/Logging.h"
+#include "WireCellClus/SteinerTerminalInjection.h"
 
+#include <ostream>
 #include <set>
 #include <map>
 
@@ -117,6 +119,10 @@ namespace WireCell::Clus::Steiner {
             /// (plane, face, apa) path tree does not count as close in 2-D.  false (the default) = the historical behaviour, bit for bit:
             /// a wrong wire plane and a -1 that passes as close, which deletes terminals in whole anodes of a multi-anode cluster.
             bool path_filter_own_wpid{false};
+
+            /// pr_ml doc 36 sec 2.2 (E1-n).  Phase 3 of create_steiner_tree, filter_by_path_constraints, is skipped.  false (the
+            /// default) = the historical behaviour.
+            bool path_filter_skip{false};
 
             /// doc pdvd/114.  Blank-plane admission policy for the Phase-1
             /// terminal candidates of one blob, applied BEFORE the per-blob
@@ -232,6 +238,16 @@ namespace WireCell::Clus::Steiner {
 
         /// Store a point cloud by std::move() in our cluster's local PCs.
         void put_point_cloud(PointCloud::Dataset&& pc, const std::string& name = "default");
+
+        /// pr_ml doc 36 sec 2.2: for the next create_steiner_tree, Phase-1 terminals from a file and / or a dump of the retiled
+        /// cluster and of each phase's terminals, under this cluster key.  Null (the default) = the rule, nothing written.
+        /// Neither pointer is owned; both must outlive the call.
+        void set_terminal_io(const InjectedTerminals* inject, std::ostream* dump, int key)
+        {
+            m_terminal_inject = inject;
+            m_terminal_dump = dump;
+            m_terminal_key = key;
+        }
 
         /// Store a point cloud by copy in our cluster's local PCs.
         void put_point_cloud(const PointCloud::Dataset& pc, const std::string& name = "default");
@@ -443,6 +459,11 @@ namespace WireCell::Clus::Steiner {
         /// Flag indicating which vertices in the reduced steiner graph are actual terminals
         /// vs. intermediate Steiner points (matches prototype flag_steiner_terminal)
         std::vector<bool> m_flag_steiner_terminal;
+        const InjectedTerminals* m_terminal_inject{nullptr};
+        std::ostream* m_terminal_dump{nullptr};
+        int m_terminal_key{-1};
+        void terminal_dump_cluster() const;
+        void terminal_dump_phase(const char* phase, const vertex_set& terminals) const;
         
         /// Mapping from original graph vertex indices to reduced steiner graph indices
         /// (matches prototype map_old_new_indices)

@@ -11,6 +11,10 @@
 
 #include "SteinerGrapher.h"
 
+#include <fstream>
+#include <memory>
+#include <string>
+
 #include "WireCellClus/IEnsembleVisitor.h"
 #include "WireCellClus/Facade_Cluster.h"
 #include "WireCellClus/Facade_Grouping.h"
@@ -75,6 +79,13 @@ namespace WireCell::Clus::Steiner {
         std::vector<std::string> m_skip_flags;
 
         Grapher::Config m_grapher_config;
+
+        // pr_ml doc 36 sec 2.2: Phase-1 terminals from a file (WireCellClus/SteinerTerminalInjection.h) and a dump of the retiled
+        // cluster and of the terminals of each phase.  Empty = off.
+        std::string m_terminals_inject_file;
+        TerminalInjection m_terminal_injection;
+        std::string m_terminals_dump_file;
+        std::shared_ptr<std::ofstream> m_terminals_dump;
 
 
     public:
