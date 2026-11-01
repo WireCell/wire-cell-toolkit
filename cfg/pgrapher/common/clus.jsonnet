@@ -1626,6 +1626,8 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 terminal_wire_tol=0, terminal_adjacent_slice=false,
                 edge_charge_forward_dead_mix=false, terminal_min_separation=0,
                 path_filter_own_wpid=false,
+                // pr_ml doc 36 sec 2.2-2.3 (E1; toolkit 53de4bf0).  C++ defaults: false / "" / "".  path_filter_skip skips Phase 3 (filter_by_path_constraints); terminals_inject_file replaces Phase 1 by the file's terminals; terminals_dump_file writes the Steiner-step cluster and each phase's terminals (the refresh pass appends .refresh).  Keys omitted when off => byte-identical config.
+                path_filter_skip=false, terminals_inject_file="", terminals_dump_file="",
                 skip_flags=[],
                 // doc pdvd/114: blank-plane admission policy for the terminal
                 // candidates.  C++ default "wcp" (no policy).  null => keys
@@ -1695,6 +1697,10 @@ clustering_recovering_bundle(name="", graph_name="relaxed") :: {
                 // pr_ml doc 34 sec 8.18.  C++ default false.  true = the Steiner path filter reads the terminal's own wire plane and
                 // an empty path tree is not close.  Key omitted when false => byte-identical pre-knob config.
                 [if path_filter_own_wpid then 'path_filter_own_wpid']: true,
+                // pr_ml doc 36 sec 2.2-2.3 (E1; toolkit 53de4bf0).  C++ defaults: false / "" / "".  path_filter_skip skips Phase 3 (filter_by_path_constraints); terminals_inject_file replaces Phase 1 by the file's terminals; terminals_dump_file writes the Steiner-step cluster and each phase's terminals (the refresh pass appends .refresh).  Keys omitted when off => byte-identical config.
+                [if path_filter_skip then 'path_filter_skip']: true,
+                [if terminals_inject_file != "" then 'terminals_inject_file']: terminals_inject_file,
+                [if terminals_dump_file != "" then 'terminals_dump_file']: terminals_dump_file,
                 // doc pdvd/114.  C++ default "wcp".  "prefer3" drops a blob's
                 // two-plane candidates when the blob holds a three-plane one;
                 // "nearby" drops them when a three-plane candidate of the

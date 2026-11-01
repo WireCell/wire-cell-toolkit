@@ -74,6 +74,10 @@ function(
     retile_deghost_writeback = null,
     // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
     steiner_path_filter_own_wpid = false,
+    // pr_ml doc 36 sec 2.2-2.3 (E1; toolkit 53de4bf0).  C++ defaults: false / "" / "".  path_filter_skip skips Phase 3 (filter_by_path_constraints); terminals_inject_file replaces Phase 1 by the file's terminals; terminals_dump_file writes the Steiner-step cluster and each phase's terminals (the refresh pass appends .refresh).  Keys omitted when off => byte-identical config.
+    steiner_path_filter_skip = false,
+    steiner_terminals_inject_file = "",
+    steiner_terminals_dump_file = "",
     // pr_ml doc 32 sec C.3: gapfill skips kept cells inside a base cell (C++ true since doc 32 sec C.4; false = doc 131).  null => key omitted.
     retile_deghost_skip_base_subcells = null,
 )
@@ -112,6 +116,9 @@ local pr = pr_maker.pr(anodes, pds, pipeline_names, dump=true, tensor_outname=sa
                        retile_deghost_reach_cm=retile_deghost_reach_cm,
                        retile_deghost_writeback=retile_deghost_writeback,
                        steiner_path_filter_own_wpid=steiner_path_filter_own_wpid,
+                       steiner_path_filter_skip=steiner_path_filter_skip,
+                       steiner_terminals_inject_file=steiner_terminals_inject_file,
+                       steiner_terminals_dump_file=steiner_terminals_dump_file,
                        retile_deghost_skip_base_subcells=retile_deghost_skip_base_subcells);
 
 local graph = g.pipeline([source, pr]);

@@ -1222,6 +1222,10 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
               steiner_terminal_min_separation=0,
               // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
               steiner_path_filter_own_wpid=false,
+              // pr_ml doc 36 sec 2.2-2.3 (E1; toolkit 53de4bf0).  C++ defaults: false / "" / "".  path_filter_skip skips Phase 3 (filter_by_path_constraints); terminals_inject_file replaces Phase 1 by the file's terminals; terminals_dump_file writes the Steiner-step cluster and each phase's terminals (the refresh pass appends .refresh).  Keys omitted when off => byte-identical config.
+              steiner_path_filter_skip=false,
+              steiner_terminals_inject_file="",
+              steiner_terminals_dump_file="",
               // doc sbnd_xin/pr/150: the PDHD/PDVD Steiner seed knobs, threaded into
               // BOTH CreateSteinerGraph instances (steiner, steiner_refresh) exactly
               // as pdhd/pr.jsonnet and protodunevd/pr.jsonnet pass them.
@@ -2828,6 +2832,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
                                 path_filter_own_wpid=steiner_path_filter_own_wpid,
+                                path_filter_skip=steiner_path_filter_skip,
+                                terminals_inject_file=steiner_terminals_inject_file,
+                                terminals_dump_file=steiner_terminals_dump_file,
                                 // doc sbnd_xin/pr/150 study knobs; FLIPPED by doc sbnd_xin/118 (owner 2026-09-20).
                                 terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,
                                 terminal_blank_plane_radius=steiner_blank_plane_radius,
@@ -2856,6 +2863,9 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0,
                                 edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                                 terminal_min_separation=steiner_terminal_min_separation * wc.cm,   // doc sbnd_xin/pr/149 amendment 1
                                 path_filter_own_wpid=steiner_path_filter_own_wpid,
+                                path_filter_skip=steiner_path_filter_skip,
+                                terminals_inject_file=steiner_terminals_inject_file,
+                                terminals_dump_file=(if steiner_terminals_dump_file == "" then "" else steiner_terminals_dump_file + ".refresh"),
                                 // doc sbnd_xin/pr/150: the same seed knobs as the first pass,
                                 // and the same doc sbnd_xin/118 flip (owner 2026-09-20).
                                 terminal_blank_plane_mode=if steiner_blank_plane_mode == null then 'prefer3' else steiner_blank_plane_mode,

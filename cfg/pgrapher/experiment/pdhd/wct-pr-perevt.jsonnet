@@ -808,6 +808,10 @@ function(
     steiner_terminal_adjacent_slice = true,
     // pr_ml doc 34 sec 8.18: Steiner path filter with the terminal's own wire plane, an empty path tree not close.  C++ default false; key omitted when false => byte-identical config.
     steiner_path_filter_own_wpid = false,
+    // pr_ml doc 36 sec 2.2-2.3 (E1; toolkit 53de4bf0).  C++ defaults: false / "" / "".  path_filter_skip skips Phase 3 (filter_by_path_constraints); terminals_inject_file replaces Phase 1 by the file's terminals; terminals_dump_file writes the Steiner-step cluster and each phase's terminals (the refresh pass appends .refresh).  Keys omitted when off => byte-identical config.
+    steiner_path_filter_skip = false,
+    steiner_terminals_inject_file = "",
+    steiner_terminals_dump_file = "",
     // Steiner EDGE-WEIGHT charge fidelity (doc pr/29 D2).  ON at the owner's
     // instruction, same reasoning as the two above: the prototype weights
     // steiner edges with charges computed under the disable_dead_mix_cell this
@@ -4371,6 +4375,9 @@ function(
                              steiner_terminal_wire_tol=steiner_terminal_wire_tol,
                              steiner_terminal_adjacent_slice=steiner_terminal_adjacent_slice,
                              steiner_path_filter_own_wpid=steiner_path_filter_own_wpid,
+                             steiner_path_filter_skip=steiner_path_filter_skip,
+                             steiner_terminals_inject_file=steiner_terminals_inject_file,
+                             steiner_terminals_dump_file=steiner_terminals_dump_file,
                              steiner_edge_charge_forward_dead_mix=steiner_edge_charge_forward_dead_mix,
                              steiner_terminal_min_separation=steiner_terminal_min_sep_cm * wc.cm,
                              steiner_blank_plane_mode=steiner_blank_plane_mode,   // doc pdvd/114
