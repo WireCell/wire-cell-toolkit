@@ -5,6 +5,9 @@
 #include "WireCellIface/IConfigurable.h"
 
 #include "WireCellUtil/NamedFactory.h"
+#include "WireCellUtil/Logging.h"
+
+#include <cmath>
 
 class ClusteringConnect1;
 WIRECELL_FACTORY(ClusteringConnect1, ClusteringConnect1,
@@ -310,18 +313,39 @@ void clustering_connect1(
             dir2 = main_dir;
         }
         else if (cluster->get_length() > 25 * units::cm) {
+            // prototype (ToyClustering_connect.h lines 70-82) divides by
+            // main_dir.Mag() with no guard.  A cluster longer than 25 cm whose
+            // two (5 cm averaged) extreme points coincide has main_dir = 0, and
+            // the 0/0 made dir1/dir2 y,z NaN; the NaN extension points then sent
+            // nanoflann's k-d tree build into endless recursion (stack overflow,
+            // or ~14 GB at SDCC with a large stack: pr_ml doc 44, 3e4 PDHD cosmic
+            // 20069_e0 / 20278_e2).  Bug fix, unconditional (Xin 2026-11-02):
+            // with a zero axis the Hough direction is kept.  A nonzero axis takes
+            // the original arithmetic unchanged.
             dir1 = cluster->vhough_transform(extreme_points.first, 80 * units::cm);
             if (dir1.magnitude() != 0) dir1 = dir1.norm();
             if (fabs(dir1.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
-                dir1.set(dir1.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
-                            (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
+                if (main_dir.magnitude() > 0) {
+                    dir1.set(dir1.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
+                                (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
+                }
+                else {
+                    SPDLOG_LOGGER_WARN(Log::logger("clus"), "connect1: zero extreme-point axis, Hough dir1 kept (cluster length {} mm, {} points)",
+                                       cluster->get_length(), cluster->npoints());
+                }
                 dir1 = dir1 * -1;
             }
             dir2 = cluster->vhough_transform(extreme_points.second, 80 * units::cm);
             if (dir2.magnitude() != 0) dir2 = dir2.norm();
             if (fabs(dir2.angle(drift_dir_abs) - 3.1415926 / 2.) < 5 * 3.1415926 / 180.) {
-                dir2.set(dir2.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
-                            (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
+                if (main_dir.magnitude() > 0) {
+                    dir2.set(dir2.x(), (extreme_points.second.y() - extreme_points.first.y()) / main_dir.magnitude(),
+                                (extreme_points.second.z() - extreme_points.first.z()) / main_dir.magnitude());
+                }
+                else {
+                    SPDLOG_LOGGER_WARN(Log::logger("clus"), "connect1: zero extreme-point axis, Hough dir2 kept (cluster length {} mm, {} points)",
+                                       cluster->get_length(), cluster->npoints());
+                }
             }
             if (dir1.dot(main_dir) > 0) dir1 *= -1;
             if (dir2.dot(dir1) > 0) dir2 *= -1;
@@ -331,6 +355,14 @@ void clustering_connect1(
             dir2 = global_point_cloud->vhough_transform(extreme_points.second, extending_dis);
             if (dir1.dot(main_dir) > 0) dir1 *= -1;
             if (dir2.dot(dir1) > 0) dir2 *= -1;
+        }
+
+        // Log only, changes nothing: a NaN direction from any other path would
+        // reach the k-d tree the same way (pr_ml doc 44).
+        if (!std::isfinite(dir1.x()) || !std::isfinite(dir1.y()) || !std::isfinite(dir1.z()) ||
+            !std::isfinite(dir2.x()) || !std::isfinite(dir2.y()) || !std::isfinite(dir2.z())) {
+            SPDLOG_LOGGER_WARN(Log::logger("clus"), "connect1: non-finite extension direction dir1 ({}, {}, {}) dir2 ({}, {}, {}) (cluster length {} mm, {} points)",
+                               dir1.x(), dir1.y(), dir1.z(), dir2.x(), dir2.y(), dir2.z(), cluster->get_length(), cluster->npoints());
         }
 
         bool flag_add_dir1 = true;
