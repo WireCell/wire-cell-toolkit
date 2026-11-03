@@ -564,24 +564,46 @@ void Graphs::connect_graph_ctpc_with_reference(
     // Store excluded points in cluster cache (matches prototype's excluded_points)
     const_cast<Cluster&>(cluster).set_excluded_points(excluded_points);
 
+    // pr_ml doc 44 sec 8 (3e4 FD-HD nc 20022 e14, SDCC 5157.7192: 13,658 components, five num x num tables = 14.9 GB).
+    // Every pair with a component that the filter above emptied is skipped below, so its table entries stay invalid
+    // and nothing reads them.  The tables therefore cover only the components that kept points ("live"), indexed
+    // j < k in the same increasing order as before: the same pairs are visited in the same order, the
+    // same edges reach the MST graphs and `graph` in the same order, and an MST graph without the isolated (emptied)
+    // vertices has the same spanning trees (Prim never enqueues an unreachable vertex; the root is still the smallest
+    // vertex of its component).  `num`, the original component count, is kept for the directional-analysis test and
+    // the log below.
+    // Compact the per-component clouds in place, order kept: below, j and k index live components only.
+    size_t nlive = 0;
+    for (size_t c = 0; c < num; ++c) {
+        if (pt_clouds[c]->get_num_points() == 0) continue;
+        if (nlive != c) {
+            pt_clouds[nlive] = std::move(pt_clouds[c]);
+            pt_clouds_global_indices[nlive] = std::move(pt_clouds_global_indices[c]);
+        }
+        ++nlive;
+    }
+    pt_clouds.resize(nlive);
+    pt_clouds_global_indices.resize(nlive);
+    SPDLOG_LOGGER_DEBUG(WireCell::Log::logger("clus"),
+                        "ctpc_with_reference: cluster {} components {} with points {} ({} pairs, was {})",
+                        cluster.ident(), num, nlive, nlive * (nlive - (nlive > 0)) / 2, num * (num - 1) / 2);
 
-
-    // Initialize distance metric containers (same structure as baseline)
+    // Initialize distance metric containers (same structure as baseline, live components only)
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
 
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
 
     // Initialize all distances to invalid/infinite
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = 0; k != num; k++) {
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = 0; k != nlive; k++) {
             index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
             index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
             index_index_dis_dir1[j][k] = std::make_tuple(-1, -1, 1e9);
@@ -596,10 +618,9 @@ void Graphs::connect_graph_ctpc_with_reference(
     const double cluster_t0 = needs_transform ? cluster.get_cluster_t0() : 0.0;
 
     // DISTANCE CALCULATION AND CTPC PATH VALIDATION
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = j + 1; k != num; k++) {
-            // Skip pairs where reference filtering emptied a component
-            if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = j + 1; k != nlive; k++) {
+            // (pairs with a component emptied by the reference filtering were skipped here; those components are gone)
 
             // Find closest points between components
             index_index_dis[j][k] = pt_clouds.at(j)->get_closest_points(*pt_clouds.at(k));
@@ -789,9 +810,9 @@ void Graphs::connect_graph_ctpc_with_reference(
 
     // Build MST for basic distances
     {
-        Weighted::Graph temp_graph(num);
-        for (size_t j = 0; j != num; j++) {
-            for (size_t k = j + 1; k != num; k++) {
+        Weighted::Graph temp_graph(nlive);
+        for (size_t j = 0; j != nlive; j++) {
+            for (size_t k = j + 1; k != nlive; k++) {
                 int index1 = j, index2 = k;
                 if (std::get<0>(index_index_dis[j][k]) >= 0) {
                     if (!boost::edge(index1, index2, temp_graph).second) {
@@ -805,9 +826,9 @@ void Graphs::connect_graph_ctpc_with_reference(
 
     // Build MST for directional distances
     {
-        Weighted::Graph temp_graph(num);
-        for (size_t j = 0; j != num; j++) {
-            for (size_t k = j + 1; k != num; k++) {
+        Weighted::Graph temp_graph(nlive);
+        for (size_t j = 0; j != nlive; j++) {
+            for (size_t k = j + 1; k != nlive; k++) {
                 int index1 = j, index2 = k;
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || 
                     std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
@@ -823,8 +844,8 @@ void Graphs::connect_graph_ctpc_with_reference(
     }
 
     // Final graph construction phase
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = j + 1; k != num; k++) {
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = j + 1; k != nlive; k++) {
             // Add short distance connections directly to MST
             if (std::get<2>(index_index_dis[j][k]) < 3 * units::cm) {
                 index_index_dis_mst[j][k] = index_index_dis[j][k];

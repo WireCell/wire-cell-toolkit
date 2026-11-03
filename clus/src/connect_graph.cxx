@@ -302,11 +302,37 @@ void Graphs::connect_graph_with_reference(
     if (cap_on || refb_on) {
         for (size_t i = 0; i < component.size(); ++i) ++comp_size[component[i]];
     }
+
+    // pr_ml doc 44 sec 8 (3e4 FD-HD nc 20022 e14, SDCC 5157.7192: ~13,600 components, the five num x num tables
+    // below held 14.7 GB at the job's peak).  As in connect_graph_ctpc_with_reference: every pair with a component
+    // that the filter above emptied is skipped, so its table entries stay invalid and nothing reads them.  The
+    // per-component clouds are compacted in place, order kept, and j < k below index the components that kept
+    // points; the same pairs are visited in the same order, the same edges reach both MST graphs and `graph` in the
+    // same order, and an MST graph without the isolated (emptied) vertices has the same spanning trees
+    // (doctest_ctpc_compact_mst).  `orig[j]` is the original component id, for comp_size (doc pdvd/138, 141), and
+    // `num`, the original count, is kept for the directional-analysis test and the logs.
+    std::vector<size_t> orig;
+    orig.reserve(num);
+    size_t nlive = 0;
+    for (size_t c = 0; c < num; ++c) {
+        if (pt_clouds[c]->get_num_points() == 0) continue;
+        if (nlive != c) {
+            pt_clouds[nlive] = std::move(pt_clouds[c]);
+            pt_clouds_global_indices[nlive] = std::move(pt_clouds_global_indices[c]);
+        }
+        orig.push_back(c);
+        ++nlive;
+    }
+    pt_clouds.resize(nlive);
+    pt_clouds_global_indices.resize(nlive);
+    SPDLOG_LOGGER_DEBUG(s_log, "connect_graph_with_reference: cluster {} components {} with points {}",
+                        cluster.ident(), num, nlive);
+
     int refb_skipped = 0;
     // true = refuse the bridge between global points g1 (component j) and g2 (component k)
     auto unsupported3d = [&](size_t j, size_t k, int g1, int g2) -> bool {
         if (!refb_on) return false;
-        if (refb_exempt > 0 && std::min(comp_size[j], comp_size[k]) >= refb_exempt) return false;
+        if (refb_exempt > 0 && std::min(comp_size[orig[j]], comp_size[orig[k]]) >= refb_exempt) return false;
         const geo_point_t p1 = cluster.point3d(g1);
         const geo_point_t p2 = cluster.point3d(g2);
         const double dis = std::sqrt(std::pow(p1.x() - p2.x(), 2) + std::pow(p1.y() - p2.y(), 2) + std::pow(p1.z() - p2.z(), 2));
@@ -327,7 +353,7 @@ void Graphs::connect_graph_with_reference(
     auto capped = [&](size_t j, size_t k, double dis) -> bool {
         if (!cap_on) return false;
         if (dis <= cap_cm) return false;
-        if (std::min(comp_size[j], comp_size[k]) >= cap_pts) return false;
+        if (std::min(comp_size[orig[j]], comp_size[orig[k]]) >= cap_pts) return false;
         ++cap_skipped;
         return true;
     };
@@ -335,19 +361,19 @@ void Graphs::connect_graph_with_reference(
 
     // Initiate dist. metrics (same as baseline)
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
 
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir1(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir2(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
     std::vector<std::vector<std::tuple<int, int, double>>> index_index_dis_dir_mst(
-        num, std::vector<std::tuple<int, int, double>>(num));
+        nlive, std::vector<std::tuple<int, int, double>>(nlive));
 
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = 0; k != num; k++) {
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = 0; k != nlive; k++) {
             index_index_dis[j][k] = std::make_tuple(-1, -1, 1e9);
             index_index_dis_mst[j][k] = std::make_tuple(-1, -1, 1e9);
 
@@ -358,10 +384,10 @@ void Graphs::connect_graph_with_reference(
     }
 
     // Distance calculation (same as baseline)
-    Weighted::Graph temp_graph(num);
+    Weighted::Graph temp_graph(nlive);
 
-    for (size_t j=0;j!=num;j++){
-      for (size_t k=j+1;k!=num;k++){
+    for (size_t j=0;j!=nlive;j++){
+      for (size_t k=j+1;k!=nlive;k++){
             // Skip pairs where reference filtering emptied a component
             if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
 
@@ -377,8 +403,8 @@ void Graphs::connect_graph_with_reference(
 
     process_mst_deterministically(temp_graph, index_index_dis, index_index_dis_mst);
 
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = j + 1; k != num; k++) {
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = j + 1; k != nlive; k++) {
             // Skip pairs where reference filtering emptied a component
             if (pt_clouds[j]->get_num_points() == 0 || pt_clouds[k]->get_num_points() == 0) continue;
 
@@ -446,10 +472,10 @@ void Graphs::connect_graph_with_reference(
 
     // MST for the directionality ... (same as baseline)
     {
-        Weighted::Graph temp_graph(num);
+        Weighted::Graph temp_graph(nlive);
 
-        for (size_t j = 0; j != num; j++) {
-            for (size_t k = j + 1; k != num; k++) {
+        for (size_t j = 0; j != nlive; j++) {
+            for (size_t k = j + 1; k != nlive; k++) {
                 int index1 = j;
                 int index2 = k;
                 if (std::get<0>(index_index_dis_dir1[j][k]) >= 0 || std::get<0>(index_index_dis_dir2[j][k]) >= 0) {
@@ -468,8 +494,8 @@ void Graphs::connect_graph_with_reference(
     }
 
     // now complete graph according to the direction (same as baseline)
-    for (size_t j = 0; j != num; j++) {
-        for (size_t k = j + 1; k != num; k++) {
+    for (size_t j = 0; j != nlive; j++) {
+        for (size_t k = j + 1; k != nlive; k++) {
             if (std::get<0>(index_index_dis_mst[j][k]) >= 0 &&
                 !capped(j, k, std::get<2>(index_index_dis_mst[j][k]))) {   // doc pdvd/138 cap (off => never true)
                 const int gind1 = pt_clouds_global_indices.at(j).at(std::get<0>(index_index_dis_mst[j][k]));
