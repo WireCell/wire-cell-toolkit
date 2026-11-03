@@ -185,7 +185,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
               retile_deghost_residual=true,
               retile_deghost_corridor_wires=1,
               retile_deghost_bridge_planes=1,
-              retile_deghost_gap_min_slices=2,
+              retile_deghost_cut_max_depth=10, retile_deghost_gap_min_slices=2,
               retile_deghost_gap_max_cm=20,
               retile_deghost_reach_cm=20,
               // pr_ml doc 28 step 2: writeback, C++ true (CreateSteinerGraph replaces the cluster's
@@ -1642,7 +1642,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1, stepped_center_fallback=
             scope: retile_deghost_scope,
             beam_window_low: beam_window[0],
             beam_window_high: beam_window[1],
-            cut_max_depth: 10,
+            cut_max_depth: retile_deghost_cut_max_depth,   // pr_ml doc 53: was the literal 10 (= the default)
             cut_min_length: 2,
             repair: true,
             repair_q_floor: retile_deghost_repair_q_floor,

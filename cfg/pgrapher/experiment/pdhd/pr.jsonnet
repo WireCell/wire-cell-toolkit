@@ -180,7 +180,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
               retile_deghost_residual=true,
               retile_deghost_corridor_wires=1,
               retile_deghost_bridge_planes=1,
-              retile_deghost_gap_min_slices=2,
+              retile_deghost_cut_max_depth=10, retile_deghost_gap_min_slices=2,
               retile_deghost_gap_max_cm=20,
               retile_deghost_reach_cm=20,
               // writeback: C++ true (CreateSteinerGraph replaces the cluster's blobs by the gapfill
@@ -1544,7 +1544,7 @@ function(output_dir='', runNo=1, subRunNo=1, eventNo=1,
             levels: [{ width: lv[1], superwire: lv[2], forward: "TorchTensorSetService:rd-e2c-%s" % lv[0], threshold: lv[3] }
                      for lv in retile_deghost_ml_levels],
             scope: 'all',
-            cut_max_depth: 10,
+            cut_max_depth: retile_deghost_cut_max_depth,   // pr_ml doc 53: was the literal 10 (= the default)
             cut_min_length: 2,
             repair: true,
             repair_q_floor: retile_deghost_repair_q_floor,

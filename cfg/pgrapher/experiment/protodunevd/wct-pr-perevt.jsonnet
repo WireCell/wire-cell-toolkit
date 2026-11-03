@@ -211,6 +211,7 @@ function(
     retile_deghost_corridor_wires = 1,
     retile_deghost_bridge_planes = 1,
     retile_deghost_gap_min_slices = 2,
+    retile_deghost_cut_max_depth = 10,   // pr_ml doc 53 (Xin 2026-11-03): the retile cascade's cut_max_depth; 10 = the old literal => compiled JSON unchanged
     retile_deghost_gap_max_cm = 20,
     retile_deghost_reach_cm = 20,
     // pr_ml doc 28 step 2: gapfill write-back (C++ true); false = the gapfill cloud feeds the Steiner graph only.
@@ -4848,6 +4849,7 @@ function(
                              retile_deghost_corridor_wires=retile_deghost_corridor_wires,
                              retile_deghost_bridge_planes=retile_deghost_bridge_planes,
                              retile_deghost_gap_min_slices=retile_deghost_gap_min_slices,
+                             retile_deghost_cut_max_depth=retile_deghost_cut_max_depth,
                              retile_deghost_gap_max_cm=retile_deghost_gap_max_cm,
                              retile_deghost_reach_cm=retile_deghost_reach_cm,
                              retile_deghost_writeback=retile_deghost_writeback,   // pr_ml doc 28 step 2
