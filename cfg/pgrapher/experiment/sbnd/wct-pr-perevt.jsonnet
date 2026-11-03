@@ -941,6 +941,10 @@ function(
     image_deghost_truth_speed_mmus = null,
     image_deghost_truth_table = '',
     image_deghost_truth_extra = {},
+    // pr_ml doc 51 round 2: false => the image_deghost labelers do not emit the truth_nu / truth_pf tensors (TruthPointLabeler
+    // emit_truth_tensors, C++ default true).  Their only consumer, PointTreeMerging, reads the trees and drops them; each carries
+    // the event's whole particle table.  true (default) => key omitted, compiled JSON byte-identical.
+    image_deghost_truth_tensors = true,
     // pr_ml doc 28 step 2 (owner 2026-10-27, gap-fill arm): the Steiner-stage retile in the doc pdvd/131 gapfill mode
     // (ImproveCluster_2 retile_deghost; see sbnd/clus.jsonnet pr()).  false (default) => key omitted, no model
     // service, no WireCellPytorch => byte-identical compiled config.  true needs retile_deghost_ml_levels = the
@@ -4028,7 +4032,7 @@ function(
                 time_offset: image_deghost_truth_time_offset_us * wc.us,
                 speed: image_deghost_truth_speed_mmus * wc.mm / wc.us,
                 truth_table: image_deghost_truth_table,
-                extra: image_deghost_truth_extra,
+                extra: image_deghost_truth_extra + (if image_deghost_truth_tensors then {} else { emit_truth_tensors: false }),
             }));
     local dg_join = g.pnode({
         type: 'PointTreeConcat',

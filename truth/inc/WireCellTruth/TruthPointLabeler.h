@@ -101,6 +101,11 @@ namespace WireCell::Truth {
         std::string m_inpath{"pointtrees/%d/live"};
         std::string m_truth_table{""};
         std::string m_truth_prefix{"truth/%d"};
+        // pr_ml doc 51 round 2: emit the truth_nu / truth_pf tensors (truth_prefix) in the output set.  Default true
+        // (legacy).  False drops only those two tensors; labels, labels_meta and every other tensor are unchanged.
+        // For a labeler whose consumer ignores them (the PR job's per-face dg labelers feed PointTreeMerging, which
+        // reads only the trees): each carries the event's whole particle table (PDHD cosmic: 688k rows, 138 MB).
+        bool m_emit_truth_tensors{true};
         std::string m_blobtruth_path{"clusters/%d"};
         std::string m_id_mode{"auto"};
         std::string m_labels_meta{""};

@@ -47,6 +47,7 @@ Configuration Truth::TruthPointLabeler::default_configuration() const
     cfg["tick"] = m_label.tick;
     cfg["truth_table"] = m_truth_table;
     cfg["truth_prefix"] = m_truth_prefix;
+    cfg["emit_truth_tensors"] = m_emit_truth_tensors;   // pr_ml doc 51 round 2, default true
     cfg["blobtruth_path"] = m_blobtruth_path;
     cfg["id_mode"] = m_id_mode;
     cfg["pfmerger"] = Json::objectValue;
@@ -111,6 +112,7 @@ void Truth::TruthPointLabeler::configure(const Configuration& cfg)
     }
     m_truth_table = get(cfg, "truth_table", m_truth_table);
     m_truth_prefix = get(cfg, "truth_prefix", m_truth_prefix);
+    m_emit_truth_tensors = get(cfg, "emit_truth_tensors", m_emit_truth_tensors);
     m_blobtruth_path = get(cfg, "blobtruth_path", m_blobtruth_path);
     m_id_mode = get(cfg, "id_mode", m_id_mode);
     if (cfg.isMember("pfmerger")) m_pfparams.configure(cfg["pfmerger"]);
@@ -529,8 +531,10 @@ bool Truth::TruthPointLabeler::operator()(const input_tuple_type& intup, output_
     tv->insert(tv->end(), btens.begin(), btens.end());
     const std::string tprefix = m_truth_prefix.find('%') == std::string::npos ? m_truth_prefix
         : String::format(m_truth_prefix, ident);
-    auto ttens = tt.as_tensors(ident, tprefix);
-    tv->insert(tv->end(), ttens.begin(), ttens.end());
+    if (m_emit_truth_tensors) {   // pr_ml doc 51 round 2 (default true = legacy)
+        auto ttens = tt.as_tensors(ident, tprefix);
+        tv->insert(tv->end(), ttens.begin(), ttens.end());
+    }
 
     Configuration setmd = ints->metadata();
     const auto meta = labels_meta(tt, pf, sum);

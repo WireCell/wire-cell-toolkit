@@ -726,6 +726,11 @@ void Graphs::connect_graph_ctpc_with_reference(
                             else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
+                    // pr_ml doc 51 round 2: the exact early break of connect_graph_ctpc (doc 79 round 1).  num_bad never
+                    // decreases and num_steps is fixed, so once the kill predicate below holds it holds at loop end; the
+                    // walk's queries are pure.  Only with the doc pdvd/140 3D support off: with it on, the walk runs to the
+                    // end so its n_bad3d diagnostic stays complete.
+                    if (sup3d <= 0 && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) break;
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
@@ -763,6 +768,11 @@ void Graphs::connect_graph_ctpc_with_reference(
                             else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
+                    // pr_ml doc 51 round 2: the exact early break of connect_graph_ctpc (doc 79 round 1).  num_bad never
+                    // decreases and num_steps is fixed, so once the kill predicate below holds it holds at loop end; the
+                    // walk's queries are pure.  Only with the doc pdvd/140 3D support off: with it on, the walk runs to the
+                    // end so its n_bad3d diagnostic stays complete.
+                    if (sup3d <= 0 && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) break;
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {
@@ -799,6 +809,11 @@ void Graphs::connect_graph_ctpc_with_reference(
                             else if (sup3d > 0 && cluster.get_closest_dis(test_p) > sup3d) { num_bad++; ++n_bad3d; }   // doc pdvd/140
                         }
                     }
+                    // pr_ml doc 51 round 2: the exact early break of connect_graph_ctpc (doc 79 round 1).  num_bad never
+                    // decreases and num_steps is fixed, so once the kill predicate below holds it holds at loop end; the
+                    // walk's queries are pure.  Only with the doc pdvd/140 3D support off: with it on, the walk runs to the
+                    // end so its n_bad3d diagnostic stays complete.
+                    if (sup3d <= 0 && (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps))) break;
                 }
 
                 if (num_bad > 7 || (num_bad > 2 && num_bad >= 0.75 * num_steps)) {

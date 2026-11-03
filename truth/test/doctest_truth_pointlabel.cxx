@@ -947,3 +947,55 @@ TEST_CASE("truth point labeler: drift_position equals Aux::time2drift bit for bi
     }
     CHECK(nchk >= 4000);
 }
+
+TEST_CASE("truth point labeler: emit_truth_tensors false drops exactly truth_nu / truth_pf (pr_ml doc 51 round 2)")
+{
+    auto s = make_setup();
+    auto root = make_tree(s);
+    auto tens = Aux::TensorDM::as_tensors(*root, "pointtrees/100/live");
+    Configuration md;
+    md["ident"] = 100;
+    auto ints = std::make_shared<Aux::SimpleTensorSet>(100, md, std::make_shared<ITensor::vector>(tens));
+
+    auto run = [&](bool emit) {
+        Truth::TruthPointLabeler node;
+        auto cfg = node.default_configuration();
+        CHECK(cfg["emit_truth_tensors"].asBool() == true);   // C++ default: legacy, emit
+        cfg["speed"] = speed;
+        cfg["anode"] = String::format("AnodePlane:%d", s.anode->ident());
+        cfg["face"] = 0;
+        cfg["drift_speed"] = speed;
+        cfg["reco_time_offset"] = 0.0;
+        cfg["tick"] = tick;
+        cfg["pfmerger"]["q_min"] = 100;
+        cfg["emit_truth_tensors"] = emit;
+        node.configure(cfg);
+        ITensorSet::pointer out;
+        REQUIRE(node(std::make_tuple(ints, s.cluster, s.depos), out));
+        REQUIRE(out);
+        return out;
+    };
+    auto on = run(true), off = run(false);
+    std::vector<std::string> kept_on, kept_off;
+    for (const auto& t : *on->tensors()) {
+        const auto dt = t->metadata()["datatype"].asString();
+        if (dt != "truth_nu" && dt != "truth_pf") kept_on.push_back(t->metadata()["datapath"].asString() + "|" + dt);
+    }
+    for (const auto& t : *off->tensors()) {
+        const auto dt = t->metadata()["datatype"].asString();
+        CHECK(dt != "truth_nu");
+        CHECK(dt != "truth_pf");
+        kept_off.push_back(t->metadata()["datapath"].asString() + "|" + dt);
+    }
+    CHECK(on->tensors()->size() == off->tensors()->size() + 2);
+    CHECK(kept_on == kept_off);   // same tensors, same order
+    CHECK(on->metadata()["labels_meta"] == off->metadata()["labels_meta"]);
+    for (size_t i = 0, j = 0; i < on->tensors()->size(); ++i) {   // and the same bytes
+        const auto& a = on->tensors()->at(i);
+        const auto dt = a->metadata()["datatype"].asString();
+        if (dt == "truth_nu" || dt == "truth_pf") continue;
+        const auto& b = off->tensors()->at(j++);
+        REQUIRE(a->size() == b->size());
+        CHECK(std::equal(a->data(), a->data() + a->size(), b->data()));
+    }
+}

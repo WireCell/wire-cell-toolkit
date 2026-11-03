@@ -1934,6 +1934,10 @@ function(
     image_deghost_truth_speed_mmus = null,
     image_deghost_truth_table = '',
     image_deghost_truth_extra = {},
+    // pr_ml doc 51 round 2: false => the image_deghost labelers do not emit the truth_nu / truth_pf tensors (TruthPointLabeler
+    // emit_truth_tensors, C++ default true).  Their only consumer, PointTreeMerging, reads the trees and drops them; each carries
+    // the event's whole particle table.  true (default) => key omitted, compiled JSON byte-identical.
+    image_deghost_truth_tensors = true,
     // doc pdvd/120: the beam-particle PR stage (pipeline name
     // 'check_beam_particle'; runner mode run_pr_evt.sh -beam).  The per-event
     // beam window is derived HERE from the light stage's trigger metadata --
@@ -5025,7 +5029,7 @@ function(
                     time_offset: image_deghost_truth_time_offset_us * wc.us,
                     speed: image_deghost_truth_speed_mmus * wc.mm / wc.us,
                     truth_table: image_deghost_truth_table,
-                    extra: image_deghost_truth_extra,
+                    extra: image_deghost_truth_extra + (if image_deghost_truth_tensors then {} else { emit_truth_tensors: false }),
                 }))
         else if beam_deghost_truth_depos == '' then null else (
             assert beam_deghost_truth_speed_mmus != null : 'beam_deghost_truth_depos needs beam_deghost_truth_speed_mmus';
