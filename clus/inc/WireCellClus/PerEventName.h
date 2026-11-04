@@ -24,11 +24,14 @@ namespace WireCell::Clus {
 
     /// The same from an ensemble: ident = ensemble.ident(); the RSE is the
     /// triplet the group's MultiAlgBlobClustering resolved (rse_valid()),
-    /// else the given fallback (a component's own configured numbers).
+    /// else the fallback, -1 by default.  Writers that share one per-event file
+    /// (the tracking visitor RECREATEs it, the flat tree UPDATEs it) must use
+    /// the SAME fallback, so every caller uses the default (PR 544 review, item 10).
     std::string per_event_name(const std::string& tmpl, const Facade::Ensemble& ensemble,
                                int run = -1, int subrun = -1, int event = -1);
 
-    /// True when the template names a different file per event (a '%' or a token).
+    /// True when the template names a different file per event: a '%', or one
+    /// of the tokens above (any other '{' is literal).
     bool per_event_templated(const std::string& tmpl);
 }
 

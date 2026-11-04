@@ -16,7 +16,12 @@ namespace {
 
 bool Clus::per_event_templated(const std::string& tmpl)
 {
-    return tmpl.find('%') != std::string::npos || tmpl.find('{') != std::string::npos;
+    // Only the known tokens: a literal '{' in a name is not a template (PR 544 review, item 10).
+    if (tmpl.find('%') != std::string::npos) return true;
+    for (const char* tok : {"{run}", "{subrun}", "{event}", "{ident}"}) {
+        if (tmpl.find(tok) != std::string::npos) return true;
+    }
+    return false;
 }
 
 std::string Clus::per_event_name(const std::string& tmpl, int ident, int run, int subrun, int event)

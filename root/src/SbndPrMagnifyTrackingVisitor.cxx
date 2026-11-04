@@ -221,7 +221,7 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     }
 
     // Open ROOT file
-    const std::string outname = Clus::per_event_name(m_output_filename, ensemble, m_runNo, m_subRunNo, m_eventNo);
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);   // same fallback as the flat tree (PR 544 item 10)
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);
