@@ -38,6 +38,10 @@ function(input='qlpctree.tar.gz',
          // ai-helper issue 35: record every DL-vertex network call (exact input,
          // payload, decision, MC truth vertex) as T_dlvtx_call / T_dlvtx_cloud.
          dl_vtx_dump=false,
+         // ai-helper issue 44: with dl_vtx_dump, also T_dlvtx_space -- the Bee
+         // clustering-layer points of the clusters within 1 cm of a call's cloud
+         // (Sne's r7_space input), once per event.  Default off.
+         dl_vtx_dump_space=false,
          // ai-helper issue 35: TaggerCheckNeutrino keys merged over the production
          // operating point, for experiments, e.g. --tla-code 'pr_knobs={dl_vtx_dual_chain: false}'.
          pr_knobs={},
@@ -88,7 +92,7 @@ local bee = {
 // tagger_bee: the tagger verdict Bee sets (tagger_stm/_tgm/_fc/_lm), which the
 // 1-step's art-side labeler_tagger writes, come from TaggerBeeVisitor here.
 local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true,
-                              dl_vtx_dump=dl_vtx_dump, pr_knobs=pr_knobs, flat_tree=flat_tree,
+                              dl_vtx_dump=dl_vtx_dump, dl_vtx_dump_space=dl_vtx_dump_space, pr_knobs=pr_knobs, flat_tree=flat_tree,
                               truth_match=truth_match, blob_truth=blob_truth,
                               vertex_method=vertex_method, dv2_bundle=dv2_bundle);
 

@@ -91,6 +91,17 @@ namespace WireCell {
             // was recorded), so the file schema does not depend on the event.  False (default) => written only
             // when a call was recorded (and then only because TaggerCheckNeutrino.dl_vtx_dump was on).
             bool m_dl_vtx_dump{false};
+            // ai-helper issue 44: T_dlvtx_space -- the Bee clustering-layer points
+            // (BeeClusterPoints, the same recipe as the PR MABC's clustering-pr
+            // layer) of every in-scope cluster that comes within space_touch_cm of a
+            // recorded call's cloud (Sne's r7_space rule), once per event, keyed by
+            // cluster; T_dlvtx_call gains space_cluster_id / n_space.  Requires
+            // dl_vtx_dump.  DEFAULT FALSE => byte-identical.
+            bool m_dl_vtx_dump_space{false};
+            double m_space_touch_cm{1.0};
+            std::string m_space_pcname{"3d"};
+            std::vector<std::string> m_space_coords{"x_t0cor", "y", "z"};
+            int m_space_filter{1};
             // ai-helper issue 41: reco<->truth matching trees (see write_truth_match).
             // DEFAULT FALSE => byte-identical.  blob_truth adds T_blob_truth.
             bool m_truth_match{false};

@@ -1,5 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
 #include "WireCellClus/PerEventName.h"
+#include "WireCellClus/BeeClusterPoints.h"   // ai-helper issue 44
 
 #include <functional>
 #include "WireCellClus/Facade_Summary.h"
@@ -3262,26 +3263,12 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     }else{
         // Get the scope
         Scope scope = {pcname, coords};
-        
-        auto filter_scope = cluster.get_scope_filter(scope);
 
-        // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << scope << " " << filter_scope << std::endl;
-
-        bool use_scope = true;
-        if (filter == 1) {
-            use_scope = filter_scope;
-        }
-        else if (filter == 0) {
-            use_scope = true; // ignore filter_scope, always true
-        }
-        else if (filter == -1) {
-            use_scope = !filter_scope;
-        }
-
-        if (use_scope) {
-            // Access the points through the cluster's scoped view
-            const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
-            const auto& spcs = sv.pcs();
+        // ai-helper issue 44: the gate and the point loop live in
+        // BeeClusterPoints (shared with the T_dlvtx_space writer); same
+        // filter semantics, same order, same charge formula.
+        if (bee_cluster_in_scope(cluster, scope, filter)) {
+            const size_t nblobs = cluster.sv<double>(scope).pcs().size();
 
             // Original (pre-flash-merge) per-blob cluster ids, if present (written
             // by examine_bundles' flash-time merge into "real_cluster_id"/"perblob").
@@ -3293,50 +3280,15 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                 auto sp = cluster.get_pcarray<int>("real_cluster_id", "perblob");
                 orig_ids.assign(sp.begin(), sp.end());
             }
-            const bool use_orig = (orig_ids.size() == spcs.size());
+            const bool use_orig = (orig_ids.size() == nblobs);
 
-            // Dead-channel threshold: uncertainty > 1e10 flags a dead wire
-            // (matches PointTreeBuilding m_dead_threshold and Facade_Cluster::is_wire_dead).
-            const double dead_threshold = 1e10;
-
-            // For each scoped point cloud (one per blob), compute per-point wire charge.
-            // Each point gets q = mean(Q_U, Q_V, Q_W) over the non-dead planes for the
-            // specific wires that define this 3D point — matching the prototype formula.
-            // The global cluster point index is obtained via a KD-tree nearest-neighbour
-            // lookup (exact match: every scoped-view point is also in the cluster PC).
-            for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
-                const auto& spc = spcs[spc_idx];
-                auto x = spc.get().get(coords[0])->elements<double>();
-                auto y = spc.get().get(coords[1])->elements<double>();
-                auto z = spc.get().get(coords[2])->elements<double>();
-
+            bee_cluster_points(cluster, scope, true,
+                               [&](size_t spc_idx, const Point& pt, double point_charge) {
                 // Per-blob original cluster id (falls back to the merged clid).
                 const int real_clid = use_orig ? orig_ids[spc_idx] : clid;
-
-                const size_t size = x.size();
-                for (size_t ind = 0; ind < size; ++ind) {
-                    // Resolve global point index via spatial lookup.
-                    // charge_value() caches all per-plane charge vectors on first call,
-                    // so subsequent lookups are O(1) vector reads.
-                    const WireCell::Point pt(x[ind], y[ind], z[ind]);
-                    const size_t pt_idx = cluster.get_closest_point_index(pt);
-
-                    // Per-plane charge mean (prototype formula), excluding dead planes.
-                    double sum = 0.0;
-                    int nplanes = 0;
-                    for (int plane = 0; plane < 3; ++plane) {
-                        if (!cluster.is_wire_dead(pt_idx, plane, dead_threshold)) {
-                            sum += cluster.charge_value(pt_idx, plane);
-                            ++nplanes;
-                        }
-                    }
-                    const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
-
-                    bpts.append(pt, point_charge, clid, real_clid);
-                    if (oft_out) oft_out->push_back(cgt_oft);
-                }
-            }
-
+                bpts.append(pt, point_charge, clid, real_clid);
+                if (oft_out) oft_out->push_back(cgt_oft);
+            });
         }
     }
 

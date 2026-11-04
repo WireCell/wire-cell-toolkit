@@ -1004,6 +1004,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // dl_vtx_dump_space (ai-helper issue 44): with dl_vtx_dump, also write
+              // T_dlvtx_space -- the Bee clustering-layer points (same scope and
+              // coords as this MABC's clustering-pr layer) of every in-scope cluster
+              // within space_touch_cm of a recorded call's cloud, once per event,
+              // plus T_dlvtx_call.space_cluster_id / n_space.  Recording only.
+              // Default false => every key omitted => byte-identical.
+              dl_vtx_dump_space=false,
+              space_touch_cm=1.0,
               // truth_match (ai-helper issue 41): the reco<->truth matching trees
               // (T_truth_track, T_overlap, T_match, T_pf; blob_truth adds
               // T_blob_truth) in tracking-pr.root.  MC only: the writer needs the
@@ -3011,6 +3019,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
+                    // ai-helper issue 44.  Keys omitted when off => byte-identical config.
+                    [if dl_vtx_dump_space then 'dl_vtx_dump_space']:
+                        (assert dl_vtx_dump : 'dl_vtx_dump_space needs dl_vtx_dump'; true),
+                    [if dl_vtx_dump_space then 'space_touch_cm']: space_touch_cm,
+                    [if dl_vtx_dump_space then 'space_pcname']: '3d',
+                    [if dl_vtx_dump_space then 'space_coords']: common_corr_coords(pos_offset_on),
                     [if truth_match then 'truth_match']: true,   // ai-helper issue 41
                     [if truth_match && blob_truth then 'blob_truth']: true,   // ai-helper issue 41
                     runNo: runNo,
