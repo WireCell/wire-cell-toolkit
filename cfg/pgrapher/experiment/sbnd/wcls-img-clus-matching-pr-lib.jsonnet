@@ -44,7 +44,13 @@
 //                         (qlpctree.tar.gz, every event of the lar job in one file).  Step 2,
 //                         wct-pr.jsonnet, runs the SAME PR stage (sbnd-pr-stage.jsonnet) on it.
 //                         Top-level job: wcls-img-clus-matching.jsonnet.
-function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step')
+//   truth_detail          false (default): the labeler writes the pre-issue-41 truth.
+//                         true: also the per-blob truth_q / truth_q_dom / trackid2 /
+//                         truth_q2 and the truth_track table step 2's truth match
+//                         (truth_match) needs.  Needs larwirecell 73c79bc or later
+//                         (wclsTensorSetLabeler truth_detail).  ON in the production
+//                         step-1 job, wcls-img-clus-matching.jsonnet.
+function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step', truth_detail=false)
 assert stage == '1step' || stage == 'ql' : "stage must be '1step' or 'ql'";
 local g = import "pgraph.jsonnet";
 local wc = import "wirecell.jsonnet";
@@ -476,7 +482,10 @@ local labeler_truth = g.pnode({
         // and the truth_track table (trackid -> nu_idx, Michel-merged id,
         // ancestor, prong, readout-window charge) for step 2's truth match.
         // MC only (the labeler skips truth on data); reco untouched.
-        truth_detail: true,
+        // Behind the truth_detail argument (default off, PR 544 review item 4):
+        // off => key omitted => the labeler config is the pre-issue-41 one, and an
+        // older larwirecell (no truth_detail, larwirecell 73c79bc) still runs.
+        [if truth_detail then 'truth_detail']: true,
     },
 }, nin=1, nout=1, uses=labeler_uses);
 

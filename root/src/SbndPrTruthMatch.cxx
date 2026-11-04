@@ -103,7 +103,10 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
 {
     const auto tt = ensemble.aux_tensor("truth_track");
     if (!tt) {
-        log->debug("SbndPrMagnifyTrackingVisitor: no truth_track table, no truth-match trees");
+        // truth_match is on, so the table was expected: warn (PR 544 review, item 4).
+        // Its producer is the step-1 labeler with truth_detail (larwirecell 73c79bc).
+        log->warn("SbndPrMagnifyTrackingVisitor: truth_match is on but the input has no truth_track "
+                  "table (step 1 without the labeler's truth_detail?): no truth-match trees");
         return;
     }
     const int run = m_evt_runNo, subrun = m_evt_subRunNo, event = m_evt_eventNo;
