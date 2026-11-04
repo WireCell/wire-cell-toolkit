@@ -877,7 +877,11 @@ static void write_empty_proj_data(TFile* output_tf)
 {
     std::vector<int> v_cluster_id;
     std::vector<std::vector<int>> v_channel, v_time_slice;
-    std::vector<std::vector<double>> v_charge, v_charge_err, v_charge_pred;
+    // ai-helper issue 39: int, as write_proj_data books them -- this empty row
+    // exists to give every event the same schema, and it gave the three charge
+    // branches the type vector<vector<double>> where a non-empty event has
+    // vector<vector<int>> (one tree, two types, depending on the event).
+    std::vector<std::vector<int>> v_charge, v_charge_err, v_charge_pred;
     TTree* tree = new TTree("T_proj_data", "T_proj_data");
     tree->SetDirectory(output_tf);
     tree->Branch("cluster_id", &v_cluster_id);
