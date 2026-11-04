@@ -6,6 +6,7 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
 
+#include "TSystem.h"
 #include "TBranch.h"
 #include "TBranchElement.h"
 #include "TFile.h"
@@ -242,6 +243,12 @@ bool Root::RootFlatTreeVisitor::flatten_file(const std::string& filename, const 
                                              const std::string& prefix, bool drop_row_trees,
                                              std::string& error)
 {
+    // "UPDATE" CREATES a missing file, which then got one entry with run = -1
+    // and valid = 1 (PR 544 review, item 2).  The file must already be there.
+    if (gSystem->AccessPathName(filename.c_str())) {   // kTRUE = does NOT exist
+        error = "no such file " + filename;
+        return false;
+    }
     std::unique_ptr<TFile> tf(TFile::Open(filename.c_str(), "UPDATE"));
     if (!tf || tf->IsZombie()) {
         error = "cannot open " + filename;
@@ -267,6 +274,7 @@ bool Root::RootFlatTreeVisitor::flatten_file(const std::string& filename, const 
     };
     std::vector<TreeCols> all;
     Int_t run = -1, subrun = -1, evt = -1;
+    bool have_trun = false;   // valid = 1 only with the header RSE (PR 544 review, item 2)
 
     for (const auto& nm : names) {
         auto* in = dynamic_cast<TTree*>(tf->Get(nm.c_str()));
@@ -301,6 +309,7 @@ bool Root::RootFlatTreeVisitor::flatten_file(const std::string& filename, const 
             if (in->GetBranch("eventNo")) in->SetBranchAddress("eventNo", &e);
             in->GetEntry(0);
             run = r; subrun = s; evt = e;
+            have_trun = true;
         }
         in->ResetBranchAddresses();
         all.push_back(std::move(tc));
@@ -309,7 +318,7 @@ bool Root::RootFlatTreeVisitor::flatten_file(const std::string& filename, const 
     tf->cd();
     auto* out = new TTree(tree_name.c_str(), "Wire-Cell per-event tree (ai-helper issue 39)");
     out->SetDirectory(tf.get());
-    Int_t valid = 1;
+    Int_t valid = have_trun ? 1 : 0;
     scalar_int_branch(out, prefix + ".run", &run);
     scalar_int_branch(out, prefix + ".subrun", &subrun);
     scalar_int_branch(out, prefix + ".evt", &evt);

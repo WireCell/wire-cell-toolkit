@@ -124,3 +124,42 @@ TEST_CASE("RootFlatTreeVisitor flattens row trees losslessly")
     f.Close();
     std::remove(fname.c_str());
 }
+
+// PR 544 review, item 2: a missing file is an error, not a created file with a
+// "valid" entry; an entry without Trun (no header RSE) is valid = 0.
+TEST_CASE("RootFlatTreeVisitor refuses a missing file")
+{
+    const std::string fname = "doctest_root_flat_tree_missing.root";
+    std::remove(fname.c_str());
+    std::string err;
+    CHECK_FALSE(Root::RootFlatTreeVisitor::flatten_file(fname, "recTreeWireCell", "wc", false, err));
+    CHECK(err.find("no such file") != std::string::npos);
+    FILE* fp = std::fopen(fname.c_str(), "r");
+    CHECK_MESSAGE(fp == nullptr, "flatten_file created " << fname);
+    if (fp) { std::fclose(fp); std::remove(fname.c_str()); }
+}
+
+TEST_CASE("RootFlatTreeVisitor without Trun is not valid")
+{
+    const std::string fname = "doctest_root_flat_tree_notrun.root";
+    {
+        TFile f(fname.c_str(), "RECREATE");
+        TTree t("T_rows", "T_rows");
+        Int_t id = 7;
+        t.Branch("id", &id, "id/I");
+        t.Fill();
+        t.Write();
+        f.Close();
+    }
+    std::string err;
+    REQUIRE_MESSAGE(Root::RootFlatTreeVisitor::flatten_file(fname, "recTreeWireCell", "wc", false, err), err);
+    TFile f(fname.c_str());
+    auto* t = dynamic_cast<TTree*>(f.Get("recTreeWireCell"));
+    REQUIRE(t);
+    t->GetEntry(0);
+    CHECK(leafvals(t, "wc.valid") == std::vector<double>{0});
+    CHECK(leafvals(t, "wc.run") == std::vector<double>{-1});
+    CHECK(leafvals(t, "wc.T_rows.id") == std::vector<double>{7});
+    f.Close();
+    std::remove(fname.c_str());
+}
