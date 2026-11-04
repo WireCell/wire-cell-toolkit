@@ -4,6 +4,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <ctime>
 #include <boost/algorithm/string.hpp>
 #include "WireCellPgraph/TorchnvTools.h"
@@ -163,6 +164,88 @@ bool Graph::execute()
         }
     }
     return true;  // shouldn't reach
+}
+
+// Same policy as execute() -- always fire the sink-most runnable node so
+// no more than one datum sits on any edge -- but discover the runnable
+// node incrementally instead of rescanning the whole topological order.
+//
+// Each node's topological index is its fixed "rank" (sink-most = highest).
+// A node's runnability can change ONLY when a neighbor fires: a child
+// consuming empties a parent's output edge (clearing the parent's "don't
+// run while output pending" guard), and a parent producing fills a child's
+// input.  So after each successful firing we re-offer just that node plus
+// its parents and children to a rank-ordered ready set, and pop the
+// highest rank.  This fires the identical node sequence as execute() (rank
+// is a total order, so "highest-rank runnable" == execute()'s reverse-scan
+// pick) in O((V+E) log V) instead of O(V^2).
+bool Graph::execute_drain()
+{
+    auto nodes = sort_kahn();
+    const size_t nnodes = nodes.size();
+    l->debug("executing (drain) with {} nodes", nnodes);
+
+    std::unordered_map<Node*, size_t> rank;
+    rank.reserve(nnodes);
+    for (size_t ind = 0; ind < nnodes; ++ind) {
+        rank[nodes[ind]] = ind;
+    }
+
+    std::set<size_t> ready;             // ranks of queued candidate nodes
+    std::vector<char> queued(nnodes, 0);  // dedup: at most one entry per node
+
+    auto enqueue = [&](Node* n) {
+        auto it = rank.find(n);
+        if (it == rank.end()) return;   // not in the sorted DAG (e.g. in a cycle)
+        const size_t r = it->second;
+        if (queued[r]) return;
+        queued[r] = 1;
+        ready.insert(r);
+    };
+
+    // Seed with sources (no input ports).  Every other runnability change
+    // is triggered by a neighbor firing, so seeding sources is sufficient.
+    for (size_t ind = 0; ind < nnodes; ++ind) {
+        if (nodes[ind]->input_ports().empty()) {
+            enqueue(nodes[ind]);
+        }
+    }
+
+    while (!ready.empty()) {
+        auto rit = std::prev(ready.end());  // highest rank == sink-most
+        const size_t r = *rit;
+        ready.erase(rit);
+        queued[r] = 0;
+        Node* node = nodes[r];
+
+        auto core = std::clock();
+        auto wall = std::chrono::high_resolution_clock::now();
+
+        bool ok = call_node(node);
+
+        m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+        auto delta = std::chrono::high_resolution_clock::now() - wall;
+        const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+        m_nodes_timer[node].wall += wall_ms / 1000.0;
+
+        if (!ok) {
+            // Was not actually runnable; it will be re-offered when a
+            // neighbor's firing next changes its input/output state.
+            continue;
+        }
+
+        if (m_enable_em) {
+            m_em(String::format("called: %s", node->ident()));
+        }
+        SPDLOG_LOGGER_TRACE(l, "ran node (drain): {}", node->ident());
+
+        // Only this node and its immediate neighbors can have become runnable.
+        enqueue(node);
+        for (auto h : m_edges_forward[node]) enqueue(h);
+        for (auto t : m_edges_backward[node]) enqueue(t);
+    }
+
+    return true;
 }
 
 bool Graph::call_node(Node* node)
