@@ -187,7 +187,9 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
             PR::IndexedVertexSet sv;
             PR::IndexedSegmentSet ss;
             shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
-            for (const auto& seg : ss) seg_to_shower[seg] = shower;
+            // First shower wins (emplace).  A segment held by two showers is
+            // settled below by its T_kine row (PR 544 review, item 8).
+            for (const auto& seg : ss) seg_to_shower.emplace(seg, shower);
         }
         std::set<int> pf_ids;
         if (auto it = pf_by_nu.find(nu); it != pf_by_nu.end()) {
@@ -211,6 +213,15 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
             key.particle = (sit == seg_to_shower.end()) ? own : seg_display_id(sit->second->start_segment());
             auto kit = kine_by_gi.find(gi);
             key.kine = (kit == kine_by_gi.end()) ? -1 : kit->second;
+            // A shower segment's particle is the shower of its T_kine row, so
+            // particle_id and kine_index name the same shower even when two
+            // showers share the segment (that row is the lowest shower row).
+            if (sit != seg_to_shower.end() && key.kine >= 0
+                && static_cast<size_t>(key.kine) < ki.kine_particle_id.size()
+                && static_cast<size_t>(key.kine) < ki.kine_particle_is_shower.size()
+                && ki.kine_particle_is_shower[key.kine]) {
+                key.particle = ki.kine_particle_id[key.kine];
+            }
             key.enu = key.kine >= 0 ? 1 : 0;
             key.pf = (pf_ids.count(key.particle) || pf_ids.count(own)) ? 1 : 0;
             const int p = piece_of(key);
@@ -552,7 +563,8 @@ void Root::SbndPrMagnifyTrackingVisitor::write_truth_match(TFile* output_tf, Clu
         }
     }
 
-    log->debug("SbndPrMagnifyTrackingVisitor: truth match: {} tracks, {} pieces, {} overlap rows, "
+    // info, not debug: the double claims bias purity/IoU (PR 544 review, item 7).
+    log->info("SbndPrMagnifyTrackingVisitor: truth match: {} tracks, {} pieces, {} overlap rows, "
                "{} pf candidates; {} segments mapped by closest point, {} points claimed twice",
                tracks.size(), pieces.size(), acc.size(), pf_by_nu.size(), n_claim_fallback, n_claim_dup);
 }

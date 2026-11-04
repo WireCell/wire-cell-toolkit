@@ -266,7 +266,9 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
                 PR::IndexedVertexSet sv;
                 PR::IndexedSegmentSet ss;
                 shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
-                for (const auto& seg : ss) seg_to_shower[seg] = shower;
+                // First shower wins; a shared segment is settled by its T_kine row below
+                // (PR 544 review, item 8).
+                for (const auto& seg : ss) seg_to_shower.emplace(seg, shower);
             }
             for (auto ed : PR::ordered_edges(*graph)) {
                 auto seg = (*graph)[ed].segment;
@@ -282,6 +284,13 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
                 sg_in_enu = (lit != link_by_gi.end()) ? 1 : 0;
                 sg_kine_index = sg_in_enu ? lit->second.first : -1;
                 sg_kine_n_rows = sg_in_enu ? lit->second.second : 0;
+                // shower_id = the shower of the segment's T_kine row, as kine_index.
+                if (sit != seg_to_shower.end() && sg_kine_index >= 0
+                    && static_cast<size_t>(sg_kine_index) < ki.kine_particle_id.size()
+                    && static_cast<size_t>(sg_kine_index) < ki.kine_particle_is_shower.size()
+                    && ki.kine_particle_is_shower[sg_kine_index]) {
+                    sg_shower_id = ki.kine_particle_id[sg_kine_index];
+                }
                 auto [start_vtx, end_vtx] = PR::find_vertices(*graph, seg);
                 sg_start_vertex_id = vtx_display_id(start_vtx);
                 sg_end_vertex_id = vtx_display_id(end_vtx);
