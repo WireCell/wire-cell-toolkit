@@ -21,6 +21,8 @@ Config (put per-site paths in a --configfile):
                   {TAG: {model: ..., cfg: ..., app: ...}}; each TAG is a style
                   (letters, digits, _), with outputs results/TAG-test_{sample}.pt
   input_dir       directory holding the linedepos-*.h5 files (default: WORKDIR)
+  lineseeds       seeds of the line samples, i.e. files linedepos-...-seedS-g4-*.h5
+                  (Snakefile lineseeds); unset for unseeded files
   cosmics_dir     directory of N_M/ subdirectories holding cosmics_*-g4-*.h5
   cosmics_dirs    which N_M subdirectories to use (default: all of them)
   cosmics_events  events per cosmics file (default 10)
@@ -110,6 +112,7 @@ config.setdefault('app', 'xvunet')
 config.setdefault('model', '')
 config.setdefault('cfg', '')
 config.setdefault('input_dir', '')
+config.setdefault('lineseeds', None)
 config.setdefault('test_tpcs', [0])
 config.setdefault('cpt_dir', '.')
 config.setdefault('proc', '0')
@@ -187,11 +190,14 @@ TRIO_COMBOS = {
     'just_w': (False, False, True),
 }
 
-LINE_SAMPLE_RE = r'line_(?P<plane>[uvw])plane_t1-(?P<t1>\d+)-t2-(?P<t2>\d+)'
+LINE_SAMPLE_RE = r'line_(?P<plane>[uvw])plane_t1-(?P<t1>\d+)-t2-(?P<t2>\d+)(?:_seed(?P<seed>\d+))?'
 COSMICS_SAMPLE_RE = r'cosmics_(?P<dir>\d+_\d+)_ev(?P<event>\d+)'
 # The same without named groups, for wildcard constraints.
-LINE_SAMPLE = r'line_[uvw]plane_t1-\d+-t2-\d+'
+LINE_SAMPLE = r'line_[uvw]plane_t1-\d+-t2-\d+(?:_seed\d+)?'
 COSMICS_SAMPLE = r'cosmics_\d+_\d+_ev\d+'
+
+# Seeds of the line samples (Snakefile lineseeds); None for unseeded files.
+LINE_SEEDS = [str(s) for s in config['lineseeds']] if config['lineseeds'] else [None]
 
 # Where each style's model output for a sample lives: STYLE_PREFIX + 'test_{sample}.pt'.
 # xvunet-style models (all three views in, the whole APA out), by tag.  The
@@ -250,8 +256,8 @@ def angle_labels(plane):
 def h5_path(name):
     return os.path.join(config['input_dir'], name) if config['input_dir'] else name
 
-def line_sample(plane, t1, t2):
-    return f'line_{plane}plane_{angle_tag(t1, t2)}'
+def line_sample(plane, t1, t2, seed=None):
+    return f'line_{plane}plane_{angle_tag(t1, t2)}' + (f'_seed{seed}' if seed is not None else '')
 
 def parse_sample(sample):
     'Return (kind, fields) for a {sample} wildcard value.'
@@ -265,7 +271,8 @@ def sample_h5_base(sample):
     'Path of the sample\'s h5 files, up to and including "-g4-".'
     kind, s = parse_sample(sample)
     if kind == 'line':
-        return h5_path(f'linedepos-{DET}-{s["plane"]}plane-{depo_tag(s["t1"], s["t2"])}-g4-')
+        seed = f'-seed{s["seed"]}' if s['seed'] is not None else ''
+        return h5_path(f'linedepos-{DET}-{s["plane"]}plane-{depo_tag(s["t1"], s["t2"])}{seed}-g4-')
     found = glob(os.path.join(config['cosmics_dir'], s['dir'], 'cosmics_*-g4-rec-0.h5'))
     if len(found) != 1:
         raise ValueError(f'expected one cosmics_*-g4-rec-0.h5 for {sample}, found {found}')
@@ -328,6 +335,49 @@ def run_n_events(rec, tru, app, model, cfg, outputs):
     for event, out in enumerate(outputs):
         os.replace(by_entry.replace('{entry}', str(event_entry(event))), out)
 
+def line_file_re(kind, view):
+    '''
+    File regex for a run_one dataset over many line samples: the ID group is
+    the whole sample part of the name (plane, angles and seed), so samples do
+    not collide the way the default ID (digits before -g4) makes them.
+    '''
+    return rf'(?:.*/)?linedepos-{DET}-(.+)-g4-{kind}-{view}\.h5'
+
+def line_id(sample):
+    'The ID line_file_re captures for a line sample.'
+    name = os.path.basename(sample_h5_base(sample))
+    return name[len(f'linedepos-{DET}-'):-len('-g4-')]
+
+def run_n_lines(rec, tru, app, model, cfg, dataset, samples, outputs):
+    '''
+    Run every line sample through a model in a single wcpy process and name
+    the outputs by sample (outputs in samples order).  The model's cfg is
+    copied with the [run_one_dataset] keys in dataset set, to select the
+    samples by line_file_re.  wcpy orders samples by ID string.
+    '''
+    import configparser, shutil, tempfile
+    tmp = tempfile.mkdtemp(prefix='.run_n-', dir=os.path.dirname(outputs[0]) or '.')
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str
+    parser.read(cfg)
+    if not parser.has_section('run_one_dataset'):
+        parser.add_section('run_one_dataset')
+    for key, value in dataset.items():
+        parser.set('run_one_dataset', key, value)
+    batch_cfg = os.path.join(tmp, 'run_one.cfg')
+    with open(batch_cfg, 'w') as out:
+        parser.write(out)
+
+    by_entry = os.path.join(tmp, 'entry{entry}.pt')
+    device = TORCH_DEVICE
+    n = len(samples)
+    shell("wcpy dnn run_n {rec} {tru} -a {app} -l {model} -c {batch_cfg} --manual-sigmoid "
+          "-d {device} -n {n} -o '{by_entry}'")
+    order = sorted(line_id(s) for s in samples)
+    for sample, out in zip(samples, outputs):
+        os.replace(by_entry.replace('{entry}', str(order.index(line_id(sample)))), out)
+    shutil.rmtree(tmp)
+
 def set_samples(name):
     'The samples of a set: cosmics, cosmics_tune, cosmics_eval or {plane}plane_high_end.'
     if name == 'cosmics':
@@ -335,7 +385,46 @@ def set_samples(name):
     if name.startswith('cosmics_'):
         return cosmics_samples(cosmics_split()[name])
     plane = name[0]
-    return [line_sample(plane, t1, t2) for t1, t2 in ANGLES[plane]]
+    return [line_sample(plane, t1, t2, seed) for t1, t2 in ANGLES[plane] for seed in LINE_SEEDS]
+
+ALL_LINE_SAMPLES = [s for p in PLANES for s in set_samples(f'{p}plane_high_end')]
+
+def sample_group(sample):
+    '''
+    (group, replica) of a sample: (angle "t1,t2", seed) for a line sample,
+    (sample, sample) for anything else.
+    '''
+    kind, s = parse_sample(sample)
+    if kind == 'line':
+        return f'{s["t1"]},{s["t2"]}', s['seed'] or '0'
+    return sample, sample
+
+def summed_and_spread(k, n, groups, replicas):
+    '''
+    Rates of counts k and n, shaped (entries, samples), per group (in order of
+    first appearance): the rate of the counts summed over the group, and the
+    mean and standard deviation over the group's replicas of each replica's
+    rate.  Returns (group names, summed, mean, std), arrays (entries, groups).
+    '''
+    k, n = np.asarray(k, dtype=float), np.asarray(n, dtype=float)
+    names = list(dict.fromkeys(groups))
+    summed, mean, std = [], [], []
+    for g in names:
+        sel = [i for i, gi in enumerate(groups) if gi == g]
+        summed.append(ratio(k[:, sel].sum(-1), n[:, sel].sum(-1)))
+        reps = list(dict.fromkeys(replicas[i] for i in sel))
+        rates = np.stack([ratio(k[:, [i for i in sel if replicas[i] == r]].sum(-1),
+                                n[:, [i for i in sel if replicas[i] == r]].sum(-1))
+                          for r in reps], axis=-1)
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)   # all-nan groups
+            mean.append(np.nanmean(rates, axis=-1))
+            std.append(np.nanstd(rates, axis=-1))
+    return names, np.stack(summed, -1), np.stack(mean, -1), np.stack(std, -1)
+
+def ratio(num, den):
+    num, den = np.asarray(num, dtype=float), np.asarray(den, dtype=float)
+    return np.divide(num, den, out=np.full(np.broadcast(num, den).shape, np.nan), where=den > 0)
 
 def pad_channels(x, width):
     'Zero-pad the channel (second to last) dimension of x up to width.'
@@ -487,6 +576,51 @@ rule run_n_view_cosmics:
         gpu=USE_GPU
     run:
         run_n_events(input.rec, input.tru, params.app, params.model, params.cfg, output)
+
+# Every line sample (ALL_LINE_SAMPLES, all planes, angles and seeds) through a
+# model in one wcpy process, as for cosmics.  See run_n_lines.
+rule run_n_xvu_lines:
+    input:
+        rec=[f for s in ALL_LINE_SAMPLES for f in sample_h5(s, 'rec', range(3))],
+        tru=[f for s in ALL_LINE_SAMPLES for f in sample_h5(s, 'tru', range(3))],
+    output:
+        [f'<results>/{{style}}-test_{s}.pt' for s in ALL_LINE_SAMPLES]
+    params:
+        model=lambda w: XVU_MODELS[w.style]['model'],
+        cfg=lambda w: XVU_MODELS[w.style]['cfg'],
+        app=lambda w: XVU_MODELS[w.style]['app'],
+    resources:
+        gpu=USE_GPU
+    wildcard_constraints:
+        style=XVU_STYLES,
+    run:
+        run_n_lines(input.rec, input.tru, params.app, params.model, params.cfg, {
+            'rec_file_res': str([line_file_re('rec', v) for v in range(3)]),
+            'tru_file_res': str([line_file_re('tru', v) for v in range(3)]),
+        }, ALL_LINE_SAMPLES, output)
+
+rule run_n_view_lines:
+    input:
+        rec=lambda w: [f for s in ALL_LINE_SAMPLES for f in sample_h5(s, 'rec', [int(w.view)])],
+        tru=lambda w: [f for s in ALL_LINE_SAMPLES for f in sample_h5(s, 'tru', [int(w.view)])],
+    output:
+        [os.path.join(config['dnnroi_dir'], f'view{{view}}-test_{s}.pt') for s in ALL_LINE_SAMPLES]
+    params:
+        model=lambda w: config['view_models'][int(w.view)]['model'],
+        cfg=lambda w: config['view_models'][int(w.view)]['cfg'],
+        app=config['view_app'],
+    resources:
+        gpu=USE_GPU
+    run:
+        view = int(wildcards.view)
+        run_n_lines(input.rec, input.tru, params.app, params.model, params.cfg, {
+            'rec_file_re': line_file_re('rec', view),
+            'tru_file_re': line_file_re('tru', view),
+        }, ALL_LINE_SAMPLES, output)
+
+# The batched rules make the same files as the per-sample ones.
+ruleorder: run_n_xvu_lines > run_one_xvu
+ruleorder: run_n_view_lines > run_view
 
 # Concatenate the per-view outputs into the xvu channel layout.  A view model
 # that covers fewer channels than view_widths (e.g. one face of w) is
@@ -1005,67 +1139,96 @@ rule plot_trio_rates:
         fig.savefig(output[0])
         plt.close(fig)
 
+def replica_kind(set_name):
+    return 'seeds' if re.fullmatch(LINE_SET, set_name) else 'events'
+
+def grouped_bars(ax, groups, mean, std, labels, colors, zoom=True):
+    '''
+    Bars of mean, shaped (entries, groups), side by side per group, with
+    error bars of std.  zoom: start the y axis just below the data.
+    '''
+    n = len(labels)
+    width = 0.8 / n
+    xpos = np.arange(len(groups))
+    for i in range(n):
+        x = xpos + (i - (n - 1) / 2) * width
+        ax.bar(x, mean[i], width, yerr=std[i], color=colors[i], label=labels[i],
+               error_kw=dict(ecolor='black', elinewidth=0.8, capsize=1.5))
+    ax.set_xticks(xpos, groups)
+    ax.grid(True, axis='y')
+    if zoom:
+        low = np.nanmin(mean - std)
+        high = np.nanmax(mean + std)
+        ax.set_ylim(max(0., low - 0.02), max(1.0, high) + 0.005)
+
 def plot_trio_compare(files, labels, title, set_name, png, npz):
     '''
-    Trio rates of several merged-crossplane files side by side, pooled over
-    the set (weighted by the number of valid trios): U & V & W per entry, the
-    other combinations, and U & V & W per sample.
+    Trio rates of several merged-crossplane files side by side.  Bars are the
+    mean and error bars the standard deviation over replicas (seeds for line
+    samples, events for cosmics, see sample_group).  Panels: U & V & W per entry, the other
+    combinations, and U & V & W per angle (line samples) or per event.
     '''
     files = [np.load(f) for f in files]
     names = list(TRIO_COMBOS)
-    pooled = np.array([
-        # nansum: a sample with no valid trios has nan rates and weight 0
-        [np.nansum(t[name] * t['n_valid']) / np.sum(t['n_valid']) for name in names]
-        for t in files])
-    for label, row in zip(labels, pooled):
-        print(label, ' '.join(f'{n}={r:.3f}' for n, r in zip(names, row)))
+    samples = [str(s) for s in files[0]['samples']]
+    groups, replicas = (list(x) for x in zip(*(sample_group(s) for s in samples)))
+    n_valid = np.array([t['n_valid'] for t in files])        # (entries, samples)
+    # Trios in each combination; a sample with no valid trios has nan rates.
+    counts = {name: np.nan_to_num(np.array([t[name] for t in files]) * n_valid) for name in names}
+
+    overall = {name: summed_and_spread(counts[name], n_valid, ['all'] * len(samples), replicas)
+               for name in names}
+    pooled, mean, std = (np.stack([overall[name][j][:, 0] for name in names], axis=-1)
+                         for j in (1, 2, 3))                   # (entries, combos)
+    group_names, uvw_sum, uvw_mean, uvw_std = summed_and_spread(counts['uvw'], n_valid, groups, replicas)
+    for label, row, err in zip(labels, pooled, std):
+        print(label, ' '.join(f'{n}={r:.3f}+-{e:.3f}' for n, r, e in zip(names, row, err)))
 
     n = len(labels)
     colors = plt.cm.tab20(np.arange(n) % 20)
     fig, (top, middle, bottom) = plt.subplots(
         3, 1, figsize=(13, 4 + 0.35 * n + 8), height_ratios=[0.35 * n + 1, 4, 4])
-    fig.suptitle(title)
+    spread = replica_kind(set_name)
+    fig.suptitle(f'{title}\nmean $\\pm$ std over {spread}')
 
     # U & V & W, the headline number: one labelled bar per entry, zoomed in.
-    uvw = pooled[:, names.index('uvw')]
+    iuvw = names.index('uvw')
     ypos = np.arange(n)[::-1]
-    top.barh(ypos, uvw, color=colors)
-    for y, value in zip(ypos, uvw):
-        top.text(value, y, f' {value:.3f}', va='center', fontsize=8)
+    top.barh(ypos, mean[:, iuvw], xerr=std[:, iuvw], color=colors,
+             error_kw=dict(ecolor='black', capsize=2))
+    for y, value, err in zip(ypos, mean[:, iuvw], std[:, iuvw]):
+        top.text(min(value + err, 1.0), y, f' {value:.3f} $\\pm$ {err:.3f}', va='center', fontsize=8)
     top.set_yticks(ypos, labels, fontsize=8)
-    top.set_xlim(max(0., np.nanmin(uvw) - 0.03), 1.0)
-    top.set_xlabel('U & V & W fraction of true trios (pooled)')
+    low = np.nanmin(mean[:, iuvw] - std[:, iuvw])
+    top.set_xlim(max(0., low - 0.03), 1.02)
+    top.set_xlabel('U & V & W fraction of true trios')
     top.grid(True, axis='x')
 
     # The rest: trios seen in two views or only one.
-    others = [name for name in names if name != 'uvw']
-    width = 0.8 / n
-    xpos = np.arange(len(others))
-    for i, (label, row) in enumerate(zip(labels, pooled)):
-        middle.bar(xpos + i * width, [row[names.index(o)] for o in others], width,
-                   color=colors[i], label=label)
-    middle.set_xticks(xpos + width * (n - 1) / 2, others)
-    middle.set_ylabel('Fraction of true trios (pooled)')
-    middle.grid(True, axis='y')
+    others = [i for i, name in enumerate(names) if name != 'uvw']
+    grouped_bars(middle, [names[i] for i in others], mean[:, others], std[:, others],
+                 labels, colors, zoom=False)
+    middle.set_ylabel('Fraction of true trios')
     middle.legend(fontsize=7, loc='upper left', bbox_to_anchor=(1.01, 1.0))
 
-    for i, t in enumerate(files):
-        bottom.plot(t['uvw'], marker='o', color=colors[i])
-    xlabels = set_labels(set_name)
-    if xlabels:
-        bottom.set_xticks(range(len(xlabels)), xlabels)
+    if spread == 'seeds':
+        grouped_bars(bottom, group_names, uvw_mean, uvw_std, labels, colors)
+        bottom.set_xlabel(f'{set_name[0]}-plane line angles (t1, t2), '
+                          f'{len(set(replicas))} seed(s) each')
     else:
+        for i, t in enumerate(files):
+            bottom.plot(t['uvw'], marker='o', color=colors[i])
         bottom.set_xlabel('Sample')
+        bottom.grid(True, axis='both')
     bottom.set_ylabel('U & V & W fraction')
-    bottom.grid(True, axis='both')
 
     fig.tight_layout()
     fig.savefig(png)
     plt.close(fig)
 
-    np.savez(npz, labels=labels, combos=names, pooled=pooled,
-             uvw=np.array([t['uvw'] for t in files]),
-             n_valid=np.array([t['n_valid'] for t in files]))
+    np.savez(npz, labels=labels, combos=names, pooled=pooled, mean=mean, std=std,
+             samples=samples, uvw=np.array([t['uvw'] for t in files]), n_valid=n_valid,
+             groups=group_names, uvw_sum=uvw_sum, uvw_mean=uvw_mean, uvw_std=uvw_std)
 
 # compare_styles side by side at one fixed threshold.
 rule compare_trio_rates:
@@ -1126,8 +1289,6 @@ def line_counts(kind, y, labels, threshold):
         counts = [truth.sum(), n_matched, reco.sum(), n_matched]
     return {key: int(count) for key, count in zip(COUNT_KEYS, counts)}
 
-def ratio(num, den):
-    return np.divide(num, den, out=np.full(np.shape(num), np.nan), where=np.asarray(den) > 0)
 
 # {type} efficiency and purity on the sample's own plane, at the style's best
 # {type} F1 threshold for that view.
@@ -1168,7 +1329,7 @@ rule merge_op_line_effpur:
                  thresholds=np.array([float(t['threshold']) for t in parts]),
                  **{key: np.array([int(t[key]) for t in parts]) for key in COUNT_KEYS})
 
-# op_compare entries' efficiency and purity vs angle.
+# op_compare entries' efficiency and purity vs angle: mean and std over seeds.
 rule compare_op_line_effpur:
     input:
         lambda w: [f'<results>/op-{w.type}F1_{mode}-{style}-effpur_{w.set}.npz'
@@ -1183,31 +1344,44 @@ rule compare_op_line_effpur:
         parts = [np.load(f) for f in input]
         labels = [f'{style} {mode} ({float(t["thresholds"][0]):.2f})'
                   for (style, mode), t in zip(config['op_compare'], parts)]
-        effs = np.array([t['effs'] for t in parts])
-        purs = np.array([t['purs'] for t in parts])
-        counts = {key: np.array([t[key] for t in parts]) for key in COUNT_KEYS}
+        counts = {key: np.array([t[key] for t in parts]) for key in COUNT_KEYS}   # (entries, samples)
+        samples = [str(s) for s in parts[0]['samples']]
+        groups, replicas = (list(x) for x in zip(*(sample_group(s) for s in samples)))
+        nseeds = len(set(replicas))
+
+        res = {}
+        for name, num, den in (('eff', 'n_true_matched', 'n_true'), ('pur', 'n_reco_matched', 'n_reco')):
+            angles, res[f'{name}_sum'], res[f'{name}_mean'], res[f'{name}_std'] = \
+                summed_and_spread(counts[num], counts[den], groups, replicas)
+            _, s, m, d = summed_and_spread(counts[num], counts[den], ['all'] * len(samples), replicas)
+            res[f'{name}_all_sum'], res[f'{name}_all_mean'], res[f'{name}_all_std'] = s[:, 0], m[:, 0], d[:, 0]
+        # Counts summed over seeds per angle, (entries, angles).
+        sums = {key: np.stack([counts[key][:, [i for i, g in enumerate(groups) if g == a]].sum(-1)
+                               for a in angles], axis=-1) for key in COUNT_KEYS}
+
         colors = plt.cm.tab20(np.arange(len(labels)) % 20)
         plane = wildcards.set[0]
         # The truth does not depend on the model: show its size under each angle.
-        xlabels = [f'{angle}\n{n} true' for angle, n in zip(set_labels(wildcards.set), counts['n_true'][0])]
+        xlabels = [f'{a}\n{n} true' for a, n in zip(angles, sums['n_true'][0])]
 
-        fig, axs = plt.subplots(2, 1, figsize=(13, 9), sharex=True)
-        for ax, values, name in zip(axs, (effs, purs), ('efficiency', 'purity')):
-            for label, row, color in zip(labels, values, colors):
-                ax.plot(row, marker='o', color=color, label=label)
+        fig, axs = plt.subplots(2, 1, figsize=(15, 10), sharex=True)
+        for ax, name in zip(axs, ('efficiency', 'purity')):
+            key = name[:3]
+            grouped_bars(ax, xlabels, res[f'{key}_mean'], res[f'{key}_std'], labels, colors)
             ax.set_ylabel(f'{wildcards.type} {name}')
-            ax.grid(True, axis='both')
         axs[0].legend(fontsize=7, loc='upper left', bbox_to_anchor=(1.01, 1.0))
-        axs[1].set_xticks(range(len(xlabels)), xlabels)
-        axs[1].set_xlabel(f'{plane}-plane line angles (t1, t2) and number of true {wildcards.type}s')
+        axs[1].set_xlabel(f'{plane}-plane line angles (t1, t2) and number of true {wildcards.type}s '
+                          f'summed over {nseeds} seed(s)')
         fig.suptitle(f'{wildcards.set}: {wildcards.type} efficiency and purity on the '
                      f'{LINE_METRIC_RANGES[PLANE_TO_VIEW[plane]]} channels, '
-                     f'at best {wildcards.type} F1 on {OP_TUNE_SET}')
+                     f'at best {wildcards.type} F1 on {OP_TUNE_SET}\n'
+                     f'mean $\\pm$ std over seeds')
         fig.tight_layout()
         fig.savefig(output.png)
         plt.close(fig)
-        np.savez(output.npz, labels=labels, angles=set_labels(wildcards.set),
-                 effs=effs, purs=purs, **counts)
+        np.savez(output.npz, labels=labels, angles=angles, nseeds=nseeds, samples=samples,
+                 **res, **{f'{key}_sum': value for key, value in sums.items()},
+                 **{f'{key}_sample': value for key, value in counts.items()})
 
 def op_styles():
     'The styles in op_compare, in order of first appearance.'
@@ -1223,7 +1397,7 @@ def describe_set(name):
 def text_page(pdf, lines):
     fig = plt.figure(figsize=(11, 8.5))
     fig.text(0.04, 0.96, '\n'.join(lines), va='top', family='monospace', fontsize=8)
-    pdf.savefig(fig)
+    pdf.savefig(fig, bbox_inches='tight')
     plt.close(fig)
 
 def table_page(pdf, title, col_labels, row_labels, cells):
@@ -1235,7 +1409,8 @@ def table_page(pdf, title, col_labels, row_labels, cells):
     table.set_fontsize(7)
     table.auto_set_column_width(list(range(-1, len(col_labels))))
     table.scale(1, 1.3)
-    pdf.savefig(fig)
+    # tight: wide tables extend past the axes; grow the page to fit them.
+    pdf.savefig(fig, bbox_inches='tight')
     plt.close(fig)
 
 def image_page(pdf, png):
@@ -1296,23 +1471,33 @@ rule op_report:
         with PdfPages(output[0]) as pdf:
             text_page(pdf, lines)
 
-            uvw = {key: t['pooled'][:, list(t['combos']).index('uvw')] for key, t in compare.items()}
-            table_page(pdf, 'Pooled U & V & W fraction of true trios, at each best-F1 operating point',
+            def uvw(key, i):
+                t = compare[key]
+                j = list(t['combos']).index('uvw')
+                return f"{t['mean'][i, j]:.3f} $\\pm$ {t['std'][i, j]:.3f}"
+
+            table_page(pdf, 'U & V & W fraction of true trios at each best-F1 operating point:\n'
+                       'mean $\\pm$ std over seeds (lines) or events (cosmics)',
                        [f'{s}\n{kind} F1' for s in sets for kind in OP_KINDS], entries,
-                       [[f'{uvw[s, kind][i]:.3f}' for s in sets for kind in OP_KINDS]
+                       [[uvw((s, kind), i) for s in sets for kind in OP_KINDS]
                         for i in range(len(entries))])
 
             for s in sets:
                 for kind in OP_KINDS:
                     t = compare[s, kind]
                     cells = []
-                    for (style, mode), pooled, n_valid in zip(config['op_compare'], t['pooled'], t['n_valid']):
+                    juvw = list(t['combos']).index('uvw')
+                    for (style, mode), mean, std, n_valid in zip(config['op_compare'], t['mean'],
+                                                                 t['std'], t['n_valid']):
                         op = ops[kind, style, mode]
                         cells.append(['/'.join(f'{x:.2f}' for x in op['thresholds']),
                                       '/'.join(f'{x:.3f}' for x in op['f1'])]
-                                     + [f'{x:.3f}' for x in pooled] + [str(int(np.sum(n_valid)))])
-                    table_page(pdf, f'{s}: best {kind} F1 on {OP_TUNE_SET}, pooled trio rates',
-                               ['thresh u/v/w', 'tune F1 u/v/w'] + list(t['combos']) + ['n_valid'],
+                                     + [f'{x:.3f}' for x in mean] + [f'{std[juvw]:.3f}']
+                                     + [str(int(np.sum(n_valid)))])
+                    table_page(pdf, f'{s}: best {kind} F1 on {OP_TUNE_SET}, '
+                               f'trio rates (mean over {replica_kind(s)})',
+                               ['thresh u/v/w', 'tune F1 u/v/w'] + list(t['combos'])
+                               + [f'uvw std\n({replica_kind(s)})', 'n_valid'],
                                entries, cells)
                 for kind in OP_KINDS:
                     image_page(pdf, f'{res}/op-{kind}F1-trio-compare_{s}.png')
@@ -1321,34 +1506,30 @@ rule op_report:
                     continue
                 effpur = {kind: np.load(f'{res}/op-{kind}F1-effpur-compare_{s}.npz') for kind in OP_KINDS}
 
-                def pooled(t, i, num, den):
-                    k, n = int(t[num][i].sum()), int(t[den][i].sum())
-                    return f'{k / n:.3f} ({k}/{n})' if n else 'nan'
-
+                nseeds = int(effpur[OP_KINDS[0]]['nseeds'])
                 cells = []
                 for i in range(len(entries)):
                     row = []
                     for kind in OP_KINDS:
                         t = effpur[kind]
-                        row += [pooled(t, i, 'n_true_matched', 'n_true'),
-                                pooled(t, i, 'n_reco_matched', 'n_reco'),
-                                f'{np.nanmean(t["effs"][i]):.3f}', f'{np.nanmean(t["purs"][i]):.3f}',
-                                f'{np.nanmin(t["effs"][i]):.3f}', f'{np.nanmin(t["purs"][i]):.3f}']
+                        row += [f'{t["eff_all_mean"][i]:.3f} $\\pm$ {t["eff_all_std"][i]:.3f}',
+                                f'{t["pur_all_mean"][i]:.3f} $\\pm$ {t["pur_all_std"][i]:.3f}',
+                                f'{np.nanmin(t["eff_mean"][i]):.3f}', f'{np.nanmin(t["pur_mean"][i]):.3f}']
                     cells.append(row)
-                table_page(pdf, f'{s}: efficiency and purity over the angles, '
-                           f'each kind at its own best F1 on {OP_TUNE_SET}\n'
-                           'pooled = summed counts (found/true, real/reco); mean and min over angles',
+                table_page(pdf, f'{s}: efficiency and purity, each kind at its own best F1 on {OP_TUNE_SET}\n'
+                           f'mean $\\pm$ std over {nseeds} seed(s) (each seed over all angles); '
+                           'min over angles of the per-angle mean',
                            [f'{kind}\n{name}' for kind in OP_KINDS
-                            for name in ('pooled eff', 'pooled pur', 'mean eff', 'mean pur', 'min eff', 'min pur')],
+                            for name in ('eff', 'pur', 'min eff', 'min pur')],
                            entries, cells)
 
                 for kind in OP_KINDS:
                     t = effpur[kind]
-                    table_page(pdf, f'{s}: {kind} counts per angle, as efficiency found/true and '
-                               f'purity real/reco, at best {kind} F1 on {OP_TUNE_SET}',
+                    table_page(pdf, f'{s}: {kind} counts per angle summed over {nseeds} seed(s), as '
+                               f'efficiency found/true and purity real/reco, at best {kind} F1 on {OP_TUNE_SET}',
                                list(t['angles']), entries,
-                               [[f'{t["n_true_matched"][i][j]}/{t["n_true"][i][j]}  '
-                                 f'{t["n_reco_matched"][i][j]}/{t["n_reco"][i][j]}'
+                               [[f'{t["n_true_matched_sum"][i][j]}/{t["n_true_sum"][i][j]}  '
+                                 f'{t["n_reco_matched_sum"][i][j]}/{t["n_reco_sum"][i][j]}'
                                  for j in range(len(t['angles']))]
                                 for i in range(len(entries))])
                 for kind in OP_KINDS:

@@ -53,10 +53,16 @@ snakemake -s /path/to/evaluate.snakefile \
 
 | Sample | `{sample}` name | Inputs |
 |---|---|---|
-| Line depos | `line_Pplane_t1-A-t2-B` | `input_dir/linedepos-pdhd-Pplane-t1_A-t2_B-g4-{rec,tru}-{0,1,2}.h5` and `...-g4-trio.h5` |
+| Line depos | `line_Pplane_t1-A-t2-B[_seedS]` | `input_dir/linedepos-pdhd-Pplane-t1_A-t2_B[-seedS]-g4-{rec,tru}-{0,1,2}.h5` and `...-g4-trio.h5` |
 | Cosmics | `cosmics_N_M_evE` | `cosmics_dir/N_M/cosmics_*-g4-{rec,tru}-{0,1,2}.h5`, event group `E`, and `...-g4-trio.h5` |
 
 - The line angles per plane are fixed in `ANGLES` near the top of the snakefile.
+- Seeded line samples (from `Snakefile` with `lineseeds`) are used when
+  `lineseeds` is set here too, e.g. `lineseeds: [0, 1, 2]`. Each (plane, angle)
+  then has one sample per seed.
+- All the line samples go through each model in a single `wcpy dnn run_n`. The
+  rules copy the model cfg with a `[run_one_dataset]` file regex whose ID is the
+  whole sample name, so the inputs don't collide.
 - Cosmics use every `N_M` directory under `cosmics_dir`, or the list in
   `cosmics_dirs`, with `cosmics_events` events each (default 10).
 - **Always set `cosmics_dirs` to directories held out of training.** The
@@ -299,21 +305,24 @@ xvunet `perplane`, xvunet `single`, and merged dnnroi `perplane`.
 (`uplane_high_end`, `vplane_high_end`, `wplane_high_end`). Its pages:
 
 1. Setup: tune and eval sets, threshold range, and each model's checkpoint and cfg.
-2. Summary: the pooled U & V & W rate of every `op_compare` entry, for each
-   set and F1 kind.
+2. Summary: the U & V & W rate of every `op_compare` entry, for each set and
+   F1 kind, as mean ± std over seeds (line sets) or events (cosmics).
 3. For each set:
    - for ROI F1 and for pixel F1, a table with one row per entry: its thresholds
-     (u/v/w), their F1 on the tune set, the pooled trio rates, and the number of
-     valid trios;
-   - the two comparison plots. For line sets, the per-sample panel is per angle.
+     (u/v/w), their F1 on the tune set, the mean trio rates and the uvw std,
+     and the number of valid trios;
+   - the two comparison plots, as mean ± std over seeds or events. For line
+     sets, the bottom panel shows each angle's mean ± std over its seeds.
    - For line sets only: efficiency and purity (recall and precision) on the
      sample's own plane (u, v or w0). ROI metrics are at each entry's best ROI
-     F1 threshold and pixel metrics at its best pixel F1 threshold. There is a
-     summary table: pooled over the angles (summed counts, e.g.
-     `0.938 (181/193)`), plus the mean and minimum. There are tables of the
-     counts per angle (found/true, real/reco), and plots of both against angle
-     with the number of true ROIs or pixels under each angle
-     (`<results>/op-{roi,pixel}F1-effpur-compare_Pplane_high_end.{png,npz}`).
+     F1 threshold and pixel metrics at its best pixel F1 threshold. Pages:
+     - a summary table: mean ± std over seeds (each seed taken over all
+       angles), and the minimum over angles of the per-angle mean;
+     - tables of the raw counts per angle, summed over seeds (found/true,
+       real/reco);
+     - bar charts per angle of mean ± std over seeds, with the number of true
+       ROIs or pixels (summed over seeds) under each angle
+       (`<results>/op-{roi,pixel}F1-effpur-compare_Pplane_high_end.{png,npz}`).
      A line track at these angles crosses only about 12–60 channels of its own
      plane, with one ROI per channel. So per-angle ROI rates move in large steps,
      and the models often tie exactly.

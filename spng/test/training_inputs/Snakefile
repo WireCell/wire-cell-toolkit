@@ -195,19 +195,20 @@ rule spng_mpsigproc:
         jsonnet=config['mpsigproc_training_js'],
         tpcid=config['tpcid'],
         detname=config['detname'],
-        device=config['device']
+        device=config['device'],
+        seedstr='',
     shadow: "minimal"
     shell:
         """
         #export WIRECELL_PATH=/lbne/u/jcalcutt/wire-cell-toolkit/spng/:/lbne/u/jcalcutt/wire-cell-toolkit/spng/cfg:/lbne/u/jcalcutt/wire-cell-data:${{WIRECELL_PATH}}
         wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
             -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
-            -A "device={params.device}"
+            -A "device={params.device}" {params.seedstr}
         # tar the output files
-	to_tar="dnnroi-training-truth.npz dnnroi-training-fodder.npz"
-	if [[ {params.jsonnet} == "dnnroi-training-trios.jsonnet" ]]; then
-	  to_tar="$to_tar dnnroi-training-trio.npz"
-	fi
+        to_tar="dnnroi-training-truth.npz dnnroi-training-fodder.npz"
+        if [[ {params.jsonnet} == "dnnroi-training-trios.jsonnet" ]]; then
+            to_tar="$to_tar dnnroi-training-trio.npz"
+        fi
         tar -cf {output} $to_tar
         """
 
@@ -220,77 +221,14 @@ use rule spng_mpsigproc as spng_mpsigproc_target with:
 use rule spng_mpsigproc as spng_msigproc_lines with:
     resources:
         gpu = 1 if config['device'] == 'gpu' else 0
+    params:
+        seedstr= lambda w: f'--tla-code "seeds=[{w.seed}]"'
     input:
         'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
     output:
-        temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
-
-#rule spng_mpsigproc_lines:
-#    resources:
-#        gpu = 1 if config['device'] == 'gpu' else 0
-#    input:
-#        'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'
-#    output:
-#        temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
-#    params:
-#        jsonnet=config['mpsigproc_training_js'],
-#        tpcid=config['tpcid'],
-#        detname=config['detname'],
-#        device=config['device'],
-#    shadow: "minimal"
-#    envmodules:
-#      "wire-cell-toolkit/spng-gcc-11.5.0-fk4b2v4"
-#    shell:
-#        """
-#        wire-cell -l stdout -L debug cfg/spng/{params.jsonnet} -A "input={input}" \
-#            -A "tpcid={params.tpcid}" -A "detname={params.detname}" --tla-code "crossed_views=[1,1,1]" \
-#            -A "device={params.device}"
-#        # tar the output files
-#        tar -cf {output} dnnroi-training-truth.npz \
-#        dnnroi-training-fodder.npz
-#        """
+        temp("sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}.tar")
 
 
-# config.setdefault('external_loc', '')
-
-# rule spng_densesigproc:
-#     input:
-#         #TODO Remove external loc
-#         os.path.join(config['external_loc'], "cosmics_{sample}_wct-depos.npz"),
-#     output:
-#         temp("sigproc-spng-dense-cosmics_{sample}.tar")
-#         # "sigproc-spng-dense-{name}.tar"
-#     shadow: "minimal"
-#     params:
-#         jsonnet='dnnroi-training-dense-only.jsonnet',
-#         detname=config['detname'],
-#     shell:
-#         """
-#         wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
-#             -A "tpcid=0" -A "detname={params.detname}"
-#         # tar the output files
-#         tar -cf {output} dnnroi-training-truth.npz \
-#         dnnroi-training-fodder.npz
-#         """
-
-# rule spng_densesigproc_lines:
-#     input:
-#         #TODO Remove external loc
-#         os.path.join(config['external_loc'], 'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}_wct-depos.npz'),
-#     output:
-#         temp("sigproc-spng-dense-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar")
-#     shadow: "minimal"
-#     params:
-#         jsonnet='dnnroi-training-dense-only.jsonnet',
-#         detname=config['detname'],
-#     shell:
-#         """
-#         wire-cell -l stdout -L debug {params.jsonnet} -A "input={input}" \
-#             -A "tpcid=0" -A "detname={params.detname}"
-#         # tar the output files
-#         tar -cf {output} dnnroi-training-truth.npz \
-#         dnnroi-training-fodder.npz
-#         """
 
 rule convert_trio:
     input:
@@ -306,10 +244,15 @@ rule convert_trio:
 
 use rule convert_trio as convert_trio_line with:
   input:
-     "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+     "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}.tar"
   output:
-     "linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-trio.h5"
+     "linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}-g4-trio.h5"
 
+use rule convert_trio as convert_trio_target with:
+  input:
+     "sigproc-spng-mp-target-{target}_{sample}.tar"
+  output:
+     "target-{target}_{sample}-g4-trio.h5"
 ## For more flexibility, create a separate rule to unpack into hdf5 for each plane
 for i in range(3):
     rule:
@@ -334,11 +277,11 @@ for i in range(3):
     rule:
         name: f'convert_spng_mp_to_hdf5_lines_{i}'
         input:
-            "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}.tar"
+            "sigproc-spng-mp-linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}.tar"
         output:
             **{
-                f'rec{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-'+f'{i}.h5',
-                f'tru{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-tru-'+f'{i}.h5',
+                f'rec{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}-g4-rec-'+f'{i}.h5',
+                f'tru{i}':'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}-g4-tru-'+f'{i}.h5',
             }
         script:
             "scripts/convert_to_h5mpSnake.py"
@@ -457,13 +400,15 @@ def get_angles_by_plane(plane):
         raise RuntimeError(f'Unknown plane {plane}')
     return angles
 
+
+config.setdefault('lineseeds', ['0'])
 rule high_end_mp_hdf5:
     input:
-        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-rec-{i}.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane) for i in range(3)],
+        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}-g4-rec-{i}.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane) for i in range(3) for seed in config['lineseeds']],
 
 rule high_end_mp_hdf5_trios:
     input:
-        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-g4-trio.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane)],
+        *[f'linedepos-pdhd-{plane}plane-t1_{t1}-t2_{t2}-seed{seed}-g4-trio.h5' for plane in ['u','v','w'] for t1,t2 in get_angles_by_plane(plane) for seed in config['lineseeds']],
 
 #
 # Run an a reco/true h5 pair through a model
