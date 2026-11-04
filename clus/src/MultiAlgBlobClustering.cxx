@@ -645,7 +645,8 @@ void MultiAlgBlobClustering::ensure_own_sink()
 {
     if (m_bee_disabled) return;
     if (!m_bee_zip_templated) return;
-    if (m_eventNo == m_bee_zip_open_evt) return;
+    if (m_bee_zip_open_evt >= 0 && m_eventNo == m_bee_zip_open_evt
+        && m_runNo == m_bee_zip_open_run && m_subRunNo == m_bee_zip_open_sub) return;
     if (m_bee_zip_open_evt >= 0) {
         m_sink.close();
     }
@@ -656,6 +657,8 @@ void MultiAlgBlobClustering::ensure_own_sink()
     m_sink.reset(name, m_initial_index);
     m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
     m_bee_zip_open_evt = m_eventNo;
+    m_bee_zip_open_run = m_runNo;
+    m_bee_zip_open_sub = m_subRunNo;
     log->debug("own Bee zip {} (event {})", name, m_eventNo);
 }
 
@@ -3966,7 +3969,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     if (md_rse) {
         // Flush the previous event FIRST, while m_runNo/... still describe it.
-        if (m_last_ident >= 0 && m_last_ident != ident) { flush(ident); }
+        // A new event is a new ident OR a new RSE: in a step-2 group run two
+        // events of different subruns can share an event number, hence an
+        // ident, and comparing idents alone merged them into one Bee event
+        // (PR 544 review, item 1).  m_runNo/... hold the previous event's RSE.
+        const bool new_rse = md_run != m_runNo || md_sub != m_subRunNo || md_evt != m_eventNo;
+        if (m_last_ident >= 0 && (m_last_ident != ident || new_rse)) { flush(ident); }
         m_runNo = md_run; m_subRunNo = md_sub; m_eventNo = md_evt;
         if (!m_use_shared_sink) {
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
