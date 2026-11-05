@@ -427,7 +427,11 @@ def label_event(ev, det=None, params=None):
 def instance_table(ev, T, R, NI, uroots, inst):
     nr = T.nrow; n = ev.n; q = ev.q
     cols = {k: np.zeros(NI, np.int64) for k in ("root_row", "g4_id", "kind", "cls_obj", "pdg", "parent_inst", "parent_g4", "edge", "interaction", "origin", "flags", "n_dep", "nseg", "npiece")}
-    fcols = {k: np.zeros(NI, np.float64) for k in ("q", "e_dep_mev", "ke_mev", "vis_frac", "ratio", "chord_mm", "run_mm", "wait_ns", "main_ext_mm", "max_ext_mm")}
+    fcols = {k: np.zeros(NI, np.float64) for k in ("q", "e_dep_mev", "ke_mev", "vis_frac", "ratio", "chord_mm", "run_mm", "wait_ns", "main_ext_mm", "max_ext_mm",
+                                                   "start_x", "start_y", "start_z", "end_x", "end_y", "end_z", "g4_start_x", "g4_start_y", "g4_start_z", "g4_end_x", "g4_end_y", "g4_end_z")}
+    for k in ("start_x", "start_y", "start_z", "end_x", "end_y", "end_z", "g4_start_x", "g4_start_y", "g4_start_z", "g4_end_x", "g4_end_y", "g4_end_z"):
+        fcols[k][:] = np.nan
+    Xr = ev.Xreco
     origins = []; oidx = {}
     root_inst = {int(r): i for i, r in enumerate(uroots.tolist())}
     qi = np.bincount(inst, weights=q, minlength=NI); ei = np.bincount(inst, weights=ev.energy, minlength=NI); ni = np.bincount(inst, minlength=NI)
@@ -451,6 +455,14 @@ def instance_table(ev, T, R, NI, uroots, inst):
             cols["parent_inst"][i] = -1; cols["parent_g4"][i] = -1; cols["interaction"][i] = -1; cols["origin"][i] = -1
             continue
         cols["root_row"][i] = r; cols["g4_id"][i] = T.tt[r]; cols["kind"][i] = T.kind[r] if not T.fold[r] else KIND["OTHER"]
+        # geometry for a later vertex fit: the first / last own deposit in the reco frame (time order) and the G4 start / end (true frame, mm)
+        mem_i = R.o_r[R.st_r[r]:R.st_r[r + 1]]; own_i = mem_i[(ev.otid[mem_i] == T.tt[r]) & np.isfinite(Xr[mem_i, 0])]
+        if not len(own_i):
+            own_i = mem_i[np.isfinite(Xr[mem_i, 0])]
+        if len(own_i):
+            o_i = own_i[np.argsort(ev.T0[own_i], kind="stable")]
+            fcols["start_x"][i], fcols["start_y"][i], fcols["start_z"][i] = Xr[o_i[0]]; fcols["end_x"][i], fcols["end_y"][i], fcols["end_z"][i] = Xr[o_i[-1]]
+        fcols["g4_start_x"][i], fcols["g4_start_y"][i], fcols["g4_start_z"][i] = T.S0[r]; fcols["g4_end_x"][i], fcols["g4_end_y"][i], fcols["g4_end_z"][i] = T.S1[r]
         cols["cls_obj"][i] = R.cls_row[r]; cols["pdg"][i] = T.pdg[r]
         fcols["ke_mev"][i] = T.ke[r]; fcols["vis_frac"][i] = own_e[r] / T.ke[r] if T.ke[r] > 0 else 0.0
         m = T.mrow[r]

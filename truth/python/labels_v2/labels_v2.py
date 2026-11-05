@@ -16,7 +16,8 @@ and the v1 columns lab_tid / lab_orig_tid / lab_cls / lab_pf_node / lab_d_traj f
 Per instance (inst_*): root_row, g4_id, kind (0 track kind, 1 delta, 2 Michel, 3 EM object, 4 other), cls_obj, pdg,
 parent_inst, parent_g4, edge, interaction, origin (index into inst_origin_names), flags (1 orphan, 2 buried, 4 hidden start, 8 hidden end, 16 vertex stub,
 32 absorbed, 64 swallowed, 128 resolved, 256 hidden attach, 512 primary, 2048 visible, 4096 unresolved long track), n_dep, nseg, npiece, q, e_dep_mev,
-ke_mev, vis_frac, ratio, chord_mm, run_mm, wait_ns, main_ext_mm (the delta / Michel main free piece), max_ext_mm (an EM instance's largest piece, >= 2-view extent).  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json.
+ke_mev, vis_frac, ratio, chord_mm, run_mm, wait_ns, main_ext_mm (the delta / Michel main free piece), max_ext_mm (an EM instance's largest piece, >= 2-view extent), start_x/y/z and end_x/y/z (first / last own deposit, reco frame, mm),
+g4_start_x/y/z and g4_end_x/y/z (the G4 start / end, true frame, mm; for a vertex fit).  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json.
 """
 import ctypes, hashlib, json, os, sys, time
 if __name__ == "__main__":
