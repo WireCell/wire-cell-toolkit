@@ -10,8 +10,14 @@ DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="f
   trad           bytes of 3 `dtype` values: the traditional main vertex (cm, raw reco frame), NaN if none
   q_scale, q_offset  float
 Returns bytes of 4 `dtype` values [x, y, z, score]: the DV2-MAX top-1 vertex in the RAW reco frame and its calibrated
-P(< 1 cm) in [0, 1]; empty bytes when no prediction is made (fewer than 5 points, no candidate, or an internal error,
-which is reported on stderr; set DV2_STRICT=1 to raise instead).  The caller then keeps the traditional vertex.
+P(< 1 cm) in [0, 1]; empty bytes when no prediction is made (fewer than 5 points or no candidate).  The caller then
+keeps the traditional vertex.  Any other error raises, which fails the job; DV2_STRICT=0 instead reports it on stderr
+and returns empty bytes (the traditional vertex for that call).
+
+DV2_Load(weights) -> bytes
+  Imports the model code and loads the bundle (the caller's configure step), so a broken environment (missing package,
+  bad bundle, sha256 mismatch) fails at startup instead of at the first event.  Raises on any error, whatever
+  DV2_STRICT says.  Returns the load-time breakdown as JSON bytes.
 
 Environment: DV2_THREADS (torch / LightGBM threads, default 1; interop threads are set to 1), DV2_HOOK_LOG=<path>
 (append one JSON line per call: n, n_vertex_rows, pred [raw frame], score, score_raw, source, n_cand, stage_ms, ms; the
@@ -68,6 +74,15 @@ def _vertexer(weights):
     return v
 
 
+def DV2_Load(weights):
+    _vertexer(weights)
+    return json.dumps({k: v for k, v in _FIRST.items() if k != "reported"}).encode()
+
+
+def _strict():
+    return os.environ.get("DV2_STRICT", "1") != "0"
+
+
 def _hook(rec):
     path = os.environ.get("DV2_HOOK_LOG")
     if path:
@@ -102,8 +117,8 @@ def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtyp
             out = np.array([p[0], p[1], p[2], r["score"]], dtype=dt).tobytes()
             rec.update(pred=[float(c) for c in p], score=r["score"], score_raw=r["score_raw"], source=r["source"],
                        n_cand=r["n_cand"], stage_ms=r["ms"])
-    except Exception as e:                 # noqa: BLE001 - the chain keeps the traditional vertex
-        if os.environ.get("DV2_STRICT", "0") not in ("", "0"):
+    except Exception as e:                 # noqa: BLE001 - DV2_STRICT=0: the chain keeps the traditional vertex
+        if _strict():
             raise
         print(f"DV2_Vertex: {type(e).__name__}: {e} (no DV2-MAX vertex for this call)", file=sys.stderr, flush=True)
         out = b""

@@ -18,12 +18,14 @@ namespace {
             PyObject *ptype, *pvalue, *ptraceback;
             PyErr_Fetch(&ptype, &pvalue, &ptraceback);
             PyErr_NormalizeException(&ptype, &pvalue, &ptraceback);
+            PyObject* pname = ptype ? PyObject_GetAttrString(ptype, "__name__") : nullptr;
+            const char* n = pname ? PyUnicode_AsUTF8(pname) : nullptr;
             PyObject* pstr = pvalue ? PyObject_Str(pvalue) : nullptr;
-            if (pstr) {
-                const char* s = PyUnicode_AsUTF8(pstr);
-                if (s) pyerr = std::string(": ") + s;
-                Py_DECREF(pstr);
-            }
+            const char* s = pstr ? PyUnicode_AsUTF8(pstr) : nullptr;
+            pyerr = std::string(": ") + (n ? n : "Python error") + (s && *s ? std::string(": ") + s : std::string());
+            Py_XDECREF(pstr);
+            Py_XDECREF(pname);
+            PyErr_Clear();
             Py_XDECREF(ptype);
             Py_XDECREF(pvalue);
             Py_XDECREF(ptraceback);
@@ -44,6 +46,37 @@ namespace {
 }
 
 namespace WCPPyUtil {
+    std::string DV2_Load(const std::string& module, const std::string& function, const std::string& weights)
+    {
+        Py_Initialize();
+
+        PyObject* pName = PyUnicode_FromString(module.c_str());
+        PyObject* pModule = PyImport_Import(pName);
+        Py_DECREF(pName);
+        if (!pModule) {
+            throw std::runtime_error("DV2_Load: import failed for module " + module + fetch_python_error());
+        }
+        PyObject* pFunc = PyObject_GetAttrString(pModule, function.c_str());   // new reference
+        if (!pFunc || !PyCallable_Check(pFunc)) {
+            Py_XDECREF(pFunc);
+            Py_DECREF(pModule);
+            PyErr_Clear();
+            throw std::runtime_error("DV2_Load: function not found or not callable: " + module + "." + function);
+        }
+        PyObject* pArg = PyUnicode_FromString(weights.c_str());
+        PyObject* pValue = PyObject_CallFunctionObjArgs(pFunc, pArg, NULL);
+        Py_XDECREF(pArg);
+        Py_DECREF(pFunc);
+        Py_DECREF(pModule);
+        if (!pValue) {
+            throw std::runtime_error("DV2_Load: loading " + weights + " failed" + fetch_python_error());
+        }
+        std::string ret;
+        if (PyBytes_Check(pValue)) ret.assign(PyBytes_AsString(pValue), PyBytes_Size(pValue));
+        Py_DECREF(pValue);
+        return ret;
+    }
+
     std::vector<FLOAT> DV2_Vertex(const std::string& module, const std::string& function,
                                   const std::string& weights,
                                   const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,

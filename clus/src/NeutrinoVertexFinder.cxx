@@ -4896,6 +4896,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         return false;
     }
 
+    // vertex_method dv2_*: a failed DV2-MAX call (Python error, which
+    // DV2_Vertex.py raises unless DV2_STRICT=0) fails the job -- rethrown by
+    // the catch at the end instead of degrading to the traditional vertex.
+    bool dv2_call_failed = false;
     try {
         // Request top_k voxels from Python: legacy mode (flag_rerank==false) uses top_k=1
         // which returns the same 3-float argmax payload as before (byte-for-byte identical).
@@ -4926,9 +4930,15 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 trad3 = {static_cast<float>(pt.x() / units::cm), static_cast<float>(pt.y() / units::cm),
                          static_cast<float>(pt.z() / units::cm)};
             }
-            dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
-                                            static_cast<int>(cand_vertices.size()), trad3,
-                                            dQdx_scale, dQdx_offset, "float32");
+            try {
+                dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
+                                                static_cast<int>(cand_vertices.size()), trad3,
+                                                dQdx_scale, dQdx_offset, "float32");
+            }
+            catch (const std::exception&) {
+                dv2_call_failed = true;
+                throw;
+            }
             if (dump_i >= 0) m_dlvtx_calls[dump_i].payload = dnn_vtx;   // ai-helper issue 35
         } else if (dual_voxels && dual_hint->mode == "voxels") {
             dnn_vtx = dual_hint->voxels;
@@ -4988,8 +4998,9 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 if (dnn_vtx.size() != 0) {
                     SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DV2 payload size {}", dnn_vtx.size());
                 }
-                SPDLOG_LOGGER_WARN(s_log, "vertex_method {}: no DV2-MAX prediction for this call ({} cloud points; a Python error "
-                                   "is printed on stderr by DV2_Vertex) -- keeping the traditional vertex with the original refinement",
+                SPDLOG_LOGGER_WARN(s_log, "vertex_method {}: no DV2-MAX prediction for this call ({} cloud points: too few points "
+                                   "or no candidate, or with DV2_STRICT=0 a Python error printed on stderr by DV2_Vertex) -- "
+                                   "keeping the traditional vertex with the original refinement",
                                    vertex_method_name(m_vertex_method), vec_xyzq[0].size());
                 if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 2;   // ai-helper issue 35
                 if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-prediction";
@@ -5671,6 +5682,11 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
         }
     }
     catch (const std::exception& ex) {
+        if (dv2_call_failed) {
+            SPDLOG_LOGGER_ERROR(s_log, "vertex_method {}: DV2-MAX inference failed: {} -- failing the job (DV2_STRICT=0 keeps "
+                                "the traditional vertex instead)", vertex_method_name(m_vertex_method), ex.what());
+            throw;
+        }
         SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: DL vertex failed: {}", ex.what());
         if (dump_i >= 0) m_dlvtx_calls[dump_i].status = 1;   // ai-helper issue 35: cloud recorded, no payload
     }

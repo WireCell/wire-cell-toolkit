@@ -32,8 +32,12 @@ wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-p
   no SCN, re-rank, dual chain, kink/junction snap, `improve_vertex`, graph audit or conn3 stitch.
 - Everything before the vertex step is unchanged, because it builds the model's input cloud. Everything after
   it is unchanged too: clustering, directions, showers, taggers and the output trees.
-- If DV2-MAX makes no prediction, the event keeps the traditional vertex, with the original refinement, and the
-  log has a WARN line. Set `DV2_STRICT=1` in validation runs to make a Python error fail the job instead.
+- The model is imported and loaded at configure. A missing package, a bad bundle or a sha256 mismatch fails the
+  job at startup.
+- A Python error during an event fails the job. `DV2_STRICT=0` instead prints the error on stderr and keeps the
+  traditional vertex for that call.
+- If DV2-MAX makes no prediction (fewer than 5 points or no candidate), the event keeps the traditional vertex, with
+  the original refinement, and the log has a WARN line.
 - Each placement is logged at INFO: `vertex_method <m>: main vertex = split|graph vertex at (x, y, z) cm, d cm
   from the DV2-MAX point ...`, plus one line per move for `dv2_split_move`.
 - Known behaviour, by design:
@@ -63,8 +67,11 @@ DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="f
 | `trad` | bytes of 3 floats: the traditional vertex, NaN if none |
 
 It returns bytes of `[x, y, z, score]` in the raw reco frame. It returns empty bytes when no prediction is
-made: fewer than 5 points, no candidate, or an internal error (reported on stderr; set `DV2_STRICT=1` to raise
-instead). The caller then keeps the traditional vertex.
+made: fewer than 5 points or no candidate. The caller then keeps the traditional vertex. Any other error raises;
+`DV2_STRICT=0` instead reports it on stderr and returns empty bytes.
+
+`DV2_Load(weights)` imports the model code and loads the bundle. `TaggerCheckNeutrino::configure` calls it, so a
+broken environment fails at startup. It always raises on error.
 
 Models are loaded once per process and manifest path. The sha256 of the bundle files is checked at load
 (`DV2_VERIFY=0` skips the check). Other environment variables:

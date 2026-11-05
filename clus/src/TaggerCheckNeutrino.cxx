@@ -5,6 +5,9 @@
 
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/BuildConfig.h"   // HAVE_PYTHON_INC: the DV2-MAX vertex methods need the embedded Python
+#ifdef HAVE_PYTHON_INC
+#include "WCPPyUtil/DV2_Vertex.h"      // vertex_method dv2_*: import + load the model at configure
+#endif
 #include <filesystem>   // vertex_method dv2_*: the bundle must exist at configure time
 #include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
 #include <iterator>   // sbnd_xin/docs/128 probe: std::back_inserter
@@ -472,8 +475,21 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
             raise<ValueError>("TaggerCheckNeutrino: vertex_method %s needs a DV2-MAX bundle, dv2_bundle \"%s\" not found on WIRECELL_PATH",
                               m_vertex_method.c_str(), raw.c_str());
         }
-        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: vertex_method {}, DV2-MAX bundle {}, module {}",
-                           m_vertex_method, m_dv2_bundle, m_dv2_py_module);
+#ifdef HAVE_PYTHON_INC
+        // Import the model code and load the bundle now, so a broken Python
+        // environment (missing package, bad bundle, sha256 mismatch) fails the
+        // job here instead of degrading every event to the traditional vertex.
+        std::string load_ms;
+        try {
+            load_ms = WCPPyUtil::DV2_Load(m_dv2_py_module, "DV2_Load", m_dv2_bundle);
+        }
+        catch (const std::exception& ex) {
+            raise<ValueError>("TaggerCheckNeutrino: vertex_method %s cannot load DV2-MAX (module %s, bundle %s): %s",
+                              m_vertex_method.c_str(), m_dv2_py_module.c_str(), m_dv2_bundle.c_str(), ex.what());
+        }
+        SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: vertex_method {}, DV2-MAX bundle {}, module {}, loaded (ms: {})",
+                           m_vertex_method, m_dv2_bundle, m_dv2_py_module, load_ms);
+#endif
     }
     // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
     // suggests the neutrino vertex).  All defaults = legacy.
