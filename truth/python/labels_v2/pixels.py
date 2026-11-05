@@ -11,10 +11,12 @@ to 1 per deposit per view; entries off the wire range dropped after that.
   ring      the 3x3 neighbourhood: wire +-1 on the deposit's own face / plane, slice +-1
   clean     for instance k: no pixel of the ring holds a present instance other than k
   CS        clean share per view = sum of the deposit's shares over clean pixels
-  seen      the deposit's main pixel (largest share) holds >= THR total true charge AND its channel is not bad at that tick
+  seen      the deposit lies inside the active volume (its face's wire extent) and the readout window, its main pixel (largest
+            share) holds >= THR total true charge, and its channel is not bad at that tick
   free      (2.2) CS >= 0.5 in >= 1 seen view
   pieces    (2.5) per view, connected components (8-neighbour) of an object's own present pixels; a deposit joins the component
-            of its main present entry; 3-D pieces = 2-of-3 keys of the per-view components (50f)
+            of its main present entry (50f); 3-D pieces = 2-of-3 keys of the per-view components.  The extent of a piece is
+            measured over its deposits SEEN in >= 2 views (G2), so a sub-hit deposit joined through a spread tail cannot inflate it
 """
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -53,6 +55,8 @@ class Projection:
         S = ev.projection_settings()
         self.n = ev.n
         self.tk = (D[:, 0] + S["toff_ns"]) / S["tick"] - S["tbin"]
+        self.nslices = int(S["nticks"]) // 4
+        self.inside = ev.inside
         self.sig_t = np.maximum(np.sqrt((D[:, 5] / S["speed"] / (S["tick"] / 1000.0)) ** 2 + (S["ext_long_us"] / (S["tick"] / 1000.0)) ** 2), 0.05)
         self.fp_list = [(an, fi, pi) for an, faces in geo.items() for fi, pl in faces.items() for pi in pl]
         self.fp_index = {k: i for i, k in enumerate(self.fp_list)}
@@ -72,7 +76,7 @@ class Projection:
                 s = np.einsum("ij,j->i", D[sel, 2:5] - g["cen0"], g["pdir"]) / g["pitch"]
                 sw = np.maximum(np.sqrt(D[sel, 6] ** 2 + S["ext_tr"][pi] ** 2) / g["pitch"], 0.02)
                 WI, SI, W = spread(s, self.tk[sel], sw, self.sig_t[sel])
-                ok = (W > 0) & (WI >= 0) & (WI < len(g["chan"]))
+                ok = (W > 0) & (WI >= 0) & (WI < len(g["chan"])) & (SI >= 0) & (SI < self.nslices)     # inside the readout window
                 r_, k_ = np.nonzero(ok)
                 ent.append((sel[r_], np.full(len(r_), self.fp_index[(an, fi, pi)], np.int64), WI[r_, k_], SI[r_, k_], W[r_, k_]))
             if not ent:
@@ -91,11 +95,13 @@ class Projection:
         """per view: the pixel codes (sorted) and the total true charge per pixel; each deposit's main entry (largest share)"""
         self.pix = {}
         self.main = {}            # per view: (deposit indices with an entry, their main entry index)
+        self.has_entry = np.zeros((self.n, 3), bool)
         for pi in range(3):
             E = self.ENT[pi]
             if E is None:
                 self.pix[pi] = (np.zeros(0, np.int64), np.zeros(0)); self.main[pi] = (np.zeros(0, np.int64), np.zeros(0, np.int64))
                 continue
+            self.has_entry[E["di"], pi] = True
             pu, pinv = np.unique(E["code"], return_inverse=True)
             ptot = np.bincount(pinv.ravel(), weights=E["wt"] * self.q[E["di"]])
             self.pix[pi] = (pu, ptot)
@@ -116,7 +122,7 @@ class Projection:
             pu, ptot = self.pix[pi]
             ix = np.searchsorted(pu, E["code"][me])
             tot = ptot[np.minimum(ix, len(pu) - 1)]
-            ok = tot >= THR
+            ok = (tot >= THR) & self.inside[md]                       # a deposit outside the active volume is never seen
             self.seen_nobad[md, pi] = ok
             isbad = np.zeros(len(me), bool)
             if self.bad:

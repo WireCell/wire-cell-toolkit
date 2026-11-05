@@ -7,7 +7,7 @@
       d_own_seg ~ 60 mm); an 8 mm proton on the segment is swallowed (shower instance, stretch 3); an 8 mm proton at the
       shower start keeps class stub (vertex guard)
   (d) a stopped mu+ with a 40 mm Michel (class Michel, key point) and a mu- decaying in flight (its electron: an EM object,
-      a shower with one segment; the mu- end under it is a hidden end, no end key point)
+      a shower with one segment; the mu- end under its own daughter shower stays a physical end)
   (e) a neutron's photon with a 4 mm Compton blob: a G3 LE blip cluster (class blip, own instance, origin neutron, no kp)
   (f) bad channels: W channels under part of a muon masked -> not seen in W there, still seen in U / V, still free
 Run: python3 selftest_v2.py [wires file]; exit 0 when every check passes, prints FAIL lines otherwise."""
@@ -178,8 +178,8 @@ def test_d():
     check(abs(R.table["inst_wait_ns"][i2] - 2000.0) < 1.0, f"wait {R.table['inst_wait_ns'][i2]:.0f} ns")
     i4 = inst_of(R, 4); d4 = dep_of(ev, 4)
     check(i4 >= 0 and R.table["inst_kind"][i4] == 3 and R.table["inst_cls_obj"][i4] == OBJ["shower"] and maj(R.cls7[d4]) == CLS7["segment"], "mu- decay in flight: an EM object, shower with a segment")
-    kk = kps["kp_kind"].tolist(); check(kk.count(KP["michel_start"]) == 1 and kk.count(KP["shower_start"]) == 1 and kk.count(KP["track_end"]) == 3, f"key points: Michel start, shower start, 3 track ends (got {kk})")
-    i3 = inst_of(R, 3); check(bool(R.table["inst_flags"][i3] & rules.FL_HIDDEN_END), "the mu- end under its decay-in-flight shower is a hidden end (2.3): no end key point there")
+    kk = kps["kp_kind"].tolist(); check(kk.count(KP["michel_start"]) == 1 and kk.count(KP["shower_start"]) == 1 and kk.count(KP["track_end"]) == 4, f"key points: Michel start, shower start, 4 track ends (got {kk})")
+    i3 = inst_of(R, 3); check(not (R.table["inst_flags"][i3] & rules.FL_HIDDEN_END), "the mu- end under its own decay-in-flight shower is the decay vertex, not a hidden end (doc 54 sec 4)")
     i1 = inst_of(R, 1); check(R.table["inst_cls_obj"][i1] == OBJ["track"] and R.table["inst_parent_inst"][i2] == i1 and R.table["inst_edge"][i2] == rules.EDGE["michel"], "Michel -> parent edge to its muon")
 
 

@@ -10,11 +10,12 @@ Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 s
 (compact instance id, -1 none), piece_id, piece_type (0 none, 1 segment, 2 blip), d_own_seg (mm; -1 none), overlap bits
 (1 not free, 2 shower-ringed, 4 folded delta / Michel on its track, 8 absorbed EM object, 16 swallowed stub), stretch
 (0 none, 1 traversed, 2 hidden end, 3 swallowed, 4 buried), kp_type / kp_dist / kp_index, ghost_dist, match_dist,
-other_reason bits (1 ghost, 2 shared, 4 no truth, 8 far from own trajectory, 16 no deposit, 32 / 64 fallback match),
+other_reason bits (1 ghost, 2 shared, 4 no truth, 8 far from own trajectory, 16 no deposit, 32 / 64 fallback match, 128 the
+point's instance holds < 2,400 e),
 and the v1 columns lab_tid / lab_orig_tid / lab_cls / lab_pf_node / lab_d_traj for the shift accounting.
 Per instance (inst_*): root_row, g4_id, kind (0 track kind, 1 delta, 2 Michel, 3 EM object, 4 other), cls_obj, pdg,
 parent_inst, parent_g4, edge, interaction, origin (index into inst_origin_names), flags, n_dep, nseg, npiece, q, e_dep_mev,
-ke_mev, vis_frac, ratio, chord_mm, run_mm, wait_ns, main_ext_mm.  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json.
+ke_mev, vis_frac, ratio, chord_mm, run_mm, wait_ns, main_ext_mm (the delta / Michel main free piece), max_ext_mm (an EM instance's largest piece, >= 2-view extent).  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json.
 """
 import ctypes, hashlib, json, os, sys, time
 if __name__ == "__main__":
@@ -41,7 +42,12 @@ def peak_rss_mb():
 
 def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det=None, tmpdir=None):
     t0 = time.time()
-    ev = evio.Event(d, root=root, wires_dir=wires_dir, stagea_root=stagea_root, tmpdir=tmpdir)
+    try:
+        ev = evio.Event(d, root=root, wires_dir=wires_dir, stagea_root=stagea_root, tmpdir=tmpdir)
+    except RuntimeError as x:            # the lane left no labels (glabels json "error": no live pctree, no steiner cloud): an empty event, as v1
+        if str(x).startswith("glabels:"):
+            return "empty", str(x)[:120]
+        raise
     try:
         det = det or ev.det
         if not len(ev.pts["X"]):

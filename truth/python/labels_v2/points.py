@@ -15,7 +15,7 @@ from .rules import OBJ, CLS7
 
 FAR_MM = 25.0
 # other_reason bits
-OR_GHOST, OR_SHARED, OR_NOTRUTH, OR_FAR, OR_NODEPO, OR_FALLBACK_TID, OR_FALLBACK_ANY = 1, 2, 4, 8, 16, 32, 64
+OR_GHOST, OR_SHARED, OR_NOTRUTH, OR_FAR, OR_NODEPO, OR_FALLBACK_TID, OR_FALLBACK_ANY, OR_INVISIBLE_OWNER = 1, 2, 4, 8, 16, 32, 64, 128
 
 
 def link(ev, R):
@@ -71,5 +71,11 @@ def link(ev, R):
     reason[far] |= OR_FAR
     if g.any() and (~g & lab).any():
         out["ghost_dist"][g] = cKDTree(X[~g & lab]).query(X[g])[0]
+    # the point's own instance holds less than one hit of charge (a nuclear recoil, a sub-hit photon): v1 gave the point to it by the
+    # nearest-deposit refinement; flagged, label kept (doc 54 sec 4, to rule)
+    from .rules import FL_VISIBLE
+    fl = np.asarray(R.table["inst_flags"]); io_ = out["inst"]
+    inv = (io_ >= 0) & ((fl[np.maximum(io_, 0)] & FL_VISIBLE) == 0)
+    reason[inv] |= OR_INVISIBLE_OWNER
     out["other_reason"] = reason
     return out

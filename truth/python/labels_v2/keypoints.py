@@ -8,7 +8,10 @@
   KP_SHOWER      3  the start of a shower: the first-in-time deposit of its earliest segment
   KP_MICHEL      4  the first own deposit of a resolved Michel (hidden start: none)
   KP_DELTA       5  the attachment point of a resolved delta (its first own deposit; hidden start: none)
-  KP_NU_VERTEX   6  the neutrino vertex: median of the primaries' first deposits per interaction
+  KP_NU_VERTEX   6  the neutrino vertex: median of the primaries' first deposits per interaction row with a neutrino pdg (cosmic
+                    rain and particle-gun rows carry pdg 0: none), where >= 2 primaries start within 10 mm of it (or one primary)
+  Every key point's deposit must be seen (inside the active volume and the readout window, in a live pixel): a boundary
+  point is not a target (G7).  A delta that is a shower gets its attachment point and, when > 10 mm away, its shower start.
   KP_VERTEX      7  a secondary vertex: >= 2 visible instances (tracks, stubs, showers, deltas, Michels) start within 10 mm
 Positions are the reco-frame positions of deposits (x from the arrival time on the face), the frame of the PR points.
 Per point: kp_type = the type of the nearest key point within radius_mm (10), kp_dist its distance.
@@ -33,6 +36,8 @@ def build(ev, R, table):
     starts = []                                              # (position, instance) of every visible instance start, for vertices
     inst_of_root = {int(r): i for i, r in enumerate(R.inst_root.tolist())}
 
+    seen = R.P.seen.any(1)
+
     def own_sorted(r):
         mem = o_r[st_r[r]:st_r[r + 1]]
         own = mem[(ev.otid[mem] == T.tt[r]) & ev.placed[mem] & np.isfinite(Xr[mem, 0])]
@@ -41,6 +46,10 @@ def build(ev, R, table):
         if not len(own):
             return own
         return own[np.argsort(ev.T0[own], kind="stable")]
+
+    def vis(j):
+        """a key point is a target only where its deposit is seen (inside the active volume and the readout, in a live pixel): G7"""
+        return j >= 0 and bool(seen[j])
 
     def add(p, kind, inst):
         kp_x.append(np.asarray(p, np.float64)); kp_kind.append(kind); kp_inst.append(inst)
@@ -63,12 +72,12 @@ def build(ev, R, table):
             if fl & (FL_BURIED | FL_SWALLOWED):
                 continue
             if cls == OBJ["track"]:
-                if ps and not (fl & FL_HIDDEN_START):
+                if ps and not (fl & FL_HIDDEN_START) and vis(own[0]):
                     add(p0, KP["track_end"], i); starts.append((p0, i))
-                if pe and not (fl & FL_HIDDEN_END):
+                if pe and not (fl & FL_HIDDEN_END) and vis(own[-1]):
                     add(p1, KP["track_end"], i)
             elif cls == OBJ["stub"]:
-                if ps:
+                if ps and vis(own[0]):
                     add(p0, KP["stub_start"], i); starts.append((p0, i))
         elif k in (KIND["DELTA"], KIND["MICHEL"]):
             if not (fl & FL_RESOLVED):
@@ -77,34 +86,44 @@ def build(ev, R, table):
             if not len(own):
                 continue
             p0 = Xr[own[0]]
-            if cls == OBJ["shower"]:                        # a resolved delta with >= 2 segments: a shower start
+            if not (fl & FL_HIDDEN_ATTACH) and vis(own[0]):          # the attachment point (delta) / start (Michel), also for a delta that is a shower
+                add(p0, KP["michel_start"] if k == KIND["MICHEL"] else KP["delta_attach"], i)
+            starts.append((p0, i))
+            if cls == OBJ["shower"]:                        # a resolved delta with >= 2 segments: also its shower start when distinct
                 e = R.eidx[r]; j = R.seg_start_dep[e] if e >= 0 else -1
-                pj = Xr[j] if j >= 0 and np.isfinite(Xr[j, 0]) else p0
-                if not (fl & FL_HIDDEN_ATTACH):
-                    add(pj, KP["shower_start"], i)
-                starts.append((pj, i))
-            else:
-                if not (fl & FL_HIDDEN_ATTACH):
-                    add(p0, KP["michel_start"] if k == KIND["MICHEL"] else KP["delta_attach"], i)
-                starts.append((p0, i))
+                if j >= 0 and np.isfinite(Xr[j, 0]) and vis(j) and np.linalg.norm(Xr[j] - p0) > RADIUS_MM and not (fl & FL_HIDDEN_ATTACH):
+                    add(Xr[j], KP["shower_start"], i)
         elif k == KIND["EM"]:
             if cls != OBJ["shower"]:
                 continue
             e = R.eidx[r]; j = R.seg_start_dep[e] if e >= 0 else -1
-            if j < 0 or not np.isfinite(Xr[j, 0]):
+            if j < 0 or not np.isfinite(Xr[j, 0]) or not vis(j):     # a shower starting outside the active volume / readout: a boundary point, no target (G7)
                 continue
             add(Xr[j], KP["shower_start"], i); starts.append((Xr[j], i))
     # neutrino vertices: median of the primaries' first deposits per interaction (all truth_nu rows; as steiner_truth)
+    # only interaction rows with a neutrino pdg (cosmic-rain and particle-gun rows carry pdg 0), and only where >= 2 primaries
+    # start together (within VERTEX_MM of the median): a scattered "rain" group gives no vertex
+    import truth_table as TT
+    nu_tab = ev.truth.get("truth_nu", np.zeros((0, len(TT.NU_COLUMNS))))
+    nu_pdg = {int(row[TT.nu_col("nu_idx")]) if TT.NU_COLUMNS[0] == "nu_idx" else k_: int(abs(row[TT.nu_col("pdg")])) for k_, row in enumerate(np.atleast_2d(nu_tab))} if len(nu_tab) else {}
     nus = sorted(set(int(v) for v in T.nu_row if v >= 0))
     for nu in nus:
+        pdg_nu = nu_pdg.get(nu, nu_pdg.get(int(nu), 0)) if nu_pdg else 0
+        if len(nu_tab) and 0 <= nu < len(np.atleast_2d(nu_tab)):
+            pdg_nu = int(abs(np.atleast_2d(nu_tab)[nu, TT.nu_col("pdg")]))
+        if pdg_nu not in (12, 14, 16):
+            continue
         prim = np.flatnonzero((T.nu_row == nu) & (T.mot == 0))
         S = []
         for r in prim.tolist():
             own = own_sorted(r) if st_r[r + 1] > st_r[r] else np.zeros(0, np.int64)
-            if len(own):
+            if len(own) and seen[own[0]]:
                 S.append(Xr[own[0]])
-        if S:
-            add(np.median(np.array(S), axis=0), KP["nu_vertex"], -1)
+        if len(S) >= 1:
+            c = np.median(np.array(S), axis=0)
+            near = sum(1 for p in S if np.linalg.norm(p - c) <= VERTEX_MM)
+            if near >= 2 or len(S) == 1:
+                add(c, KP["nu_vertex"], -1)
     # secondary vertices: >= 2 instance starts within VERTEX_MM (single linkage), away from a nu vertex
     if len(starts) >= 2:
         SP = np.array([s[0] for s in starts]); SI = np.array([s[1] for s in starts])

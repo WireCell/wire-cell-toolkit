@@ -33,7 +33,7 @@ VERTEX_GUARD_MM = 10.0
 OBJ = {"track": 0, "stub": 1, "delta": 2, "michel": 3, "shower": 4, "le": 5, "ghost": 6, "other": 7}
 CLS7 = {"ghost": 0, "track": 1, "stub": 2, "segment": 3, "blip": 4, "michel": 5, "delta": 6, "other": -1}
 # overlap bits (per deposit / point)
-OV_NOTFREE, OV_SHRING, OV_FOLDED, OV_ABSORBED, OV_SWALLOWED, OV_WEAKFOLD = 1, 2, 4, 8, 16, 32
+OV_NOTFREE, OV_SHRING, OV_FOLDED, OV_ABSORBED, OV_SWALLOWED = 1, 2, 4, 8, 16
 # stretch codes
 STR_NONE, STR_TRAVERSED, STR_HIDDEN_END, STR_SWALLOWED, STR_BURIED = 0, 1, 2, 3, 4
 # instance flags
@@ -86,7 +86,7 @@ def csr(keys, n_keys):
     return o, st
 
 
-def piece_stats(piece, dob, comp, q, P3, selfdep=None):
+def piece_stats(piece, dob, comp, q, P3, selfdep=None, seen=None):
     """per piece (sorted by piece id): object, charge, self charge, extent over the deposits seen in >= 2 views; and the
     piece id list"""
     sel = np.flatnonzero(piece >= 0)
@@ -97,7 +97,7 @@ def piece_stats(piece, dob, comp, q, P3, selfdep=None):
     pid = piece[o]; b = np.r_[0, np.flatnonzero(np.diff(pid)) + 1, len(o)]
     obj = dob[o[b[:-1]]]; pq = np.add.reduceat(q[o], b[:-1])
     sq = np.add.reduceat(q[o] * selfdep[o], b[:-1]) if selfdep is not None else pq
-    mv = (comp[o] >= 0).sum(1) >= 2
+    mv = (seen[o].sum(1) >= 2) if seen is not None else ((comp[o] >= 0).sum(1) >= 2)     # G2: seen in >= 2 views
     ext = np.array([diameter(P3[o[b[i]:b[i + 1]][mv[b[i]:b[i + 1]]]]) for i in range(len(b) - 1)])
     members = [o[b[i]:b[i + 1]] for i in range(len(b) - 1)]
     return dict(pid=pid[b[:-1]], obj=obj, q=pq, sq=sq, ext=ext, members=members)
@@ -137,11 +137,11 @@ def label_event(ev, det=None, params=None):
         free0 = P.free(CS0) & is_cand_dep
         selfdep = is_cand_dep & (T.grow == inst0)
         comp_own = P.components(dob_c); p_own = pieces_2of3(dob_c, comp_own, q)
-        so = piece_stats(p_own, dob_c, comp_own, q, P3, selfdep)
+        so = piece_stats(p_own, dob_c, comp_own, q, P3, selfdep, P.seen)
         np.add.at(nseg_own, so["obj"][so["ext"] >= ltb], 1)
         dfree = np.where(free0, dob_c, -1)
         comp_fr = P.components(dfree); p_fr = pieces_2of3(dfree, comp_fr, q)
-        sf = piece_stats(p_fr, dfree, comp_fr, q, P3, selfdep)
+        sf = piece_stats(p_fr, dfree, comp_fr, q, P3, selfdep, P.seen)
         main_sq = np.zeros(K)
         for i in range(len(sf["obj"])):
             k = sf["obj"][i]
@@ -175,15 +175,16 @@ def label_event(ev, det=None, params=None):
     M = len(em_rows); eidx = np.full(nr, -1, np.int64); eidx[em_rows] = np.arange(M)
     dob_e = np.where(em_root, eidx[np.minimum(inst1, nr - 1)], -1)
     piece_type = np.zeros(n, np.int8); piece_id = np.full(n, -1, np.int64); d_own_seg = np.full(n, -1.0, np.float32)
-    nseg_e = np.zeros(M, np.int64); npiece_e = np.zeros(M, np.int64)
+    nseg_e = np.zeros(M, np.int64); npiece_e = np.zeros(M, np.int64); maxext_e = np.zeros(M)
     seg_start_dep = np.full(M, -1, np.int64)              # the first-in-time deposit of the earliest segment
     if M:
         comp_e = P.components(dob_e); piece_e = pieces_2of3(dob_e, comp_e, q)
-        se = piece_stats(piece_e, dob_e, comp_e, q, P3)
+        se = piece_stats(piece_e, dob_e, comp_e, q, P3, None, P.seen)
         piece_id = piece_e
         isseg = se["ext"] >= ltb
         np.add.at(nseg_e, se["obj"], 1 * 0 + 1); npiece_e = nseg_e.copy(); nseg_e[:] = 0
         np.add.at(nseg_e, se["obj"][isseg], 1)
+        maxext_e = np.zeros(M); np.maximum.at(maxext_e, se["obj"], se["ext"])
         t0seg = np.full(M, np.inf)
         for i, mem in enumerate(se["members"]):
             piece_type[mem] = 1 if isseg[i] else 2
@@ -200,7 +201,7 @@ def label_event(ev, det=None, params=None):
             bl = mem[piece_type[mem] != 1]
             if len(bl) and len(sd):
                 d_own_seg[bl] = cKDTree(P3[sd]).query(P3[bl])[0]
-    R.em_rows, R.nseg_e, R.npiece_e = em_rows, nseg_e, npiece_e
+    R.em_rows, R.nseg_e, R.npiece_e, R.maxext_e = em_rows, nseg_e, npiece_e, maxext_e
 
     # ------------------------------------------------------------------ classes per root row (before absorption)
     cls_row = np.full(nr, OBJ["other"], np.int64)
@@ -276,7 +277,23 @@ def label_event(ev, det=None, params=None):
         Pp = P3[own]
         sseg = np.r_[0, np.cumsum(np.linalg.norm(np.diff(Pp, axis=0), axis=1))]
         chord = float(np.linalg.norm(Pp[-1] - Pp[0]))
-        Rm = free1[own]; Hm = ~Rm & ringed[own]
+        Rm = free1[own]
+        # shower-hidden deposits: not free and shower-ringed in a seen view.  An instance below one hit of charge is never seen, so
+        # its ringing is read without the seen requirement (a sub-hit recoil inside a shower core is still inside it).  A ring made only
+        # by the track's own daughter EM objects (a decay-in-flight electron, its own delta showers) does not hide the track: that
+        # end is the decay / branching vertex, a physical end (doc 54 sec 4)
+        visible_inst = q[mem].sum() >= THR
+        rg = ringed[own] if visible_inst else ((CSs[own] <= 0.5 + 1e-9) & P.has_entry[own]).any(1)
+        cs_own = causes[own]
+        own_daughter = np.zeros(len(own), bool)
+        for v_ in range(3):
+            c_ = cs_own[:, v_]; okc = (c_ >= 0) & (c_ < nr)
+            own_daughter[okc] |= (T.mrow[np.maximum(c_[okc], 0)] == r)
+        other_ring = np.zeros(len(own), bool)
+        for v_ in range(3):
+            c_ = cs_own[:, v_]; okc = (c_ >= 0) & (c_ < nr)
+            other_ring[okc] |= (T.mrow[np.maximum(c_[okc], 0)] != r)
+        Hm = ~Rm & rg & (other_ring | ~own_daughter)
         qq = q[own]; qt = max(qq.sum(), 1e-9)
         lr = longest_run(Rm, sseg, Pp)
         run = lr[2] if lr else 0.0
@@ -301,7 +318,7 @@ def label_event(ev, det=None, params=None):
                         info["end_hidden"] = True; info["flags"] |= FL_HIDDEN_END
         elif info["hfrac"] >= 0.5:
             if chord >= 2 * step:
-                stretch[mem] = STR_BURIED; info["flags"] |= FL_BURIED
+                stretch[mem] = STR_BURIED; info["flags"] |= FL_BURIED; track = True      # 2.3: a buried track keeps the track class
             else:
                 cs = causes[own][Hm]; cs = cs[(cs >= 0) & (cs < nr)]
                 cs = cs[is_shower_row[cs]] if len(cs) else cs
@@ -330,7 +347,7 @@ def label_event(ev, det=None, params=None):
             continue
         j = pm[np.argmin(np.linalg.norm(P3[pm] - T.S0[r], axis=1))]
         cj = causes[j][causes[j] >= 0]                     # the shower instances ringing the attachment deposit (per view)
-        if stretch[j] in (STR_TRAVERSED, STR_HIDDEN_END, STR_BURIED) and (not len(cj) or (cj != r).any()):   # not shadowed by its own shower only
+        if stretch[j] in (STR_TRAVERSED, STR_HIDDEN_END, STR_BURIED, STR_SWALLOWED) and (not len(cj) or (cj != r).any()):   # not shadowed by its own shower only
             hidden_attach[r] = True
     log["n_hidden_attach"] = int(hidden_attach.sum())
 
@@ -372,10 +389,11 @@ def label_event(ev, det=None, params=None):
 def instance_table(ev, T, R, NI, uroots, inst):
     nr = T.nrow; n = ev.n; q = ev.q
     cols = {k: np.zeros(NI, np.int64) for k in ("root_row", "g4_id", "kind", "cls_obj", "pdg", "parent_inst", "parent_g4", "edge", "interaction", "origin", "flags", "n_dep", "nseg", "npiece")}
-    fcols = {k: np.zeros(NI, np.float64) for k in ("q", "e_dep_mev", "ke_mev", "vis_frac", "ratio", "chord_mm", "run_mm", "wait_ns", "main_ext_mm")}
+    fcols = {k: np.zeros(NI, np.float64) for k in ("q", "e_dep_mev", "ke_mev", "vis_frac", "ratio", "chord_mm", "run_mm", "wait_ns", "main_ext_mm", "max_ext_mm")}
     origins = []; oidx = {}
     root_inst = {int(r): i for i, r in enumerate(uroots.tolist())}
     qi = np.bincount(inst, weights=q, minlength=NI); ei = np.bincount(inst, weights=ev.energy, minlength=NI); ni = np.bincount(inst, minlength=NI)
+    own_e = np.bincount(np.where(T.inst_dep < nr, T.inst_dep, nr), weights=ev.energy, minlength=nr + 1)        # the root's own object, before absorption
     cand_pos = {int(r): k for k, r in enumerate(R.cand_rows.tolist())}
     for i, r in enumerate(uroots.tolist()):
         cols["n_dep"][i] = ni[i]; fcols["q"][i] = qi[i]; fcols["e_dep_mev"][i] = ei[i]
@@ -385,7 +403,7 @@ def instance_table(ev, T, R, NI, uroots, inst):
             continue
         cols["root_row"][i] = r; cols["g4_id"][i] = T.tt[r]; cols["kind"][i] = T.kind[r] if not T.fold[r] else KIND["OTHER"]
         cols["cls_obj"][i] = R.cls_row[r]; cols["pdg"][i] = T.pdg[r]
-        fcols["ke_mev"][i] = T.ke[r]; fcols["vis_frac"][i] = ei[i] / T.ke[r] if T.ke[r] > 0 else 0.0
+        fcols["ke_mev"][i] = T.ke[r]; fcols["vis_frac"][i] = own_e[r] / T.ke[r] if T.ke[r] > 0 else 0.0
         m = T.mrow[r]
         cols["parent_g4"][i] = T.tt[m] if m >= 0 else -1
         pr = T.root_of[m] if m >= 0 else -1
@@ -409,7 +427,7 @@ def instance_table(ev, T, R, NI, uroots, inst):
             if R.cand_resolved[kk]: fl |= FL_RESOLVED
             if R.hidden_attach[r]: fl |= FL_HIDDEN_ATTACH
         if R.eidx[r] >= 0:
-            cols["nseg"][i] = R.nseg_e[R.eidx[r]]; cols["npiece"][i] = R.npiece_e[R.eidx[r]]
+            cols["nseg"][i] = R.nseg_e[R.eidx[r]]; cols["npiece"][i] = R.npiece_e[R.eidx[r]]; fcols["max_ext_mm"][i] = R.maxext_e[R.eidx[r]]   # the largest piece's >= 2-view extent
         cols["flags"][i] = fl
     # the members absorbed into each instance (EM objects and swallowed stubs): count and list by root row
     absorbed_members = {}

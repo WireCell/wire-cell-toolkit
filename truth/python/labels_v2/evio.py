@@ -176,9 +176,12 @@ def load_depos(fn):
     return D[act], I[act], P3, T0
 
 
+NTICKS_DEFAULT = {"sbnd": 3427, "pdhd": 6000, "pdvd": 6400, "fdhd": 6000, "fdvd": 8500}   # the g25 frames (doc 54 sec 2); used when no frames are kept
+
+
 def load_frames_info(fns):
-    """tickinfo (3,) of the SP charge frame (dnnsp else gauss) and the bad channels {channel: [(t0, t1), ...]} (ticks)"""
-    ti, bad, nfr = None, {}, 0
+    """tickinfo (3,) and the tick count of the SP charge frame (dnnsp else gauss), and the bad channels {channel: [(t0, t1), ...]}"""
+    ti, bad, nfr, nticks = None, {}, 0, None
     for fn in fns:
         with open_tar(fn) as t:
             mem = {m.name: m for m in t.getmembers()}
@@ -186,12 +189,15 @@ def load_frames_info(fns):
             for n in sorted(mem):
                 if re.match(r"tickinfo_" + tag + r"\d*_\d+\.npy", n):
                     ti = np.load(io.BytesIO(t.extractfile(mem[n]).read()), allow_pickle=False); nfr += 1
+                    h = t.extractfile(mem[n.replace("tickinfo_", "frame_")]); v = np.lib.format.read_magic(h)      # the header only: (nchannels, nticks)
+                    sh = (np.lib.format.read_array_header_1_0(h) if v == (1, 0) else np.lib.format.read_array_header_2_0(h))[0]
+                    nticks = int(sh[1]) if nticks is None else max(nticks, int(sh[1]))
             for n in mem:
                 if n.startswith("chanmask_bad"):
                     b = np.load(io.BytesIO(t.extractfile(mem[n]).read()), allow_pickle=False)
                     for c, t0, t1 in np.asarray(b).reshape(-1, 3).tolist():
                         bad.setdefault(int(c), []).append((int(t0), int(t1)))
-    return ti, bad, nfr
+    return ti, bad, nfr, nticks
 
 
 def load_static_bad(files):
@@ -248,6 +254,7 @@ class Event:
         self.files = None; self.G = {"inputs": inputs}; self.inputs = inputs; self.tj = tj; self.wires = wires
         self.depo_file = self.truth_file = self.pctree_file = None; self.truth_id = "synthetic"
         self.tickinfo = np.asarray(tickinfo, np.float64); self.bad = bad or {}; self.bad_source = "synthetic"
+        self.nticks = NTICKS_DEFAULT.get(det, 6000); self.nticks_source = "default"
         self.D, self.I, self.P3, self.T0 = np.asarray(D, np.float64), np.asarray(I, np.int64), np.asarray(P3, np.float64), np.asarray(T0, np.float64)
         self.truth = truth
         self._finish()
@@ -281,7 +288,10 @@ class Event:
         self.pctree_file = F.path("mlpr_v1/pr-pctree.tar.gz")
         # frames: tickinfo + bad channels
         fr = F.find("sp-frames.tar") or F.find("sim-frames-anode")
-        self.tickinfo, self.bad, nfr = load_frames_info([F.path(r) for r in fr]) if fr else (None, {}, 0)
+        self.tickinfo, self.bad, nfr, self.nticks = load_frames_info([F.path(r) for r in fr]) if fr else (None, {}, 0, None)
+        self.nticks_source = "frames" if self.nticks else "default"
+        if not self.nticks:
+            self.nticks = NTICKS_DEFAULT.get(self.det, 6000)
         self.bad_source = "frames:chanmask_bad" if (nfr and self.bad) else ("frames:no_mask" if nfr else "none")
         if not nfr:
             sb = load_static_bad(F)
@@ -317,6 +327,12 @@ class Event:
         self.faces = load_faces(self.wires)
         self.da, self.df = V2.assign_faces(self.D, self.geo)
         self.placed = self.da >= 0
+        # inside the active volume: within its face's wire extent in y and z with no margin (assign_faces allows 50 mm)
+        self.inside = np.zeros(self.n, bool)
+        for an, faces in self.geo.items():
+            for fi, fg in faces.items():
+                g0 = fg[0]; m = (self.da == an) & (self.df == fi)
+                self.inside[m] = (self.D[m, 3] >= g0["ymin"]) & (self.D[m, 3] <= g0["ymax"]) & (self.D[m, 4] >= g0["zmin"]) & (self.D[m, 4] <= g0["zmax"])
         self.Xreco = self._place()
 
     def _place(self):
@@ -343,4 +359,4 @@ class Event:
         return dict(toff_ns=float(tj["time_offset_us"]) * 1000.0, speed=float(tj["speed_mmus"]),
                     ext_tr=(float(ra["extra_smear_tran_induction"]), float(ra["extra_smear_tran_induction"]), float(ra["extra_smear_tran_collection"])),
                     ext_long_us=float(tj["extra"]["extra_smear_long"]) / 1000.0,
-                    tick=float(self.tickinfo[1]), tbin=float(self.tickinfo[2]))
+                    tick=float(self.tickinfo[1]), tbin=float(self.tickinfo[2]), nticks=int(self.nticks))
