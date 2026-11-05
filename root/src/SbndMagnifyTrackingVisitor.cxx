@@ -1,3 +1,4 @@
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/SbndMagnifyTrackingVisitor.h"
 
 #include <cmath>
@@ -90,11 +91,6 @@ namespace {
     /// process.  A name with no '%' and an ensemble with no published RSE give
     /// back exactly the configured name and numbers, so the per-event job is
     /// unchanged.
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
     struct Rse { int run, subrun, event; };
     Rse event_rse(const WireCell::Clus::Facade::Ensemble& ensemble,
                   int run, int subrun, int event)
@@ -132,7 +128,7 @@ void Root::SbndMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble) c
         const auto rse = event_rse(ensemble, m_runNo, m_subRunNo, m_eventNo);
         m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
     }
-    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);   // same fallback as the flat tree (PR 544 item 10)
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);

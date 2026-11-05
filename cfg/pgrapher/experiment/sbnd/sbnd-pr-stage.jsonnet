@@ -36,13 +36,15 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // kine_reco_Enu); the Bee "mc" node keeps Enu and both scores regardless.
     // tagger_bee=true appends the tagger verdict Bee sets (TaggerBeeVisitor) --
     // the standalone step-2 job, which has no art-side labeler_tagger to write them.
-    pipeline_names(enable_tracking_root=true, tagger_bee=false)::
+    pipeline_names(enable_tracking_root=true, tagger_bee=false, flat_tree=false)::
         ['switch_scope', 'unmerge_bundle', 'unmerge_assoc', 'steiner',
          'fiducialutils', 'tagger_check_tgm', 'tagger_check_stm', 'tagger_check_fc',
          'protect_bundle', 'steiner_refresh', 'tagger_check_neutrino',
          'numu_bdt_scorer', 'nue_bdt_scorer']
         + (if enable_tracking_root then ['tracking_visitor', 'tagger_output'] else [])
-        + (if tagger_bee then ['tagger_bee'] else []),
+        + (if tagger_bee then ['tagger_bee'] else [])
+        // ai-helper issue 39: the per-event flat tree, LAST (after every writer of tracking-pr.root)
+        + (if flat_tree && enable_tracking_root then ['flat_tree'] else []),
 
     // The clus_pr MABC as a pass-through tensor node (dump=false).  bee_sink: the
     // shared IBeeSink the PR display layers (clustering-pr / track_fit /
@@ -52,9 +54,15 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // dl_vtx_dump (ai-helper issue 35): record the DL-vertex network calls into
     // tracking-pr.root (T_dlvtx_call / T_dlvtx_cloud); recording only, default off.
     // pr_knobs: TaggerCheckNeutrino keys merged over the production bag (experiments only).
-    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={})::
+    // flat_tree (ai-helper issue 39): also write recTreeWireCell, every tree of
+    // tracking-pr.root as one flat CAF-style entry; default off.
+    // truth_match / blob_truth (ai-helper issue 41): the reco<->truth matching
+    // trees in tracking-pr.root (MC with the labeler's truth_detail); default off.
+    node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
+         flat_tree=false, truth_match=false, blob_truth=false)::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
-                      pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee),
+                      truth_match=truth_match, blob_truth=blob_truth,
+                      pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee, flat_tree),
                       particle_dataset=pds.particle_dataset, extra_uses=pds.all,
                       beam_window=$.beam_window),
 }

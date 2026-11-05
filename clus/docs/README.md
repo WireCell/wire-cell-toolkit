@@ -19,6 +19,7 @@ codebase. Start with the overview, then follow the links to each deep-dive docum
 | [data_structures.md](data_structures.md) | Facade layer, PR::Graph, PR::Vertex, PR::Segment |
 | [bee_output.md](bee_output.md) | Bee ZIP format: point-cloud dumps and particle-flow tree |
 | [magnify_tracking_output.md](magnify_tracking_output.md) | ROOT tracking output, conversion tool, Magnify-tracking viewer |
+| [truth_match_ids.md](truth_match_ids.md) | SBND `truth_match` trees: truth id conventions (blob `trackid`, sentinels, larg4 negative ids, prong grouping) |
 
 ## Quick Reference: Pipeline Stages
 
