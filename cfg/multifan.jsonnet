@@ -18,8 +18,36 @@
 // If multiplicity <= max a single atomic fan node is returned; otherwise a
 // subgraph (g.intern) whose exposed ports are exactly the 1 + N (fanout) or
 // N + 1 (fanin) leaf ports, in order.  Every fan node in the tree has
-// multiplicity <= max.  `data` is merged into each fan node's `data` (on top of
-// the computed `multiplicity`), e.g. {tag_rules: [...]} for frame fans.
+// multiplicity <= max.
+//
+// `data` sets the rest of each fan node's `data` (the computed `multiplicity` is
+// always set).  It is either:
+//
+// - an object, merged unchanged into EVERY fan node of the tree.  Use this only
+//   for port-independent settings.  Per-port arrays such as FrameFanout or
+//   FrameFanin `tag_rules` (or FrameFanin `tags`) have one entry per port of a
+//   node, and the nodes of a tree have different multiplicities and cover
+//   different ranges of the N tree ports, so an object can not express them.
+//
+// - a function(node) returning an object, called once per fan node with
+//
+//     node.multiplicity  the node's number of fan ports (m)
+//     node.leaf          true if the node's fan ports are tree ports
+//     node.offset        the tree port index of the node's first covered port
+//     node.ports         array of m arrays: the tree port indices reached
+//                        through each of the node's fan ports, in order
+//
+//   For a leaf, node.ports[i] == [node.offset + i].  Eg, for a FrameFanout tree
+//   with one rule per tree port in `rules` (length N), apply them at the leaves
+//   and give inner nodes no tag_rules (FrameFanout then copies frames as-is):
+//
+//     data = function(node)
+//       if node.leaf then { tag_rules: [ rules[p[0]] for p in node.ports ] }
+//       else {}
+//
+//   A FrameFanin tree is the mirror image, but its inner nodes need rules (or
+//   `tags`) that carry forward the tags made by the nodes upstream of them, as a
+//   FrameFanin without them drops the input tags.
 
 local g = import 'pgraph.jsonnet';
 
@@ -56,18 +84,42 @@ local g = import 'pgraph.jsonnet';
                  else std.foldl(function(a, t) a + self.leaves(t), tree, 0),
 
   // --- node helper -----------------------------------------------------------
-  local fan_node(fantype, name, mult, nin, nout, data) =
-    g.pnode({ type: fantype, name: name, data: { multiplicity: mult } + data },
+  // the tree port indices reached through each top-level port of `tree`, whose
+  // first tree port is `offset`
+  local port_spans(tree, offset) =
+    if std.type(tree) == 'number' then [ [offset + i] for i in std.range(0, tree - 1) ]
+    else
+      local sizes = [ $.leaves(t) for t in tree ];
+      local starts = std.foldl(function(a, n) a + [a[std.length(a) - 1] + n],
+                               sizes, [offset]);
+      [ std.range(starts[i], starts[i + 1] - 1) for i in std.range(0, std.length(tree) - 1) ],
+
+  local fan_data(tree, offset, data) =
+    if std.type(data) == 'function'
+    then data({
+      multiplicity: if std.type(tree) == 'number' then tree else std.length(tree),
+      leaf: std.type(tree) == 'number',
+      offset: offset,
+      ports: port_spans(tree, offset),
+    })
+    else data,
+
+  local fan_node(fantype, name, tree, offset, nin, nout, data) =
+    local mult = if std.type(tree) == 'number' then tree else std.length(tree);
+    g.pnode({ type: fantype, name: name,
+              data: { multiplicity: mult } + fan_data(tree, offset, data) },
             nin=nin, nout=nout),
 
   // --- fanout: 1 input port -> N output ports --------------------------------
-  local build_out(tree, fantype, basename, path, data) =
+  local build_out(tree, fantype, basename, path, data, offset=0) =
     if std.type(tree) == 'number'
-    then fan_node(fantype, basename + path, tree, 1, tree, data)
+    then fan_node(fantype, basename + path, tree, offset, 1, tree, data)
     else
       local b = std.length(tree);
-      local root = fan_node(fantype, basename + path, b, 1, b, data);
-      local kids = [ build_out(tree[i], fantype, basename, path + '_%d' % i, data)
+      local spans = port_spans(tree, offset);
+      local root = fan_node(fantype, basename + path, tree, offset, 1, b, data);
+      local kids = [ build_out(tree[i], fantype, basename, path + '_%d' % i, data,
+                               spans[i][0])
                      for i in std.range(0, b - 1) ];
       g.intern(innodes=[root], outnodes=kids,
                edges=[ g.edge(root, kids[i], i, 0) for i in std.range(0, b - 1) ],
@@ -84,13 +136,15 @@ local g = import 'pgraph.jsonnet';
     build_out(tree, fantype, name, '', data),
 
   // --- fanin: N input ports -> 1 output port ---------------------------------
-  local build_in(tree, fantype, basename, path, data) =
+  local build_in(tree, fantype, basename, path, data, offset=0) =
     if std.type(tree) == 'number'
-    then fan_node(fantype, basename + path, tree, tree, 1, data)
+    then fan_node(fantype, basename + path, tree, offset, tree, 1, data)
     else
       local b = std.length(tree);
-      local root = fan_node(fantype, basename + path, b, b, 1, data);
-      local kids = [ build_in(tree[i], fantype, basename, path + '_%d' % i, data)
+      local spans = port_spans(tree, offset);
+      local root = fan_node(fantype, basename + path, tree, offset, b, 1, data);
+      local kids = [ build_in(tree[i], fantype, basename, path + '_%d' % i, data,
+                              spans[i][0])
                      for i in std.range(0, b - 1) ];
       g.intern(innodes=kids, outnodes=[root],
                edges=[ g.edge(kids[i], root, 0, i) for i in std.range(0, b - 1) ],
