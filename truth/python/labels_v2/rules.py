@@ -154,8 +154,31 @@ def label_event(ev, det=None, params=None):
         T.inst_dep = np.where(T.grow >= 0, T.root_of[np.maximum(T.grow, 0)], -1)
         lost = T.inst_dep < 0
         T.inst_dep[lost] = nr + ev.tid[lost]
+        # Q16 d (Xin 2026-11-05): an unresolved delta's own FREE pieces farther than 2 steps from its parent track are 2.5 objects of
+        # their own (LE blip clusters, pseudo roots), as its radiation is; the rest of the electron stays part of the track
+        far_base = nr + int(ev.tid.max()) + 1 if n else nr + 1
+        far_of = {}                                       # pseudo root id -> (candidate row, parent row)
+        for k in np.flatnonzero(~resolved).tolist():
+            r_ = int(cand_rows[k]); m_ = T.mrow[r_]
+            if m_ < 0:
+                continue
+            cd = np.flatnonzero((dob_c == k) & (p_fr >= 0))
+            if not len(cd):
+                continue
+            par = np.flatnonzero((T.grow == m_) & ev.placed)
+            if not len(par):
+                continue
+            dpar = cKDTree(P3[par]).query(P3[cd])[0]
+            for pc_ in np.unique(p_fr[cd]).tolist():
+                sel_ = cd[p_fr[cd] == pc_]
+                if dpar[np.isin(cd, sel_)].min() > 2 * step and q[sel_].sum() >= THR:
+                    pid_ = far_base + len(far_of); far_of[pid_] = (r_, int(m_)); T.inst_dep[sel_] = pid_
+        R.far_of = far_of
     log.update(n_candidates=int(K), n_resolved=int(resolved.sum()), n_resolved_michel=int((resolved & (T.kind[cand_rows] == KIND["MICHEL"])).sum()) if K else 0)
     R.cand_rows, R.cand_resolved, R.cand_main_ext, R.cand_nseg_own = cand_rows, resolved, main_ext, nseg_own
+    if not hasattr(R, "far_of"):
+        R.far_of = {}
+    log["n_delta_far_pieces"] = int(len(R.far_of))
     res_rows = cand_rows[resolved]
     res_shower = np.zeros(nr, bool); res_shower[res_rows[nseg_own[resolved] >= 2]] = True
     resolved_row = np.zeros(nr, bool); resolved_row[res_rows] = True
@@ -218,8 +241,12 @@ def label_event(ev, det=None, params=None):
     # shower-ringed shares: only shower instances can be present
     shower_dep = is_row & is_shower_row[np.minimum(inst1, nr - 1)]
     CSs, causes = P.clean_share(inst1, test_all, qmask=shower_dep.astype(np.float64))
-    ringed = ((CSs <= 0.5 + 1e-9) & P.seen).any(1) & test_all
-    R.ringed = ringed
+    # shower-ringed (Q16 c, Xin 2026-11-05): in EVERY seen view where the deposit is not clean, the overlapper's ring holds a shower
+    # (2.2's own quantifier; 50e's "some seen view" let a W-view coincidence hide a vertex 150 mm from the only shower in 3-D)
+    overlapped = P.seen & (CS1 < 0.5 - 1e-9)
+    shr = CSs <= 0.5 + 1e-9
+    ringed = overlapped.any(1) & (~overlapped | shr).all(1) & test_all
+    R.ringed = ringed; R.CSs, R.causes = CSs, causes
 
     # ------------------------------------------------------------------ Q12 A: EM objects with no free deposit, shower-ringed
     absorbed_into = np.full(nr, -1, np.int64)
@@ -283,7 +310,10 @@ def label_event(ev, det=None, params=None):
         # by the track's own daughter EM objects (a decay-in-flight electron, its own delta showers) does not hide the track: that
         # end is the decay / branching vertex, a physical end (doc 54 sec 4)
         visible_inst = q[mem].sum() >= THR
-        rg = ringed[own] if visible_inst else ((CSs[own] <= 0.5 + 1e-9) & P.has_entry[own]).any(1)
+        if visible_inst:
+            rg = ringed[own]
+        else:                                             # never seen: every view with an entry counts as overlapped
+            ov_ = P.has_entry[own]; rg = ov_.any(1) & (~ov_ | (CSs[own] <= 0.5 + 1e-9)).all(1)
         cs_own = causes[own]
         own_daughter = np.zeros(len(own), bool)
         for v_ in range(3):
@@ -361,6 +391,8 @@ def label_event(ev, det=None, params=None):
     cls_obj = np.full(n, OBJ["other"], np.int8)
     rowc = np.where(is_row, cls_row[np.minimum(inst1, nr - 1)], OBJ["other"])
     cls_obj[:] = rowc
+    if R.far_of:
+        fp = np.isin(inst1, np.fromiter(R.far_of.keys(), np.int64)); cls_obj[fp] = OBJ["le"]; piece_type[fp] = 2
     abs_dep = is_row & (absorbed_into[np.minimum(inst1, nr - 1)] >= 0)
     swl_dep = is_row & (swallowed_into[np.minimum(inst1, nr - 1)] >= 0)
     cls_obj[abs_dep | swl_dep] = OBJ["shower"]
@@ -397,6 +429,17 @@ def instance_table(ev, T, R, NI, uroots, inst):
     cand_pos = {int(r): k for k, r in enumerate(R.cand_rows.tolist())}
     for i, r in enumerate(uroots.tolist()):
         cols["n_dep"][i] = ni[i]; fcols["q"][i] = qi[i]; fcols["e_dep_mev"][i] = ei[i]
+        if r >= nr and r in R.far_of:                      # Q16 d: a far free piece of an unresolved delta, an LE blip cluster of its own
+            cr, pr_ = R.far_of[r]
+            cols["root_row"][i] = -1; cols["g4_id"][i] = T.tt[cr]; cols["kind"][i] = KIND["EM"]; cols["cls_obj"][i] = OBJ["le"]; cols["pdg"][i] = T.pdg[cr]
+            pr_root = T.root_of[pr_] if pr_ >= 0 else -1
+            cols["parent_inst"][i] = root_inst.get(int(pr_root), -1); cols["parent_g4"][i] = T.tt[pr_]; cols["edge"][i] = EDGE["daughter"]
+            cols["interaction"][i] = T.interaction(cr); fcols["ke_mev"][i] = T.ke[cr]
+            og = "delta_far_piece"
+            if og not in oidx:
+                oidx[og] = len(origins); origins.append(og)
+            cols["origin"][i] = oidx[og]; cols["flags"][i] = FL_VISIBLE if qi[i] >= THR else 0
+            continue
         if r >= nr:                                       # pseudo instance: a stored id with no table row
             cols["root_row"][i] = -1; cols["g4_id"][i] = r - nr; cols["kind"][i] = KIND["OTHER"]; cols["cls_obj"][i] = OBJ["other"]
             cols["parent_inst"][i] = -1; cols["parent_g4"][i] = -1; cols["interaction"][i] = -1; cols["origin"][i] = -1

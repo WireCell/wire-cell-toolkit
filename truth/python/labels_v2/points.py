@@ -6,7 +6,8 @@ particle in the reco frame: first by orig_tid among the deposits whose own G4 id
 deposits folded to that id, else (flagged) the nearest deposit of any particle.  The deposit's labels are then copied to
 the point.  Ghost points (tid == -1) keep class ghost and store the distance to the nearest labelled point; points with
 tid < -1 (shared / no truth) are "other"; points farther than far_mm from their own trajectory (lab d_traj) keep their
-label with the far bit set (50b 2.7, "Other": masked, out of the loss, label kept).
+label with the far bit set (50b 2.7, "Other": masked, out of the loss, label kept).  A point whose own instance holds < 2,400 e
+is re-owned to the nearest deposit of a visible instance (Q16 b, Xin 2026-11-05), with other_reason bit 128 set.
 """
 import numpy as np
 from scipy.spatial import cKDTree
@@ -77,5 +78,14 @@ def link(ev, R):
     fl = np.asarray(R.table["inst_flags"]); io_ = out["inst"]
     inv = (io_ >= 0) & ((fl[np.maximum(io_, 0)] & FL_VISIBLE) == 0)
     reason[inv] |= OR_INVISIBLE_OWNER
+    # Q16 b (Xin 2026-11-05): such a point is re-owned to the nearest deposit of a visible instance (>= 2,400 e); the flag stays
+    vis_inst = (fl & FL_VISIBLE) > 0
+    vd = okdep & (R.inst >= 0) & vis_inst[np.maximum(R.inst, 0)]
+    if inv.any() and vd.any():
+        d, j = cKDTree(Xr[vd]).query(X[inv]); dd = np.flatnonzero(vd)[j]
+        dep[inv] = dd; out["match_dist"][inv] = d.astype(np.float32)
+        for k in ("inst", "cls_obj", "cls7", "piece_id", "piece_type", "d_own_seg", "overlap", "stretch"):
+            out[k][inv] = getattr(R, k)[dd]
+    out["dep"] = dep
     out["other_reason"] = reason
     return out
