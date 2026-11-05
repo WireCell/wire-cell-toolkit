@@ -56,7 +56,7 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // ('dv2_split_move' = default; 'dv2_snap' | 'dv2_split'; 'original' = the
     // pre-DV2-MAX production chain).
     node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
-         vertex_method='dv2_split_move', dv2_bundle='dv2max/r7_cloud/bundle.json')::
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/sbnd/r7_cloud/bundle.json')::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
                       vertex_method=vertex_method, dv2_bundle=dv2_bundle,
                       pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee),

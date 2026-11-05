@@ -955,7 +955,7 @@ function(
     // LightGBM env on PYTHONPATH and libpython preloaded, like the SCN net.
     // 'original' => compiled config byte-identical to the pre-DV2-MAX production.
     vertex_method = 'dv2_split_move',
-    dv2_bundle = 'dv2max/r7_cloud/bundle.json',
+    dv2_bundle = 'dv2max/sbnd/r7_cloud/bundle.json',
     // Beam window [low, high) in us on cluster_t0 (= matched flash time) selecting
     // the bundle that gets neutrino PR.  [0,0] disables the gate (then
     // tagger_check_neutrino falls back to uBooNE single-main selection, which on

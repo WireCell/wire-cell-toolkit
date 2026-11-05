@@ -6,7 +6,9 @@ top-1 vertex in the raw reco frame plus a calibrated P(< 1 cm).
 
 - Runtime dependencies: numpy, scipy, torch (CPU), lightgbm. No spconv, torch_scatter, pandas, h5py or sklearn.
 - Nothing is imported from sbnd-vertexer.
-- Model bundle: `cfg/dv2max/r7_cloud/` (`bundle.json` and the files it lists, each with its sha256).
+- Model bundle: `dv2max/sbnd/r7_cloud/` in [wire-cell-data](https://github.com/WireCell/wire-cell-data) (`bundle.json`
+  and the files it lists, each with its sha256), not in this repository. A `dv2_*` method needs that wire-cell-data
+  directory on `WIRECELL_PATH`; without it the job fails at configure ("not found on WIRECELL_PATH").
 
 ## Choosing the vertexing method
 
@@ -47,7 +49,7 @@ wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-p
   - `dv2_split` can split a track one fit spacing (about 0.6 cm) from an existing vertex, which leaves a short
     stub segment between the two;
   - a split long-muon segment stays the long muon: its two halves replace it.
-- `dv2_bundle` (default `dv2max/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
+- `dv2_bundle` (default `dv2max/sbnd/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
   `dl_weights` stays the SCN net of `original`.
 - `original` compiles to the same configuration as master (b7bd2a1a), byte for byte. The C++ default of
   `TaggerCheckNeutrino` stays `original`, so detectors other than SBND are unchanged.
@@ -137,7 +139,7 @@ Notes on the table:
 `make_bundle.py` is a build tool (it needs pyyaml + torch, e.g. the sbnd-vertexer venv). It writes the bundle from
 `R/dv2max/runs/r7_cloud` and the ranker re-fit. `validate_r7.py` is the parity test.
 
-## Model bundle (`cfg/dv2max/r7_cloud/`)
+## Model bundle (wire-cell-data `dv2max/sbnd/r7_cloud/`)
 
 | file | contents |
 |---|---|
@@ -179,7 +181,7 @@ The isotonic map was re-fit the same way. Both calibration halves stop at the sa
 
 ```bash
 python validate_r7.py extract --out DIR                 # needs h5py: the r7 export -> DIR/calls.npz (fold 0)
-python validate_r7.py run --out DIR --bundle <W>/cfg/dv2max/r7_cloud/bundle.json --workers 16 --results results_x.jsonl
+python validate_r7.py run --out DIR --bundle <wire-cell-data>/dv2max/sbnd/r7_cloud/bundle.json --workers 16 --results results_x.jsonl
 python validate_r7.py report --out DIR --results results_x.jsonl      # -> DIR/report_x.json / .md
 ```
 

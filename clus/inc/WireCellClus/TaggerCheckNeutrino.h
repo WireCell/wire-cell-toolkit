@@ -494,7 +494,7 @@ public:
         //                         original chain's vertex knobs are not used
         std::string m_vertex_method{"original"};
         bool        m_vertex_is_dv2{false};
-        std::string m_dv2_bundle{"dv2max/r7_cloud/bundle.json"};   // DV2-MAX bundle manifest (resolved via WIRECELL_PATH)
+        std::string m_dv2_bundle{"dv2max/sbnd/r7_cloud/bundle.json"};   // DV2-MAX bundle manifest (resolved via WIRECELL_PATH)
         std::string m_dv2_py_module{"DV2_Vertex"};   // Python module (on PYTHONPATH) holding DV2_Vertex()
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production

@@ -3,7 +3,7 @@ DV2-MAX run directory.  A build tool, not imported at run time; it needs pyyaml 
 venv).  The ranker text and the isotonic thresholds come from the deterministic fold re-fit (see README.md).
 
 usage: python make_bundle.py --run <sbnd-vertexer>/dv2max/runs/r7_cloud --refit <dir with ranker_fold0.txt,
-       isotonic_fold0.json, feature_names.json, refit2_report.json> --out <wct>/cfg/dv2max/r7_cloud [--fold 0]
+       isotonic_fold0.json, feature_names.json, refit2_report.json> --out <wire-cell-data>/dv2max/sbnd/r7_cloud [--fold 0]
 """
 import argparse
 import datetime

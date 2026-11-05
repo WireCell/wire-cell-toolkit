@@ -14,7 +14,7 @@ the label frame), i.e. the offline tag_nu fallback.
 
 usage:
   python validate_r7.py extract --out DIR [--fold 0] [--max-calls N] [--seed 0]
-  python validate_r7.py run --out DIR --bundle <W>/cfg/dv2max/r7_cloud/bundle.json [--workers 16] [--first N]
+  python validate_r7.py run --out DIR --bundle <wire-cell-data>/dv2max/sbnd/r7_cloud/bundle.json [--workers 16] [--first N]
                            [--sample N --seed S] [--results NAME.jsonl]
   python validate_r7.py report --out DIR [--results NAME.jsonl]
 """

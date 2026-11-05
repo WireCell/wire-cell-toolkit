@@ -42,7 +42,7 @@ function(input='qlpctree.tar.gz',
          // 'dv2_snap', 'dv2_split', or 'original' (the pre-DV2-MAX production chain),
          // e.g. --tla-str vertex_method=original.  dv2_bundle: the DV2-MAX model.
          vertex_method='dv2_split_move',
-         dv2_bundle='dv2max/r7_cloud/bundle.json')
+         dv2_bundle='dv2max/sbnd/r7_cloud/bundle.json')
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';

@@ -2,7 +2,7 @@
 DV2-MAX neutrino vertex for one DL-vertex call (called by WCPPyUtil::DV2_Vertex through the embedded interpreter).
 
 DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32") -> bytes
-  weights        absolute path of the model bundle manifest (e.g. <WIRECELL_PATH>/dv2max/r7_cloud/bundle.json)
+  weights        absolute path of the model bundle manifest (e.g. <wire-cell-data>/dv2max/sbnd/r7_cloud/bundle.json)
   x, y, z, q     bytes of `dtype` arrays: the call's point cloud (cm, raw reco frame; q = dQ * q_scale + q_offset,
                  i.e. the floats the DL-vertex dump writes); the first n_vertex_rows points are the PR-graph
                  vertex rows
