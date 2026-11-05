@@ -17,7 +17,8 @@ Per instance (inst_*): root_row, g4_id, kind (0 track kind, 1 delta, 2 Michel, 3
 parent_inst, parent_g4, edge, interaction, origin (index into inst_origin_names), flags (1 orphan, 2 buried, 4 hidden start, 8 hidden end, 16 vertex stub,
 32 absorbed, 64 swallowed, 128 resolved, 256 hidden attach, 512 primary, 2048 visible, 4096 unresolved long track), n_dep, nseg, npiece, q, e_dep_mev,
 ke_mev, vis_frac, ratio, chord_mm, run_mm, wait_ns, main_ext_mm (the delta / Michel main free piece), max_ext_mm (an EM instance's largest piece, >= 2-view extent), start_x/y/z and end_x/y/z (first / last own deposit, reco frame, mm),
-g4_start_x/y/z and g4_end_x/y/z (the G4 start / end, true frame, mm; for a vertex fit).  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json.
+g4_start_x/y/z and g4_end_x/y/z (the G4 start / end, true frame, mm; for a vertex fit).  Key points: kp_x/y/z, kp_kind, kp_inst.  meta: json
+(byte-reproducible); run: json with the timings and peak RSS (the only member that differs between two runs).
 """
 import ctypes, hashlib, json, os, sys, time
 if __name__ == "__main__":
@@ -71,12 +72,15 @@ def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det
                     n_points=int(len(pt["cls7"])), cls7_counts=counts, n_keypoints=int(len(kps["kp_kind"])), kp_points=int((kpt["kp_type"] > 0).sum()),
                     match_dist_p50=float(np.median(pt["match_dist"][pt["match_dist"] >= 0])) if (pt["match_dist"] >= 0).any() else -1.0,
                     match_dist_p99=float(np.percentile(pt["match_dist"][pt["match_dist"] >= 0], 99)) if (pt["match_dist"] >= 0).any() else -1.0,
-                    wall_s=dict(load=round(t1 - t0, 2), rules=round(t2 - t1, 2), points_kp=round(t3 - t2, 2)), peak_rss_mb=peak_rss_mb(),
                     slim_sha256=hashlib.sha256(open(slim, "rb").read()).hexdigest() if slim else None)
+        # timings and memory go to a separate member, so that `meta` and every array are byte-reproducible run to run (the SDCC
+        # gate compares all members but `run`; two runs of one event differed only in wall_s, campaign session 2026-11-05)
+        run = dict(wall_s=dict(load=round(t1 - t0, 2), rules=round(t2 - t1, 2), points_kp=round(t3 - t2, 2)), peak_rss_mb=peak_rss_mb())
         A = writer.assemble(ev, R, pt, kps, kpt, meta)
+        A["run"] = np.frombuffer(json.dumps(run, sort_keys=True).encode(), np.uint8)
         os.makedirs(outdir, exist_ok=True)
         writer.write_npz(f"{outdir}/{ev.ev}.labels_v2.npz", A)
-        return "ok", f"{meta['n_points']} points inst {R.log['n_instances']} kp {meta['n_keypoints']} ({meta['kp_points']} pts) cls7 {counts} wall {meta['wall_s']} rss {meta['peak_rss_mb']}MB"
+        return "ok", f"{meta['n_points']} points inst {R.log['n_instances']} kp {meta['n_keypoints']} ({meta['kp_points']} pts) cls7 {counts} wall {run['wall_s']} rss {run['peak_rss_mb']}MB"
     finally:
         ev.close()
 
