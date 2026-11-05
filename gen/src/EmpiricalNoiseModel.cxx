@@ -13,6 +13,7 @@
 #include "WireCellAux/DftTools.h"
 
 #include <iostream>  // debug
+#include <sstream>
 
 WIRECELL_FACTORY(EmpiricalNoiseModel,
                  WireCell::Gen::EmpiricalNoiseModel,
@@ -46,7 +47,7 @@ Gen::EmpiricalNoiseModel::EmpiricalNoiseModel(const std::string& spectra_file, c
   // , m_fres(freq_scale)
   , m_anode_tn(anode_tn)
   , m_chanstat_tn(chanstat_tn)
-  , m_len_amp_cache(4)
+  , m_cache(std::make_shared<SpectrumCache>())
 {
     m_fft_length = fft_length(m_nsamples);
     gen_elec_resp_default();
@@ -168,9 +169,15 @@ void Gen::EmpiricalNoiseModel::configure(const WireCell::Configuration& cfg)
         log->critical("required configuration parameter \"spectra_file\" is empty");
         ++errors;
     }
+    // What the spectra are, for the shared cache key.
+    std::string spectra_key = "file:" + m_spectra_file;
     if (jspectra.isString()) {
         m_spectra_file = jspectra.asString();
+        spectra_key = "file:" + m_spectra_file;
         jspectra = Persist::load(m_spectra_file);
+    }
+    else {
+        spectra_key = "json:" + Persist::dumps(jspectra);
     }
 
     std::string dft_tn = get<std::string>(cfg, "dft", "FftwDFT");
@@ -228,6 +235,27 @@ void Gen::EmpiricalNoiseModel::configure(const WireCell::Configuration& cfg)
     if (errors) {
         THROW(ValueError() << errmsg{"EmpiricalNoiseModel: configuration errors"});
     }
+
+    // Everything the cached spectra depend on.
+    std::stringstream key;
+    key << spectra_key << "|" << m_nsamples << "|" << m_fft_length << "|" << m_period
+        << "|" << m_wlres << "|" << m_gres << "|" << m_sres;
+    m_cache = shared_cache(key.str());
+}
+
+std::shared_ptr<Gen::EmpiricalNoiseModel::SpectrumCache>
+Gen::EmpiricalNoiseModel::shared_cache(const std::string& key)
+{
+    static std::mutex mutex;
+    static std::unordered_map<std::string, std::weak_ptr<SpectrumCache>> caches;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    auto cache = caches[key].lock();
+    if (!cache) {
+        cache = std::make_shared<SpectrumCache>();
+        caches[key] = cache;
+    }
+    return cache;
 }
 
 
@@ -309,11 +337,18 @@ const double Gen::EmpiricalNoiseModel::gain(int chid) const
 const Gen::EmpiricalNoiseModel::spectrum_data_t&
 Gen::EmpiricalNoiseModel::get_spectrum_data(int iplane, int ilen) const
 {
-    if (iplane < 0 or iplane >= (int)m_len_amp_cache.size()) {
+    std::lock_guard<std::mutex> lock(m_cache->mutex);
+    return get_spectrum_data_locked(iplane, ilen);
+}
+
+const Gen::EmpiricalNoiseModel::spectrum_data_t&
+Gen::EmpiricalNoiseModel::get_spectrum_data_locked(int iplane, int ilen) const
+{
+    if (iplane < 0 or iplane >= (int)m_cache->len_amp.size()) {
         THROW(ValueError() << errmsg{"EmpiricalNoiseModel: illegal plane index"});
     }
 
-    auto& amp_cache = m_len_amp_cache[iplane];
+    auto& amp_cache = m_cache->len_amp[iplane];
     auto lenamp = amp_cache.find(ilen);
     if (lenamp == amp_cache.end()) {
         amp_cache[ilen] = interpolate_wire_length(iplane, ilen * m_wlres);
@@ -325,16 +360,15 @@ Gen::EmpiricalNoiseModel::get_spectrum_data(int iplane, int ilen) const
 const IChannelSpectrum::amplitude_t&
 Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
 {
+    // Lock order: this instance's per-channel maps, then the shared cache.
+    std::lock_guard<std::mutex> lock(m_mutex_cache);
+
     auto packkeyit = m_channel_packkey_cache.find(chid);
     if (packkeyit != m_channel_packkey_cache.end()) {
-        unsigned int packkey = packkeyit->second;
-        auto cacit = m_channel_amp_cache.find(packkey);
-        if (cacit != m_channel_amp_cache.end()) {
-            return cacit->second;
-        }
+        std::lock_guard<std::mutex> clock(m_cache->mutex);
+        return m_cache->channel_amp.at(packkeyit->second);
     }
 
-    std::lock_guard<std::mutex> lock(m_mutex_cache);
     // get truncated wire length for cache
     int ilen = 0;
     auto chlen = m_chid_to_intlen.find(chid);
@@ -348,7 +382,7 @@ Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
         ilen = int(len / m_wlres);
         // there might be  aproblem with the wire length's unit
         // ilen = int(len);
-        m_chid_to_intlen[chid] = ilen; // fixme: not thread safe
+        m_chid_to_intlen[chid] = ilen;
     }
     else {
         ilen = chlen->second;
@@ -358,10 +392,6 @@ Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
     auto wpid = m_anode->resolve(chid);
     const int iplane = wpid.index();
 
-    // Must copy as next apply channel-specific changes.
-    auto [constant, amp] = get_spectrum_data(iplane, ilen);
-    const size_t namps = amp.size();
-
     // Convert from as-built to as-designed.
     const double db_gain = gain(chid);
     const double db_shaping = shaping_time(chid);
@@ -369,51 +399,6 @@ Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
     if (m_chanstat) {  // allow for deviation from nominal
         ch_gain = m_chanstat->preamp_gain(chid);
         ch_shaping = m_chanstat->preamp_shaping(chid);
-    }
-
-    // Convert gain.
-    if (fabs(ch_gain - db_gain) > 0.01 * ch_gain) {
-        Waveform::scale(amp, ch_gain / db_gain);
-    }
-
-    // Convert shaping
-    if (fabs(ch_shaping - db_shaping) > 0.01 * ch_shaping) {
-        // scale the amplitude by different shaping time ...
-        int nconfig = ch_shaping / units::us / 0.1;
-        auto resp1 = m_elec_resp_cache.find(nconfig);
-        if (resp1 == m_elec_resp_cache.end()) {
-            Response::ColdElec elec_resp(10, ch_shaping);  // default at 1 mV/fC
-            auto sig = elec_resp.generate(WireCell::Waveform::Domain(0, namps * m_period), namps);
-            auto filt = fwd_r2c(m_dft, sig);
-            auto ele_resp_amp = Waveform::magnitude(filt);
-
-            ele_resp_amp.resize(m_elec_resp_freq.size());
-            m_elec_resp_cache[nconfig] = ele_resp_amp;
-        }
-        resp1 = m_elec_resp_cache.find(nconfig);
-
-        nconfig = db_shaping / units::us / 0.1;
-        auto resp2 = m_elec_resp_cache.find(nconfig);
-        if (resp2 == m_elec_resp_cache.end()) {
-            Response::ColdElec elec_resp(10, db_shaping);  // default at 1 mV/fC
-            auto sig = elec_resp.generate(WireCell::Waveform::Domain(0, namps * m_period), namps);
-            auto filt = fwd_r2c(m_dft, sig);
-            auto ele_resp_amp = Waveform::magnitude(filt);
-
-            ele_resp_amp.resize(m_elec_resp_freq.size());
-            m_elec_resp_cache[nconfig] = ele_resp_amp;
-        }
-        resp2 = m_elec_resp_cache.find(nconfig);
-
-        for (size_t ind = 0; ind < namps; ++ind) {
-            amp[ind] *= resp1->second[ind] / resp2->second[ind];
-        }
-    }
-
-    // add the constant terms ...
-    const double constant_squared = constant*constant;
-    for (auto& val : amp) {
-        val = sqrt(val*val + constant_squared); // units still in mV
     }
 
     struct PWGS {
@@ -433,7 +418,64 @@ Gen::EmpiricalNoiseModel::channel_spectrum(int chid) const
 
     unsigned int packkey = pack();
     m_channel_packkey_cache[chid] = packkey;
-    // m_channel_amp_cache.clear();
-    m_channel_amp_cache[packkey] = amp;
-    return channel_spectrum(chid);
+
+    std::lock_guard<std::mutex> clock(m_cache->mutex);
+    auto cacit = m_cache->channel_amp.find(packkey);
+    if (cacit != m_cache->channel_amp.end()) {
+        return cacit->second;
+    }
+
+    // Must copy as next apply channel-specific changes.
+    auto [constant, amp] = get_spectrum_data_locked(iplane, ilen);
+    const size_t namps = amp.size();
+
+    // Convert gain.
+    if (fabs(ch_gain - db_gain) > 0.01 * ch_gain) {
+        Waveform::scale(amp, ch_gain / db_gain);
+    }
+
+    // Convert shaping
+    if (fabs(ch_shaping - db_shaping) > 0.01 * ch_shaping) {
+        auto& elec_resp_cache = m_cache->elec_resp;
+        // scale the amplitude by different shaping time ...
+        int nconfig = ch_shaping / units::us / 0.1;
+        auto resp1 = elec_resp_cache.find(nconfig);
+        if (resp1 == elec_resp_cache.end()) {
+            Response::ColdElec elec_resp(10, ch_shaping);  // default at 1 mV/fC
+            auto sig = elec_resp.generate(WireCell::Waveform::Domain(0, namps * m_period), namps);
+            auto filt = fwd_r2c(m_dft, sig);
+            auto ele_resp_amp = Waveform::magnitude(filt);
+
+            ele_resp_amp.resize(m_elec_resp_freq.size());
+            elec_resp_cache[nconfig] = ele_resp_amp;
+        }
+        resp1 = elec_resp_cache.find(nconfig);
+
+        nconfig = db_shaping / units::us / 0.1;
+        auto resp2 = elec_resp_cache.find(nconfig);
+        if (resp2 == elec_resp_cache.end()) {
+            Response::ColdElec elec_resp(10, db_shaping);  // default at 1 mV/fC
+            auto sig = elec_resp.generate(WireCell::Waveform::Domain(0, namps * m_period), namps);
+            auto filt = fwd_r2c(m_dft, sig);
+            auto ele_resp_amp = Waveform::magnitude(filt);
+
+            ele_resp_amp.resize(m_elec_resp_freq.size());
+            elec_resp_cache[nconfig] = ele_resp_amp;
+        }
+        resp2 = elec_resp_cache.find(nconfig);
+
+        for (size_t ind = 0; ind < namps; ++ind) {
+            amp[ind] *= resp1->second[ind] / resp2->second[ind];
+        }
+    }
+
+    // add the constant terms ...
+    const double constant_squared = constant*constant;
+    for (auto& val : amp) {
+        val = sqrt(val*val + constant_squared); // units still in mV
+    }
+
+    auto& stored = m_cache->channel_amp[packkey];
+    stored = std::move(amp);
+    return stored;
 }

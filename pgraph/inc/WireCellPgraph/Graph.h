@@ -48,17 +48,12 @@ namespace WireCell {
             // return a topological sort of the graph as per Kahn algorithm.
             std::vector<Node*> sort_kahn();
 
-            // Excute the graph until nodes stop delivering
+            // Excute the graph until nodes stop delivering.  The
+            // sink-most runnable node is always fired next ("drain
+            // toward sinks"), minimizing data held on edges.  It is
+            // found from an event-driven, rank-ordered ready set,
+            // O((V+E) log V) overall.
             bool execute();
-
-            // Execute the graph with the same "drain toward sinks"
-            // policy as execute() (minimizing data held on edges) but
-            // using an event-driven, rank-ordered ready set instead of
-            // rescanning the full topological order after every firing.
-            // This fires the identical sequence of nodes as execute()
-            // but in O((V+E) log V) rather than O(V^2).  Used by the
-            // TopoGrapher application; Pgrapher keeps using execute().
-            bool execute_drain();
 
             // Excute parents of node or if any parent is not ready,
             // recursively call this method on parent.  Return number
