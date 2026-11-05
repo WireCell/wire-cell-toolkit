@@ -20,7 +20,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from .objects import KIND
-from .rules import OBJ, FL_BURIED, FL_SWALLOWED, FL_HIDDEN_START, FL_HIDDEN_END, FL_HIDDEN_ATTACH, FL_RESOLVED, FL_VISIBLE
+from .rules import OBJ, FL_BURIED, FL_SWALLOWED, FL_HIDDEN_START, FL_HIDDEN_END, FL_HIDDEN_ATTACH, FL_RESOLVED, FL_VISIBLE, FL_UNRESOLVED
 
 KP = {"track_end": 1, "stub_start": 2, "shower_start": 3, "michel_start": 4, "delta_attach": 5, "nu_vertex": 6, "vertex": 7}
 PHYS_MM = 10.0
@@ -69,7 +69,7 @@ def build(ev, R, table):
             p0, p1 = Xr[own[0]], Xr[own[-1]]
             ps = np.linalg.norm(ev.P3[own[0]] - T.S0[r]) <= PHYS_MM
             pe = np.linalg.norm(ev.P3[own[-1]] - T.S1[r]) <= PHYS_MM
-            if fl & (FL_BURIED | FL_SWALLOWED):
+            if fl & (FL_BURIED | FL_SWALLOWED | FL_UNRESOLVED):      # never resolved: no key points (Q17)
                 continue
             if cls == OBJ["track"]:
                 if ps and not (fl & FL_HIDDEN_START) and vis(own[0]):

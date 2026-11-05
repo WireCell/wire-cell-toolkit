@@ -2,7 +2,8 @@
 """selftest_v2.py -- the v2 rules on synthetic events drawn on the real SBND wires (pr_ml doc 54 step 5).
   (a) a muon with an unresolved 6 mm delta (folded into the track) and a resolved 80 mm delta at 60 deg (class delta, own
       instance, attachment key point); the muon is a Track with two physical end key points
-  (b) two parallel muons 4 mm apart: never resolved -> both Stubs, every deposit overlapping; a third far muon is a Track
+  (b) two parallel muons 4 mm apart: never resolved -> Tracks with the unresolved flag (Q17), every deposit overlapping, no key
+      points; a third far muon is a Track with two end key points
   (c) a photon's 100 mm conversion electron (segment) and a 3 mm Compton blob 60 mm beyond it (blip, same shower instance,
       d_own_seg ~ 60 mm); an 8 mm proton on the segment is swallowed (shower instance, stretch 3); an 8 mm proton at the
       shower start keeps class stub (vertex guard)
@@ -134,9 +135,9 @@ def test_b():
     ev = B.event(); R, pt, kps, kpt = run(ev)
     for t in (1, 2):
         i = inst_of(R, t); d = dep_of(ev, t)
-        check(R.table["inst_cls_obj"][i] == OBJ["stub"], f"muon {t}: Stub (never resolved)")
+        check(R.table["inst_cls_obj"][i] == OBJ["track"] and (R.table["inst_flags"][i] & rules.FL_UNRESOLVED), f"muon {t}: Track with the unresolved flag (Q17: long, never resolved)")
         check((~R.free[d]).mean() > 0.95, f"muon {t}: {100 * (~R.free[d]).mean():.0f} % of deposits overlapping")
-        check(maj(R.cls7[d]) == CLS7["stub"], f"muon {t}: deposits class stub")
+        check(maj(R.cls7[d]) == CLS7["track"], f"muon {t}: deposits class track")
     i3 = inst_of(R, 3); check(R.table["inst_cls_obj"][i3] == OBJ["track"] and R.free[dep_of(ev, 3)].all(), "far muon: Track, every deposit free")
     kk = kps["kp_kind"].tolist(); check(kk.count(KP["track_end"]) == 2, f"key points: the far muon's 2 ends only among track ends (got {kk})")
 

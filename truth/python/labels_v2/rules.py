@@ -37,8 +37,8 @@ OV_NOTFREE, OV_SHRING, OV_FOLDED, OV_ABSORBED, OV_SWALLOWED = 1, 2, 4, 8, 16
 # stretch codes
 STR_NONE, STR_TRAVERSED, STR_HIDDEN_END, STR_SWALLOWED, STR_BURIED = 0, 1, 2, 3, 4
 # instance flags
-FL_ORPHAN, FL_BURIED, FL_HIDDEN_START, FL_HIDDEN_END, FL_VERTEX_STUB, FL_ABSORBED, FL_SWALLOWED, FL_RESOLVED, FL_HIDDEN_ATTACH, FL_PRIMARY, FL_NODELTA_TRUTH, FL_VISIBLE = (
-    1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048)
+FL_ORPHAN, FL_BURIED, FL_HIDDEN_START, FL_HIDDEN_END, FL_VERTEX_STUB, FL_ABSORBED, FL_SWALLOWED, FL_RESOLVED, FL_HIDDEN_ATTACH, FL_PRIMARY, FL_NODELTA_TRUTH, FL_VISIBLE, FL_UNRESOLVED = (
+    1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096)
 EDGE = {"none": 0, "delta": 1, "michel": 2, "daughter": 3, "absorbed": 4, "swallowed": 5}
 
 
@@ -327,7 +327,11 @@ def label_event(ev, det=None, params=None):
         qq = q[own]; qt = max(qq.sum(), 1e-9)
         lr = longest_run(Rm, sseg, Pp)
         run = lr[2] if lr else 0.0
-        track = chord >= 2 * step and run >= step
+        # Q17 (Xin 2026-11-05): a track kind with chord >= 2 steps is a Track whatever its resolved run; without a resolved run
+        # >= 1 step it carries the UNRESOLVED flag (no key points).  Stub = chord < 2 steps (2.2's run condition kept as the flag)
+        track = chord >= 2 * step
+        if track and run < step:
+            info["flags"] |= FL_UNRESOLVED
         info.update(track=bool(track), chord=chord, path=float(sseg[-1]), run=run, ratio=float(qq[Rm].sum() / qt), hfrac=float(qq[Hm].sum() / qt),
                     i_first=int(own[0]), i_last=int(own[-1]))
         good = [(a, b) for a, b in runs_of(Rm) if np.linalg.norm(Pp[b] - Pp[a]) >= step]
@@ -346,9 +350,11 @@ def label_event(ev, det=None, params=None):
                         info["start_hidden"] = True; info["flags"] |= FL_HIDDEN_START
                     if b == len(own) - 1:
                         info["end_hidden"] = True; info["flags"] |= FL_HIDDEN_END
-        elif info["hfrac"] >= 0.5:
-            if chord >= 2 * step:
-                stretch[mem] = STR_BURIED; info["flags"] |= FL_BURIED; track = True      # 2.3: a buried track keeps the track class
+        if track and run < step and info["hfrac"] >= 0.5:
+            stretch[mem] = STR_BURIED; info["flags"] |= FL_BURIED                       # 2.3: never resolved inside a shower
+        elif not track and info["hfrac"] >= 0.5:
+            if False:
+                pass
             else:
                 cs = causes[own][Hm]; cs = cs[(cs >= 0) & (cs < nr)]
                 cs = cs[is_shower_row[cs]] if len(cs) else cs
