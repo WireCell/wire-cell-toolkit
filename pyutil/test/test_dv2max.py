@@ -350,15 +350,30 @@ class TestAPI(unittest.TestCase):
         for k in ("import_numpy", "import_torch", "import_dv2max_vertexer", "load", "load_steps"):
             self.assertIn(k, rep)
 
+    def _threads_in_subprocess(self, dv2_threads, with_dv2=True):
+        """(intra, interop) torch threads of a fresh process after DV2_Vertex set them up (or plain torch)."""
+        code = ("import os, sys; sys.path.insert(0, %r); " % str(PYDIR)
+                + ("import DV2_Vertex as d; d._threads(); " if with_dv2 else "")
+                + "import torch; print(torch.get_num_threads(), torch.get_num_interop_threads())")
+        env = {k: v for k, v in os.environ.items() if k not in ("DV2_THREADS", "OMP_NUM_THREADS")}
+        if dv2_threads is not None:
+            env["DV2_THREADS"] = dv2_threads
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+        return tuple(int(x) for x in out.stdout.split())
+
     def test_dv2_threads_sets_the_torch_thread_count(self):
-        code = ("import os, sys; sys.path.insert(0, %r); import DV2_Vertex as d; d._threads(); import torch; "
-                "print(torch.get_num_threads(), torch.get_num_interop_threads())" % str(PYDIR))
-        for n, want in (("3", "3 1"), (None, "1 1")):
-            env = {k: v for k, v in os.environ.items() if k not in ("DV2_THREADS", "OMP_NUM_THREADS")}
-            if n:
-                env["DV2_THREADS"] = n
-            out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
-            self.assertEqual(out.stdout.strip(), want)
+        self.assertEqual(self._threads_in_subprocess("3"), (3, 1))
+        self.assertEqual(self._threads_in_subprocess(None), (1, 1))      # default
+
+    def test_dv2_threads_0_leaves_torch_alone(self):
+        self.assertEqual(self._threads_in_subprocess("0"), self._threads_in_subprocess(None, with_dv2=False))
+
+    def test_load_report_records_the_thread_change(self):
+        rep = json.loads(dv().DV2_Load(str(BUNDLE)))
+        tt = rep["torch_threads"]
+        self.assertEqual(set(tt), {"DV2_THREADS", "before", "after"})
+        n = int(os.environ.get("DV2_THREADS", "1") or 1)
+        self.assertEqual(tt["after"]["intra"], n if n > 0 else tt["before"]["intra"])
 
 
 # ---------------------------------------------------------------------------- pipeline + golden

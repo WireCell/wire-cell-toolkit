@@ -84,7 +84,7 @@ Models are loaded once per process and manifest path. The sha256 of the bundle f
 
 | variable | effect |
 |---|---|
-| `DV2_THREADS` | torch / LightGBM threads, default 1; interop threads are always 1 |
+| `DV2_THREADS` | torch / LightGBM threads, default 1, interop threads 1. torch's thread setting belongs to the whole process (SCN_Vertex of the original method also sets 1); `0` leaves torch's settings as the process chose them. The load report records the values before and after |
 | `DV2_HOOK_LOG=<path>` | append one JSON line per call: n points, n_vertex_rows, prediction, score, source, stage and total ms |
 | `DV2_DEBUG` | print that line to stdout as well |
 
@@ -187,7 +187,7 @@ Automated tests (run with the WCT test suite; each skips with the reason when wh
 
 | file | what it tests | needs |
 |---|---|---|
-| `pyutil/test/test_dv2max.py` | the algorithm, 29 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, and the golden replay | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 20 of them |
+| `pyutil/test/test_dv2max.py` | the algorithm, 31 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, and the golden replay | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 22 of them |
 | `pyutil/test/doctest_dv2_vertex.cxx` (`wcdoctest-pyutil`) | the C++ wrapper against a fake module (argument marshalling, empty = no prediction, every Python error reaches C++ with its type and message), and 5 golden calls through the wrapper with the real model | the golden case: the bundle and the Python packages |
 | `clus/test/doctest_vertex_method.cxx` | method names, the payload check behind the fallback (empty, wrong size, NaN), the configure-time failures (bad method, missing bundle, failed import) | -- |
 | `clus/test/doctest_pattern_recognition.cxx`, suite "dv2 placements [B]" | `dv2_place_point` and `dv2_place_main_vertex` on the fixture [B] PR graph: snap, split at a fit point (incl. the long-muon sets), split_move reuse within 1.5 cm, the move onto P and when it declines | fixture [B] |

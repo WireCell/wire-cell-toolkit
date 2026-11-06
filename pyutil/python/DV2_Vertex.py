@@ -19,7 +19,8 @@ DV2_Load(weights) -> bytes
   bad bundle, sha256 mismatch) fails at startup instead of at the first event.  Raises on any error, whatever
   DV2_STRICT says.  Returns the load-time breakdown as JSON bytes.
 
-Environment: DV2_THREADS (torch / LightGBM threads, default 1; interop threads are set to 1), DV2_HOOK_LOG=<path>
+Environment: DV2_THREADS (torch / LightGBM threads, default 1, interop threads 1; torch's setting is per PROCESS;
+0 = leave torch's thread settings alone), DV2_HOOK_LOG=<path>
 (append one JSON line per call: n, n_vertex_rows, pred [raw frame], score, score_raw, source, n_cand, stage_ms, ms; the
 call that loads the models also carries first_call_ms = import / load breakdown), DV2_DEBUG (print a summary per call to stdout), DV2_VERIFY=0 (skip the sha256 check
 of the bundle files at load).  Models are loaded once per process and manifest path.
@@ -42,20 +43,32 @@ _FIRST = {"import_numpy": round(1e3 * (time.perf_counter() - _T0), 1)}   # load-
 
 
 def _threads():
+    """torch's thread pools belong to the whole PROCESS: what is set here applies to every torch user in it (the
+    SCN_Vertex net of the original method sets 1 the same way).  DV2_THREADS=N (default 1): N intra-op threads, 1
+    inter-op thread.  DV2_THREADS=0: torch's settings are left as the process (or another component) chose them.
+    The values before and after go into the load report (DV2_Load, first_call_ms of DV2_HOOK_LOG)."""
     global _THREADS
     if _THREADS is None:
         t0 = time.perf_counter()
         import torch
         _FIRST["import_torch"] = round(1e3 * (time.perf_counter() - t0), 1)
+        raw = os.environ.get("DV2_THREADS", "1") or "1"
         try:
-            n = max(1, int(os.environ.get("DV2_THREADS", "1") or 1))
+            n = int(raw)
         except ValueError:
             n = 1
-        torch.set_num_threads(n)
-        try:
-            torch.set_num_interop_threads(1)
-        except RuntimeError:            # already set, or inter-op work has started in this process
-            pass
+        before = {"intra": torch.get_num_threads(), "interop": torch.get_num_interop_threads()}
+        if n <= 0:                      # leave torch's thread settings alone
+            n = before["intra"]
+        else:
+            torch.set_num_threads(n)
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:        # already set, or inter-op work has started in this process
+                pass
+        _FIRST["torch_threads"] = {"DV2_THREADS": raw, "before": before,
+                                   "after": {"intra": torch.get_num_threads(),
+                                             "interop": torch.get_num_interop_threads()}}
         _THREADS = n
     return _THREADS
 
