@@ -8,15 +8,18 @@
 #include <Python.h>
 
 #include "WCPPyUtil/DV2_Vertex.h"
+#include "WCPPyUtil/Interpreter.h"
 #include "WireCellUtil/Persist.h"
 #include "WireCellUtil/doctest.h"
 
 #include <cmath>
+#include <atomic>
 #include <filesystem>
 #include <limits>
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <unistd.h>
@@ -24,6 +27,21 @@
 using WCPPyUtil::FLOAT;
 
 namespace {
+
+    // The wrapper starts the interpreter and then releases the GIL
+    // (WCPPyUtil::ensure_interpreter), so the test's own Python C-API calls
+    // take it, as any other caller must.
+    struct TestGIL {
+        PyGILState_STATE s;
+        TestGIL() : s(PyGILState_Ensure()) {}
+        ~TestGIL() { PyGILState_Release(s); }
+    };
+
+    bool py_error()
+    {
+        TestGIL g;
+        return PyErr_Occurred() != nullptr;
+    }
 
     const char* kModule = "wct_doctest_dv2_fake";
 
@@ -76,8 +94,9 @@ def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtyp
             std::filesystem::create_directories(dir);
             std::ofstream(dir / (std::string(kModule) + ".py")) << kFake;
             REQUIRE(std::filesystem::is_regular_file(dir / (std::string(kModule) + ".py")));
-            Py_Initialize();
+            WCPPyUtil::ensure_interpreter();
             const std::string cmd = "import sys; sys.path.insert(0, r'" + dir.string() + "')";
+            TestGIL g;
             REQUIRE(PyRun_SimpleString(cmd.c_str()) == 0);
         }
         ~FakeModule()
@@ -178,12 +197,12 @@ TEST_CASE("DV2_Vertex: a failed call leaves no Python error behind")
     for (const std::string w : {"raise", "ragged", "notbytes"}) {
         CAPTURE(w);
         CHECK_FALSE(error_of([&] { call(w); }).empty());
-        CHECK_FALSE(PyErr_Occurred());
+        CHECK_FALSE(py_error());
     }
     CHECK_FALSE(error_of([] { call("ok", "wct_doctest_no_such_module"); }).empty());
-    CHECK_FALSE(PyErr_Occurred());
+    CHECK_FALSE(py_error());
     CHECK_FALSE(error_of([] { call("ok", kModule, "no_such_function"); }).empty());
-    CHECK_FALSE(PyErr_Occurred());
+    CHECK_FALSE(py_error());
     CHECK(call("ok").size() == 4);
 }
 
@@ -191,6 +210,7 @@ namespace {
     // Python's count of allocated memory blocks, after a full garbage collection.
     long python_blocks()
     {
+        TestGIL g;
         REQUIRE(PyRun_SimpleString("import gc; gc.collect()") == 0);
         PyObject* sys = PyImport_ImportModule("sys");
         PyObject* f = sys ? PyObject_GetAttrString(sys, "getallocatedblocks") : nullptr;
@@ -220,6 +240,7 @@ namespace {
 TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on any failure")
 {
     fake_module();
+    TestGIL g;   // held for the whole case; the wrapper's own guard nests
     PyObject* mod = PyImport_ImportModule(kModule);
     REQUIRE(mod);
     PyObject* fv = PyObject_GetAttrString(mod, "DV2_Vertex");
@@ -241,7 +262,7 @@ TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on an
     CAPTURE(after);
     CHECK(before > 0);
     CHECK(after - before < n / 3);
-    CHECK_FALSE(PyErr_Occurred());
+    CHECK_FALSE(py_error());
     Py_DECREF(fl);
     Py_DECREF(fv);
     Py_DECREF(mod);
@@ -269,7 +290,33 @@ TEST_CASE("DV2_Load: every failure throws with the reason")
         CHECK(has(msg, "loading raise failed"));
         CHECK(has(msg, "RuntimeError: injected load failure"));
     }
-    CHECK_FALSE(PyErr_Occurred());
+    CHECK_FALSE(py_error());
+}
+
+TEST_CASE("DV2_Vertex: concurrent calls from several threads (the GIL is taken per call)")
+{
+    fake_module();
+    std::atomic<int> good{0}, bad{0};
+    std::vector<std::thread> pool;
+    for (int k = 0; k < 4; ++k) {
+        pool.emplace_back([&] {
+            for (int i = 0; i < 100; ++i) {
+                try {
+                    const auto v = call("ok");
+                    ((v.size() == 4 && v[0] == 2.0f && v[3] == 0.25f) ? good : bad)++;
+                    (has(error_of([] { call("raise"); }), "injected inference failure") ? good : bad)++;
+                }
+                catch (...) {
+                    ++bad;
+                }
+            }
+        });
+    }
+    for (auto& th : pool) th.join();
+    CHECK(good == 800);
+    CHECK(bad == 0);
+    CHECK(PyGILState_Check() == 0);   // no thread keeps the GIL between calls
+    CHECK_FALSE(py_error());
 }
 
 // ---- the real DV2-MAX model through this wrapper ----------------------------
@@ -293,11 +340,16 @@ TEST_CASE("DV2_Vertex: the real DV2-MAX model reproduces the golden held-out cal
         return;
     }
     fake_module();   // initialises the interpreter
-    if (std::filesystem::is_directory("../pyutil/python")) {
-        const std::string dir = std::filesystem::canonical("../pyutil/python").string();
-        REQUIRE(PyRun_SimpleString(("import sys; sys.path.insert(0, r'" + dir + "')").c_str()) == 0);
+    bool importable = false;
+    {
+        TestGIL g;
+        if (std::filesystem::is_directory("../pyutil/python")) {
+            const std::string dir = std::filesystem::canonical("../pyutil/python").string();
+            REQUIRE(PyRun_SimpleString(("import sys; sys.path.insert(0, r'" + dir + "')").c_str()) == 0);
+        }
+        importable = PyRun_SimpleString("import numpy, scipy, torch, lightgbm, DV2_Vertex") == 0;
     }
-    if (PyRun_SimpleString("import numpy, scipy, torch, lightgbm, DV2_Vertex") != 0) {
+    if (!importable) {
         MESSAGE("Skipping: the DV2-MAX Python packages (numpy, scipy, torch, lightgbm, DV2_Vertex) do not import");
         return;
     }

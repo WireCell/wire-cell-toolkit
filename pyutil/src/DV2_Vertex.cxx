@@ -2,12 +2,14 @@
 
 #include "WCPPyUtil/DV2_Vertex.h"
 
+#include "GIL.h"
+
 #include <cstring>
 #include <stdexcept>
 #include <vector>
 
-// Same embedding pattern as SCN_Vertex.cxx: initialise the interpreter (safe
-// to repeat), import the module by name, call one function with bytes
+// Same embedding pattern as SCN_Vertex.cxx: start the interpreter once and take
+// the GIL for the call (GIL.h), import the module by name, call one function with bytes
 // buffers, read a bytes result.  Py_Finalize() is never called (torch).
 
 namespace {
@@ -94,8 +96,8 @@ namespace {
 namespace WCPPyUtil {
     std::string DV2_Load(const std::string& module, const std::string& function, const std::string& weights)
     {
-        Py_Initialize();
-        PyRefs refs;
+        GIL gil;       // the interpreter is started once; the GIL is held for this call only
+        PyRefs refs;   // declared after gil: released while the GIL is still held
         PyObject* pModule = import_module(refs, module, "DV2_Load");
         PyObject* pFunc = get_function(refs, pModule, module, function, "DV2_Load");
         PyObject* pArg = refs.own(PyUnicode_FromString(weights.c_str()));
@@ -127,8 +129,8 @@ namespace WCPPyUtil {
             throw std::runtime_error("DV2_Vertex: n_vertex_rows out of range");
         }
 
-        Py_Initialize();
-        PyRefs refs;   // every reference below is released on return or throw
+        GIL gil;       // the interpreter is started once; the GIL is held for this call only
+        PyRefs refs;   // every reference below is released on return or throw, with the GIL held
         PyObject* pModule = import_module(refs, module, "DV2_Vertex");
         PyObject* pFunc = get_function(refs, pModule, module, function, "DV2_Vertex");
 

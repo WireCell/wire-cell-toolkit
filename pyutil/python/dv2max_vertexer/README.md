@@ -75,6 +75,10 @@ made: fewer than 5 points or no candidate. The caller then keeps the traditional
 `DV2_Load(weights)` imports the model code and loads the bundle. `TaggerCheckNeutrino::configure` calls it, so a
 broken environment fails at startup. It always raises on error.
 
+The C++ wrappers (`WCPPyUtil::DV2_Load`, `DV2_Vertex`, and `SCN_Vertex` of the original method) start the
+interpreter once per process and then release the GIL (`WCPPyUtil/Interpreter.h`); each call takes the GIL for
+its own duration, so calls are safe from any thread (they run one at a time).
+
 Models are loaded once per process and manifest path. The sha256 of the bundle files is checked at load
 (`DV2_VERIFY=0` skips the check). Other environment variables:
 
