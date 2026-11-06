@@ -5,6 +5,15 @@ Inference-only copy of the DV2-MAX vertexer, called by WCT through `pyutil/pytho
 top-1 vertex in the raw reco frame plus a calibrated P(< 1 cm).
 
 - Runtime dependencies: numpy, scipy, torch (CPU), lightgbm. No spconv, torch_scatter, pandas, h5py or sklearn.
+  Tested versions:
+
+  | environment | Python | numpy | scipy | torch | lightgbm | checked with |
+  |---|---|---|---|---|---|---|
+  | pyenv-dl (Ubuntu 22.04 container, glibc 2.35) | 3.14.5 | 2.5.3 | 1.18.1 | 2.9.1+cpu | 4.7.0 | validation on 5,038 held-out calls, the golden fixture, the tests |
+  | SBND UPS stack (SL7, glibc 2.17) | 3.9 | 2.0.2 | 1.13.1 | 2.6.0 | 4.6.0 | review of PR #543: identical results in-chain and standalone, no warnings |
+
+  lightgbm 4.7 has no wheel for glibc 2.17; 4.6.0 reads this bundle's ranker (`ranker_fold0.txt`) and gives the
+  same results.
 - Nothing is imported from sbnd-vertexer.
 - Model bundle: `dv2max/sbnd/r7_cloud/` in [wire-cell-data](https://github.com/WireCell/wire-cell-data) (`bundle.json`
   and the files it lists, each with its sha256), not in this repository. A `dv2_*` method needs that wire-cell-data
