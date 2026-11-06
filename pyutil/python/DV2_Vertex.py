@@ -22,13 +22,15 @@ DV2_Load(weights) -> bytes
 
 Environment: DV2_THREADS (torch / LightGBM threads, default 1, interop threads 1; torch's setting is per PROCESS;
 0 = leave torch's thread settings alone), DV2_HOOK_LOG=<path>
-(append one JSON line per call: n, n_vertex_rows, pred [raw frame], score, score_raw, source, n_cand, stage_ms, ms; the
-call that loads the models also carries first_call_ms = import / load breakdown), DV2_DEBUG (print a summary per call to stdout), DV2_VERIFY=0 (skip the sha256 check
+(append one JSON line per call: n, n_vertex_rows, input_sha1, pred [raw frame], score, score_raw, source, n_cand,
+stage_ms, ms; the call that loads the models also carries first_call_ms = import / load breakdown; input_sha1 =
+input_digest() of the call's arguments, so an in-chain call can be matched with its standalone replay), DV2_DEBUG (print a summary per call to stdout), DV2_VERIFY=0 (skip the sha256 check
 of the bundle files at load).  Models are loaded once per process and manifest path.
 '''
 import time
 
 _T0 = time.perf_counter()
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sys  # noqa: E402
@@ -106,6 +108,17 @@ def _hook(rec):
             f.write(json.dumps(rec) + "\n")
 
 
+def input_digest(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
+    """sha1 (hex) of one call's exact arguments: the x, y, z, q and trad bytes in that order, then the ASCII text
+    '<n_vertex_rows>:<repr(float(q_scale))>:<repr(float(q_offset))>:<dtype>'.  A call and its replay with the same
+    bytes (e.g. dv2max_vertexer/validate_r7.py) give the same digest."""
+    h = hashlib.sha1()
+    for b in (x, y, z, q, trad):
+        h.update(b)
+    h.update(f"{int(n_vertex_rows)}:{float(q_scale)!r}:{float(q_offset)!r}:{dtype}".encode())
+    return h.hexdigest()
+
+
 def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
     global _LAST
     t0 = time.perf_counter()
@@ -116,7 +129,8 @@ def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtyp
     Q = np.frombuffer(q, dtype=dt)
     T = np.frombuffer(trad, dtype=dt)
     nv = int(n_vertex_rows)
-    rec = {"n": int(len(Q)), "n_vertex_rows": nv}
+    rec = {"n": int(len(Q)), "n_vertex_rows": nv,
+           "input_sha1": input_digest(x, y, z, q, nv, trad, q_scale, q_offset, dtype)}
     try:
         if not (len(X) == len(Y) == len(Z) == len(Q)) or len(T) != 3 or not 0 <= nv <= len(Q):
             raise ValueError(f"bad input sizes x {len(X)} y {len(Y)} z {len(Z)} q {len(Q)} trad {len(T)} "

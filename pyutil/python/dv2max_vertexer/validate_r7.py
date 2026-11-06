@@ -130,7 +130,8 @@ def _call(item):
     last = getattr(dv, "_LAST", {}) or {}
     return {"i": int(i), "key": str(key), "out": [float(c) for c in v], "wall_s": wall, "cpu_s": cpu,
             "n": int(len(x)), "source": last.get("source"), "score_raw": last.get("score_raw"),
-            "stage_ms": last.get("stage_ms"), "reason": last.get("reason"), "pid": os.getpid(), "load": _W["load"]}
+            "stage_ms": last.get("stage_ms"), "reason": last.get("reason"), "input_sha1": last.get("input_sha1"),
+            "pid": os.getpid(), "load": _W["load"]}
 
 
 def run(a):

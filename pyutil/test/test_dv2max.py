@@ -344,9 +344,23 @@ class TestAPI(unittest.TestCase):
             call(golden()["calls"][-1], DV2_HOOK_LOG=log)          # a synthetic no-prediction call
             recs = [json.loads(line) for line in log.read_text().splitlines()]
         self.assertEqual(len(recs), 2)
-        for k in ("n", "n_vertex_rows", "pred", "score", "score_raw", "source", "n_cand", "stage_ms", "ms"):
+        for k in ("n", "n_vertex_rows", "input_sha1", "pred", "score", "score_raw", "source", "n_cand", "stage_ms", "ms"):
             self.assertIn(k, recs[0])
         self.assertIsNone(recs[1]["pred"])
+
+    def test_input_digest_identifies_the_call(self):
+        c = self.c
+        call(c)
+        d = dv()._LAST["input_sha1"]
+        h = hashlib.sha1()                                       # the documented recipe, recomputed here
+        for k in ("x", "y", "z", "q", "trad"):
+            h.update(f32(c[k]).tobytes())
+        h.update(f"{int(c['n_vertex_rows'])}:{float(c['q_scale'])!r}:{float(c['q_offset'])!r}:float32".encode())
+        self.assertEqual(d, h.hexdigest())
+        call(c)
+        self.assertEqual(dv()._LAST["input_sha1"], d)           # same call, same digest
+        call(dict(c, q_offset=c["q_offset"] + 1.0))
+        self.assertNotEqual(dv()._LAST["input_sha1"], d)        # any argument change -> another digest
 
     def test_dv2_load_reports_the_load_breakdown(self):
         rep = json.loads(dv().DV2_Load(str(BUNDLE)))
