@@ -130,6 +130,19 @@ static Configuration dv2_config(const std::string& method, const std::string& bu
     return cfg;
 }
 
+TEST_CASE("vertex_method: the loaded bundle manifest must have the configured sha256")
+{
+    const std::string sha = "bfb095ca286b20077c142e3e6bdd363ce6a83fbc548bfe76f4bb53d50ae12a6b";
+    const std::string rep = "{\"load\": 1.0, \"bundle_sha256\": \"" + sha + "\"}";
+    CHECK(TaggerCheckNeutrino::dv2_bundle_sha256_error(rep, sha).empty());              // match
+    CHECK(TaggerCheckNeutrino::dv2_bundle_sha256_error(rep, "").empty());               // nothing configured: no check
+    CHECK(TaggerCheckNeutrino::dv2_bundle_sha256_error("not json", "").empty());
+    const auto bad = TaggerCheckNeutrino::dv2_bundle_sha256_error(rep, std::string(64, '0'));
+    CHECK(bad.find("!= configured dv2_bundle_sha256") != std::string::npos);
+    CHECK(TaggerCheckNeutrino::dv2_bundle_sha256_error("{\"load\": 1.0}", sha).find("no bundle_sha256") != std::string::npos);
+    CHECK(TaggerCheckNeutrino::dv2_bundle_sha256_error("not json", sha).find("not JSON") != std::string::npos);
+}
+
 TEST_CASE("vertex_method: configure rejects an unknown vertex_method")
 {
     const auto msg = configure_error(dv2_config("dv2", "dv2max/sbnd/r7_cloud/bundle.json"));

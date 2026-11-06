@@ -50,6 +50,9 @@ wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-p
     stub segment between the two;
   - a split long-muon segment stays the long muon: its two halves replace it.
 - `dv2_bundle` (default `dv2max/sbnd/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
+  `clus.jsonnet` holds the sha256 of each known bundle manifest (`bundle.json`, which carries the sha256 of every
+  other bundle file). `TaggerCheckNeutrino` fails at configure if the manifest it loads has another sha256
+  (`dv2_bundle_sha256`), and `Trun/dl_weights` records `<vertex_method>:<dv2_bundle>@sha256:<that hash>`.
   `dl_weights` stays the SCN net of `original`.
 - `original` compiles to the same configuration as master (b7bd2a1a), byte for byte. The C++ default of
   `TaggerCheckNeutrino` stays `original`, so detectors other than SBND are unchanged.

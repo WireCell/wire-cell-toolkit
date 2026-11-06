@@ -150,6 +150,22 @@ namespace {
     }
 }
 
+std::string TaggerCheckNeutrino::dv2_bundle_sha256_error(const std::string& load_report, const std::string& expected)
+{
+    if (expected.empty()) return "";
+    Json::Value rep;
+    try {
+        rep = Persist::loads(load_report);
+    }
+    catch (const std::exception&) {
+        return "the DV2_Load report is not JSON";
+    }
+    const std::string got = (rep.isObject() && rep["bundle_sha256"].isString()) ? rep["bundle_sha256"].asString() : "";
+    if (got.empty()) return "the DV2_Load report has no bundle_sha256";
+    if (got != expected) return "manifest sha256 " + got + " != configured dv2_bundle_sha256 " + expected;
+    return "";
+}
+
 void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
 {
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
@@ -486,6 +502,14 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
         catch (const std::exception& ex) {
             raise<ValueError>("TaggerCheckNeutrino: vertex_method %s cannot load DV2-MAX (module %s, bundle %s): %s",
                               m_vertex_method.c_str(), m_dv2_py_module.c_str(), m_dv2_bundle.c_str(), ex.what());
+        }
+        // The manifest that loaded must be the one the configuration names
+        // (its sha256 then pins every bundle file; Trun records it).
+        m_dv2_bundle_sha256 = get(config, "dv2_bundle_sha256", m_dv2_bundle_sha256);
+        const std::string sha_err = dv2_bundle_sha256_error(load_ms, m_dv2_bundle_sha256);
+        if (!sha_err.empty()) {
+            raise<ValueError>("TaggerCheckNeutrino: vertex_method %s, DV2-MAX bundle %s: %s",
+                              m_vertex_method.c_str(), m_dv2_bundle.c_str(), sha_err.c_str());
         }
         SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: vertex_method {}, DV2-MAX bundle {}, module {}, loaded (ms: {})",
                            m_vertex_method, m_dv2_bundle, m_dv2_py_module, load_ms);
@@ -1114,6 +1138,7 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["vertex_method"]           = m_vertex_method;      // original | dv2_snap | dv2_split | dv2_split_move
     cfg["dv2_bundle"]              = m_dv2_bundle;         // dv2_* methods: DV2-MAX bundle manifest (WIRECELL_PATH-relative)
     cfg["dv2_py_module"]           = m_dv2_py_module;      // dv2_* methods: Python module holding DV2_Vertex()
+    cfg["dv2_bundle_sha256"]       = m_dv2_bundle_sha256;  // dv2_* methods: expected sha256 of the bundle manifest; "" = not checked
     cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
     cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
     cfg["dual_chain_transfer"]     = m_dual_chain_transfer;     // doc pr/112 sec 11: false = probe (pass runs, nothing moves)

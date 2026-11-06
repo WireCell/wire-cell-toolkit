@@ -151,7 +151,9 @@ class Vertexer:
             t0 = now
 
         self.path = Path(manifest).resolve()
-        self.man = json.loads(self.path.read_text())
+        data = self.path.read_bytes()
+        self.manifest_sha256 = hashlib.sha256(data).hexdigest()   # pins the bundle: the manifest lists every file's sha256
+        self.man = json.loads(data)
         if self.man.get("format") != FORMAT:
             raise ValueError(f"{self.path}: format {self.man.get('format')!r}, expected {FORMAT!r}")
         d = self.path.parent

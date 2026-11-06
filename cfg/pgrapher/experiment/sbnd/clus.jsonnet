@@ -2397,6 +2397,16 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // merged last into its config, so an override wins over the argument.
         local vm_eff = if std.objectHas(tcn_overrides, 'vertex_method') then tcn_overrides.vertex_method else vertex_method,
         local dv2_bundle_eff = if std.objectHas(tcn_overrides, 'dv2_bundle') then tcn_overrides.dv2_bundle else dv2_bundle,
+        // sha256 of each known DV2-MAX bundle manifest (bundle.json carries the sha256 of every other bundle file,
+        // checked when the model loads).  TaggerCheckNeutrino fails at configure if the manifest it loads has
+        // another sha256, and Trun/dl_weights records it.  A bundle not listed here runs unchecked and without a
+        // hash in Trun: add a line for a new bundle (sha256sum bundle.json).  dv2_bundle_sha256 in tcn_overrides wins.
+        local dv2_bundle_sha256 = {
+            'dv2max/sbnd/r7_cloud/bundle.json': 'bfb095ca286b20077c142e3e6bdd363ce6a83fbc548bfe76f4bb53d50ae12a6b',
+        },
+        local dv2_sha_eff = if std.objectHas(tcn_overrides, 'dv2_bundle_sha256') then tcn_overrides.dv2_bundle_sha256
+                            else if std.objectHas(dv2_bundle_sha256, dv2_bundle_eff) then dv2_bundle_sha256[dv2_bundle_eff]
+                            else '',
         assert std.member(['original', 'dv2_snap', 'dv2_split', 'dv2_split_move'], vm_eff) :
             "vertex_method must be 'original', 'dv2_snap', 'dv2_split' or 'dv2_split_move', got '%s'" % vm_eff,
         local dv = detector_volumes(anodes, '', pos_offset_on),
@@ -2912,6 +2922,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
                   [if vm_eff != 'original' then 'vertex_method']: vm_eff,   // checked by the pr() object assert
                   [if vm_eff != 'original' then 'dv2_bundle']: dv2_bundle_eff,
+                  [if vm_eff != 'original' && dv2_sha_eff != '' then 'dv2_bundle_sha256']: dv2_sha_eff,
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
@@ -3006,9 +3017,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         numu_xgboost_xml: numu_xgboost_xml,
                         nue_xgboost_xml: nue_xgboost_xml,
                         // the vertex model that ran: the SCN weights (original),
-                        // else '<vertex_method>:<dv2_bundle>'
+                        // else '<vertex_method>:<dv2_bundle>@sha256:<manifest sha256>'
+                        // (the hash is checked at configure; omitted for an unlisted bundle)
                         dl_weights: if vm_eff == 'original' then dl_weights
-                                    else vm_eff + ':' + dv2_bundle_eff,
+                                    else vm_eff + ':' + dv2_bundle_eff
+                                         + (if dv2_sha_eff != '' then '@sha256:' + dv2_sha_eff else ''),
                         trackfitting_config: trackfitting_config_file,
                     } + provenance_extra,
                 },

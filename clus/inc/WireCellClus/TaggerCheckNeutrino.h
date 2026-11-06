@@ -34,6 +34,11 @@ public:
 
     virtual Configuration default_configuration() const ;
 
+    /// vertex_method dv2_*: "" if the DV2_Load report (JSON) names a bundle
+    /// manifest whose sha256 is `expected`, or if `expected` is empty (no
+    /// check); otherwise the reason.  configure() fails on a reason.
+    static std::string dv2_bundle_sha256_error(const std::string& load_report, const std::string& expected);
+
     virtual void visit(Ensemble& ensemble) const;
 
 
@@ -496,6 +501,7 @@ public:
         bool        m_vertex_is_dv2{false};
         std::string m_dv2_bundle{"dv2max/sbnd/r7_cloud/bundle.json"};   // DV2-MAX bundle manifest (resolved via WIRECELL_PATH)
         std::string m_dv2_py_module{"DV2_Vertex"};   // Python module (on PYTHONPATH) holding DV2_Vertex()
+        std::string m_dv2_bundle_sha256;             // expected sha256 of the bundle manifest; "" = not checked
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
         // stage sequence up to the vertex refinement block) suggests the

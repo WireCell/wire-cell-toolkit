@@ -218,6 +218,7 @@ class TestBundle(unittest.TestCase):
         self.assertEqual(v.min_points, 5)
         self.assertEqual(v.family, (0,))
         self.assertEqual(set(v.models), {"pass1", "pass2"})
+        self.assertEqual(v.manifest_sha256, hashlib.sha256(BUNDLE.read_bytes()).hexdigest())
 
     def _copy(self, edit_manifest=None, edit_isotonic=False):
         """A bundle in a temp dir: big files symlinked, manifest and isotonic map copied (and edited)."""
@@ -347,8 +348,10 @@ class TestAPI(unittest.TestCase):
 
     def test_dv2_load_reports_the_load_breakdown(self):
         rep = json.loads(dv().DV2_Load(str(BUNDLE)))
-        for k in ("import_numpy", "import_torch", "import_dv2max_vertexer", "load", "load_steps"):
+        for k in ("import_numpy", "import_torch", "import_dv2max_vertexer", "load", "load_steps", "torch_threads"):
             self.assertIn(k, rep)
+        # the manifest hash TaggerCheckNeutrino checks against dv2_bundle_sha256 (and Trun records)
+        self.assertEqual(rep["bundle_sha256"], hashlib.sha256(BUNDLE.read_bytes()).hexdigest())
 
     def _threads_in_subprocess(self, dv2_threads, with_dv2=True):
         """(intra, interop) torch threads of a fresh process after DV2_Vertex set them up (or plain torch)."""

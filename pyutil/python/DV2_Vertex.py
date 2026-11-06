@@ -17,7 +17,8 @@ and returns empty bytes (the traditional vertex for that call).
 DV2_Load(weights) -> bytes
   Imports the model code and loads the bundle (the caller's configure step), so a broken environment (missing package,
   bad bundle, sha256 mismatch) fails at startup instead of at the first event.  Raises on any error, whatever
-  DV2_STRICT says.  Returns the load-time breakdown as JSON bytes.
+  DV2_STRICT says.  Returns JSON bytes: the load-time breakdown, torch_threads, and bundle_sha256 (the sha256 of
+  the manifest, which TaggerCheckNeutrino checks against dv2_bundle_sha256).
 
 Environment: DV2_THREADS (torch / LightGBM threads, default 1, interop threads 1; torch's setting is per PROCESS;
 0 = leave torch's thread settings alone), DV2_HOOK_LOG=<path>
@@ -88,8 +89,10 @@ def _vertexer(weights):
 
 
 def DV2_Load(weights):
-    _vertexer(weights)
-    return json.dumps({k: v for k, v in _FIRST.items() if k != "reported"}).encode()
+    v = _vertexer(weights)
+    rep = {k: val for k, val in _FIRST.items() if k != "reported"}
+    rep["bundle_sha256"] = v.manifest_sha256
+    return json.dumps(rep).encode()
 
 
 def _strict():
