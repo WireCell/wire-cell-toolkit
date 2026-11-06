@@ -13,6 +13,7 @@
 #include "WireCellUtil/doctest.h"
 
 #include <cmath>
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <limits>
@@ -247,21 +248,30 @@ TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on an
     PyObject* fl = PyObject_GetAttrString(mod, "DV2_Load");
     REQUIRE(fv);
     REQUIRE(fl);
-    for (int i = 0; i < 20; ++i) every_path();       // warm-up: import caches, interned strings
+    for (int i = 0; i < 50; ++i) every_path();       // warm-up: import caches, interned strings
     const auto rc_mod = Py_REFCNT(mod), rc_fv = Py_REFCNT(fv), rc_fl = Py_REFCNT(fl);
-    const long before = python_blocks();
-    const int n = 300;                               // 13 calls per pass: 3,900 calls
-    for (int i = 0; i < n; ++i) every_path();
-    const long after = python_blocks();
+    // Python's allocated blocks over successive batches.  A leak of even one
+    // object per pass adds >= n blocks in EVERY batch; Python's own caches can
+    // add a few hundred blocks once (seen: +344 on the first exception-heavy
+    // batch, then flat), so the test fails only if no batch stays flat.
+    const int n = 200;                               // 13 calls per pass
+    std::vector<long> growth;
+    for (int b = 0; b < 4; ++b) {
+        const long before = python_blocks();
+        REQUIRE(before > 0);
+        for (int i = 0; i < n; ++i) every_path();
+        growth.push_back(python_blocks() - before);
+    }
+    const long least = *std::min_element(growth.begin(), growth.end());
+    CAPTURE(growth[0]);
+    CAPTURE(growth[1]);
+    CAPTURE(growth[2]);
+    CAPTURE(growth[3]);
+    CHECK(least < n / 4);
     // the module and the functions the wrapper looks up hold no extra reference
     CHECK(Py_REFCNT(mod) == rc_mod);
     CHECK(Py_REFCNT(fv) == rc_fv);
     CHECK(Py_REFCNT(fl) == rc_fl);
-    // a leak of even one object per pass would add >= n blocks
-    CAPTURE(before);
-    CAPTURE(after);
-    CHECK(before > 0);
-    CHECK(after - before < n / 3);
     CHECK_FALSE(py_error());
     Py_DECREF(fl);
     Py_DECREF(fv);
