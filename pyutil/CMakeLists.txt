@@ -1,6 +1,7 @@
 # WCPPyUtil (mirrors pyutil/wscript_build): a small library plus the Python
 # modules that must be on PYTHONPATH at runtime.
-wct_package(WCPPyUtil USE PYTHON)
+# TEST_USE: the doctests (test/doctest_*.cxx) need WireCellUtil's doctest.h and logging.
+wct_package(WCPPyUtil USE PYTHON TEST_USE WireCellUtil)
 
 # SCN_Vertex.py is the top-level inference script the C++ SCN_Vertex wrapper
 # calls; SCN/DeepVtx.py holds the sparseconvnet model class it imports.

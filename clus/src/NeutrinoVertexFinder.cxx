@@ -4993,9 +4993,10 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
             // No re-rank, composite score, direction check, two-end-break veto
             // or dual-chain transfer.
             // ===================================================================
-            if (dnn_vtx.size() != 4) {
+            const Dv2Payload payload = dv2_parse_payload(dnn_vtx);
+            if (payload.status == Dv2Payload::Status::no_prediction || payload.status == Dv2Payload::Status::bad_size) {
                 // empty payload = the model made no prediction: keep the traditional vertex
-                if (dnn_vtx.size() != 0) {
+                if (payload.status == Dv2Payload::Status::bad_size) {
                     SPDLOG_LOGGER_WARN(s_log, "determine_overall_main_vertex_DL: unexpected DV2 payload size {}", dnn_vtx.size());
                 }
                 SPDLOG_LOGGER_WARN(s_log, "vertex_method {}: no DV2-MAX prediction for this call ({} cloud points: too few points "
@@ -5006,76 +5007,23 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                 if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-prediction";
                 return false;
             }
-            const WireCell::Point P(dnn_vtx[0] * units::cm, dnn_vtx[1] * units::cm, dnn_vtx[2] * units::cm);
-            const double score = dnn_vtx[3];
+            const WireCell::Point& P = payload.P;
+            const double score = payload.score;
             SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 prediction ({:.2f}, {:.2f}, {:.2f}) cm, P(<1cm)={:.3f}",
                                 dnn_vtx[0], dnn_vtx[1], dnn_vtx[2], score);
-            if (!std::isfinite(P.x()) || !std::isfinite(P.y()) || !std::isfinite(P.z())) {
+            if (payload.status == Dv2Payload::Status::nonfinite) {
                 if (m_vertex_scoreboard) m_vtx_board.route = "dv2-reject-nonfinite";
                 if (dump_i >= 0) m_dlvtx_calls[dump_i].accepted = false;
                 return false;
             }
 
-            // nearest PR-graph vertex (same point convention as the cloud rows)
-            VertexPtr v_near = nullptr;
-            double d_near = 1e9 * units::cm;
-            for (auto vtx : cand_vertices) {
-                const auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
-                const double d = (pt - P).magnitude();
-                if (d < d_near) { d_near = d; v_near = vtx; }
-            }
-            // nearest segment-interior fit point (break_segment refuses a
-            // segment's first/last fit point).  Searched only when the method
-            // may split: dv2_split always, dv2_split_move when no graph vertex
-            // is within kDv2MoveReuseDistCm of P, dv2_snap never.
-            SegmentPtr s_near = nullptr;
-            double ds_near = 1e9 * units::cm;
-            const bool may_split = m_vertex_method == VertexMethod::dv2_split ||
-                (m_vertex_method == VertexMethod::dv2_split_move && d_near > kDv2MoveReuseDistCm * units::cm);
-            if (may_split) {
-                for (auto e : ordered_edges(graph)) {
-                    SegmentPtr sg = graph[e].segment;
-                    if (!sg || !sg->cluster() || !sg->descriptor_valid()) continue;
-                    const auto& fits = sg->fits();
-                    for (size_t i = 1; i + 1 < fits.size(); ++i) {
-                        const double d = (fits[i].point - P).magnitude();
-                        if (d < ds_near) { ds_near = d; s_near = sg; }
-                    }
-                }
-            }
-            const bool want_split = s_near && ds_near < d_near;
-
-            min_vertex = v_near;
-            min_dis = d_near;
-            bool did_split = false;
-            if (want_split) {
-                auto [ok, segs, vtx_new] = break_segment(graph, s_near, P, particle_data, recomb_model, dv,
-                                                         1e9 * units::cm, m_break_seg_orient);
-                if (ok && vtx_new) {
-                    // break_segment puts the new vertex exactly on the nearest
-                    // fit point.  Shield the deliberate split from any later
-                    // vertex-merge pass (pr/48 contract, as
-                    // snap_main_vertex_to_kink marks its split).
-                    vtx_new->set_flags(VertexFlags::kProtectedBreak);
-                    // A split long-muon segment stays the long muon: its two
-                    // halves (and the vertex between them) replace it in the
-                    // long-muon sets, which the taggers, shower clustering and
-                    // MCS read.  Otherwise the sets keep the removed segment.
-                    if (segments_in_long_muon.find(s_near) != segments_in_long_muon.end()) {
-                        segments_in_long_muon.erase(s_near);
-                        if (segs.first) segments_in_long_muon.insert(segs.first);
-                        if (segs.second) segments_in_long_muon.insert(segs.second);
-                        vertices_in_long_muon.insert(vtx_new);
-                    }
-                    min_vertex = vtx_new;
-                    const auto pt = vtx_new->fit().valid() ? vtx_new->fit().point : vtx_new->wcpt().point;
-                    min_dis = (pt - P).magnitude();
-                    did_split = true;
-                } else {
-                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 break_segment declined, using the nearest vertex ({:.2f} cm)",
-                                        d_near / units::cm);
-                }
-            }
+            // the method's placement of P (dv2_place_point)
+            const Dv2Placement placed = dv2_place_point(graph, cand_vertices, P, vertices_in_long_muon,
+                                                        segments_in_long_muon, particle_data, recomb_model, dv);
+            min_vertex = placed.vertex;
+            min_dis = placed.dis;
+            const bool did_split = placed.split;
+            const double d_near = placed.d_near;
             if (!min_vertex) {
                 if (m_vertex_scoreboard) m_vtx_board.route = "dv2-no-candidates";
                 return false;
@@ -5734,6 +5682,90 @@ bool PatternAlgorithms::dv2_place_main_vertex(Graph& graph, Facade::Cluster& clu
                        move / units::cm, P.x() / units::cm, P.y() / units::cm, P.z() / units::cm, segs.size(),
                        (now - P).magnitude() / units::cm, cluster.ident());
     return true;
+}
+
+PatternAlgorithms::Dv2Payload PatternAlgorithms::dv2_parse_payload(const std::vector<float>& dnn_vtx)
+{
+    Dv2Payload out;
+    if (dnn_vtx.empty()) return out;                        // no prediction
+    if (dnn_vtx.size() != 4) { out.status = Dv2Payload::Status::bad_size; return out; }
+    out.P = WireCell::Point(dnn_vtx[0] * units::cm, dnn_vtx[1] * units::cm, dnn_vtx[2] * units::cm);
+    out.score = dnn_vtx[3];
+    out.status = (std::isfinite(out.P.x()) && std::isfinite(out.P.y()) && std::isfinite(out.P.z()))
+        ? Dv2Payload::Status::ok : Dv2Payload::Status::nonfinite;
+    return out;
+}
+
+PatternAlgorithms::Dv2Placement PatternAlgorithms::dv2_place_point(Graph& graph, const std::vector<VertexPtr>& cand_vertices,
+                                                                   const WireCell::Point& P,
+                                                                   IndexedVertexSet& vertices_in_long_muon,
+                                                                   IndexedSegmentSet& segments_in_long_muon,
+                                                                   const Clus::ParticleDataSet::pointer& particle_data,
+                                                                   const IRecombinationModel::pointer& recomb_model,
+                                                                   IDetectorVolumes::pointer dv)
+{
+    Dv2Placement out;
+    // nearest PR-graph vertex (same point convention as the cloud rows)
+    VertexPtr v_near = nullptr;
+    double d_near = 1e9 * units::cm;
+    for (auto vtx : cand_vertices) {
+        const auto pt = vtx->fit().valid() ? vtx->fit().point : vtx->wcpt().point;
+        const double d = (pt - P).magnitude();
+        if (d < d_near) { d_near = d; v_near = vtx; }
+    }
+    // nearest segment-interior fit point (break_segment refuses a segment's
+    // first/last fit point).  Searched only when the method may split:
+    // dv2_split always, dv2_split_move when no graph vertex is within
+    // kDv2MoveReuseDistCm of P, dv2_snap never.
+    SegmentPtr s_near = nullptr;
+    double ds_near = 1e9 * units::cm;
+    const bool may_split = m_vertex_method == VertexMethod::dv2_split ||
+        (m_vertex_method == VertexMethod::dv2_split_move && d_near > kDv2MoveReuseDistCm * units::cm);
+    if (may_split) {
+        for (auto e : ordered_edges(graph)) {
+            SegmentPtr sg = graph[e].segment;
+            if (!sg || !sg->cluster() || !sg->descriptor_valid()) continue;
+            const auto& fits = sg->fits();
+            for (size_t i = 1; i + 1 < fits.size(); ++i) {
+                const double d = (fits[i].point - P).magnitude();
+                if (d < ds_near) { ds_near = d; s_near = sg; }
+            }
+        }
+    }
+    const bool want_split = s_near && ds_near < d_near;
+
+    out.vertex = v_near;
+    out.dis = d_near;
+    out.nearest = v_near;
+    out.d_near = d_near;
+    if (want_split) {
+        auto [ok, segs, vtx_new] = break_segment(graph, s_near, P, particle_data, recomb_model, dv,
+                                                 1e9 * units::cm, m_break_seg_orient);
+        if (ok && vtx_new) {
+            // break_segment puts the new vertex exactly on the nearest fit
+            // point.  Shield the deliberate split from any later vertex-merge
+            // pass (pr/48 contract, as snap_main_vertex_to_kink marks its split).
+            vtx_new->set_flags(VertexFlags::kProtectedBreak);
+            // A split long-muon segment stays the long muon: its two halves
+            // (and the vertex between them) replace it in the long-muon sets,
+            // which the taggers, shower clustering and MCS read.  Otherwise
+            // the sets keep the removed segment.
+            if (segments_in_long_muon.find(s_near) != segments_in_long_muon.end()) {
+                segments_in_long_muon.erase(s_near);
+                if (segs.first) segments_in_long_muon.insert(segs.first);
+                if (segs.second) segments_in_long_muon.insert(segs.second);
+                vertices_in_long_muon.insert(vtx_new);
+            }
+            out.vertex = vtx_new;
+            const auto pt = vtx_new->fit().valid() ? vtx_new->fit().point : vtx_new->wcpt().point;
+            out.dis = (pt - P).magnitude();
+            out.split = true;
+        } else {
+            SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 break_segment declined, using the nearest vertex ({:.2f} cm)",
+                                d_near / units::cm);
+        }
+    }
+    return out;
 }
 
 // doc sbnd_xin/docs/pr/112 sec 11 -- pure snap-and-guard arithmetic of the

@@ -177,6 +177,25 @@ hash is 7e4ef1400541, the same as offline. Training: 20,320 events / 1,649,599 r
 The isotonic map was re-fit the same way. Both calibration halves stop at the same iteration in either mode
 (126 and 419). Every mode combination gives the same map to within 3.3e-5.
 
+## Tests
+
+Automated tests (run with the WCT test suite; each skips with the reason when what it needs is missing):
+
+| file | what it tests | needs |
+|---|---|---|
+| `pyutil/test/test_dv2max.py` | the algorithm, 29 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, and the golden replay | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 20 of them |
+| `pyutil/test/doctest_dv2_vertex.cxx` (`wcdoctest-pyutil`) | the C++ wrapper against a fake module (argument marshalling, empty = no prediction, every Python error reaches C++ with its type and message), and 5 golden calls through the wrapper with the real model | the golden case: the bundle and the Python packages |
+| `clus/test/doctest_vertex_method.cxx` | method names, the payload check behind the fallback (empty, wrong size, NaN), the configure-time failures (bad method, missing bundle, failed import) | -- |
+| `clus/test/doctest_pattern_recognition.cxx`, suite "dv2 placements [B]" | `dv2_place_point` and `dv2_place_main_vertex` on the fixture [B] PR graph: snap, split at a fit point (incl. the long-muon sets), split_move reuse within 1.5 cm, the move onto P and when it declines | fixture [B] |
+
+The golden fixture `pyutil/test/data/dv2max_golden.json` holds 26 held-out fold-0 calls (BNB and nue, both
+passes, three cloud sizes, two without a traditional vertex) and 3 synthetic no-prediction calls, with the answer
+of the code at the time; tolerances 0.01 cm and 0.001 in score.  Only calls whose top-1 candidate wins by a
+ranker-score margin of at least 0.5 are used, so the answers do not depend on floating-point details.  Regenerate
+it with `pyutil/test/make_dv2max_golden.py` (see its header) when the model or the inference changes on purpose.
+Accuracy itself (< 1 cm efficiency on all 5,038 held-out calls) is too slow for the test suite: that is
+`validate_r7.py` below.
+
 ## How to validate (`validate_r7.py`)
 
 ```bash

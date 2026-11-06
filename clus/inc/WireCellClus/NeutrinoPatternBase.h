@@ -3622,6 +3622,44 @@ namespace WireCell::Clus::PR {
         // methods.  Returns true if the vertex was moved.
         bool dv2_place_main_vertex(Graph& graph, Facade::Cluster& cluster, VertexPtr main_vertex, TrackFitting& track_fitter, IDetectorVolumes::pointer dv);
 
+        // vertex_method dv2_*: one DL-vertex call's DV2-MAX payload as
+        // determine_overall_main_vertex_DL reads it: [x, y, z] (cm, raw reco
+        // frame) + calibrated P(< 1 cm), or empty when the model made no
+        // prediction.  Any status but ok keeps the traditional vertex.
+        struct Dv2Payload {
+            enum class Status { ok, no_prediction, bad_size, nonfinite };
+            Status status{Status::no_prediction};
+            WireCell::Point P;      // WCT length units
+            double score{-1.0};
+        };
+        static Dv2Payload dv2_parse_payload(const std::vector<float>& dnn_vtx);
+
+        // vertex_method dv2_*: the main-vertex placement of the DV2-MAX point
+        // P (determine_overall_main_vertex_DL).  Candidates: cand_vertices
+        // (every PR-graph vertex, ordered_nodes order) and, when the method
+        // may split, every segment-interior fit point (ordered_edges order).
+        //   dv2_snap        the nearest candidate vertex
+        //   dv2_split       the nearest candidate vertex, or the nearest
+        //                   interior fit point if that is nearer: break_segment
+        //                   splits its segment there (new vertex on the fit
+        //                   point, flagged kProtectedBreak); a split long-muon
+        //                   segment is replaced in the long-muon sets by its two
+        //                   halves, and the new vertex is added
+        //   dv2_split_move  as dv2_split, but a candidate vertex within
+        //                   kDv2MoveReuseDistCm of P is reused (no split)
+        // Moves no vertex (dv2_place_main_vertex does, for dv2_split_move).
+        struct Dv2Placement {
+            VertexPtr vertex;       // the main vertex; nullptr = no candidate
+            double dis{0};          // its distance to P
+            VertexPtr nearest;      // the nearest candidate vertex (nullptr if none)
+            double d_near{0};       // its distance to P (1e9 cm if none)
+            bool split{false};      // vertex is new: a segment was split at its fit point nearest P
+        };
+        Dv2Placement dv2_place_point(Graph& graph, const std::vector<VertexPtr>& cand_vertices, const WireCell::Point& P,
+                                     IndexedVertexSet& vertices_in_long_muon, IndexedSegmentSet& segments_in_long_muon,
+                                     const Clus::ParticleDataSet::pointer& particle_data,
+                                     const IRecombinationModel::pointer& recomb_model, IDetectorVolumes::pointer dv);
+
         // doc pr/112 sec 11 -- the OFF pass's SCN inference on its own graph:
         // builds the same cloud determine_overall_main_vertex_DL builds (vertex
         // rows first, then segment-interior fit points) and returns the raw
