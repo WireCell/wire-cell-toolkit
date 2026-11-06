@@ -190,7 +190,7 @@ Automated tests (run with the WCT test suite; each skips with the reason when wh
 
 | file | what it tests | needs |
 |---|---|---|
-| `pyutil/test/test_dv2max.py` | the algorithm, 31 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, and the golden replay | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 22 of them |
+| `pyutil/test/test_dv2max.py` | the algorithm, 32 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, the golden replay, and run-to-run repeatability in fresh processes | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 23 of them |
 | `pyutil/test/doctest_dv2_vertex.cxx` (`wcdoctest-pyutil`) | the C++ wrapper against a fake module (argument marshalling, empty = no prediction, every Python error reaches C++ with its type and message), and 5 golden calls through the wrapper with the real model | the golden case: the bundle and the Python packages |
 | `clus/test/doctest_vertex_method.cxx` | method names, the payload check behind the fallback (empty, wrong size, NaN), the configure-time failures (bad method, missing bundle, failed import) | -- |
 | `clus/test/doctest_pattern_recognition.cxx`, suite "dv2 placements [B]" | `dv2_place_point` and `dv2_place_main_vertex` on the fixture [B] PR graph: snap, split at a fit point (incl. the long-muon sets), split_move reuse within 1.5 cm, the move onto P and when it declines | fixture [B] |
@@ -202,6 +202,19 @@ ranker-score margin of at least 0.5 are used, so the answers do not depend on fl
 it with `pyutil/test/make_dv2max_golden.py` (see its header) when the model or the inference changes on purpose.
 Accuracy itself (< 1 cm efficiency on all 5,038 held-out calls) is too slow for the test suite: that is
 `validate_r7.py` below.
+
+## Repeatability
+
+- Within one process the same call gives the same bytes (`test_dv2max.py`).
+- Across processes, which is how wire-cell runs it (one process per job): the same calls in the same order give
+  the same bytes; in another order they agree to about 1e-5 cm and 1e-7 in score (`TestRepeat`; the golden
+  replay saw at most 1.4e-5 cm and 3e-8).  CPU torch at 1 thread, fp32.
+- In the chain (2026-11-06): `dv2_snap`, `dv2_split` and `dv2_split_move` rerun on all 372 fold-0 events of
+  `r7/inchain` with later builds gave the same `tracking-pr.root`, every tree and branch, as the 2026-10-30 runs
+  (337 events finished; the same 35 failed the same way, a known `ParticleInfo` energy-momentum crash also seen with
+  `original`).
+- `validate_r7.py` on all 5,038 held-out calls (2026-11-06) reproduced the 2026-10-29 results: every accuracy and
+  agreement number identical.
 
 ## How to validate (`validate_r7.py`)
 

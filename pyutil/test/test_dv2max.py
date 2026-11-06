@@ -18,6 +18,8 @@ Groups:
   TestPipeline       per-stage invariants on real held-out calls (pass 1, ranker rows, top-1 pick, calibration)
   TestGolden         replay of data/dv2max_golden.json (make_dv2max_golden.py): held-out calls the bundle was not
                      trained on must give the recorded vertex and score
+  TestRepeat         run-to-run: the same calls in two fresh processes give the same bytes; in another order they
+                     agree within the golden tolerance
 """
 import hashlib
 import importlib
@@ -442,6 +444,37 @@ class TestGolden(unittest.TestCase):
                 self.assertLess(ds, tol["score"], f"score changed by {ds:.3g}")
         print(f"\n[golden] {len(golden()['calls'])} calls: max vertex deviation {worst_d:.3g} cm, "
               f"max score deviation {worst_s:.3g}", file=sys.stderr)
+
+
+@needs_bundle
+class TestRepeat(unittest.TestCase):
+    """Run-to-run repeatability of DV2_Vertex, each run a fresh process (as each wire-cell job is)."""
+    N = 8
+
+    def _fresh_process(self, keys):
+        code = ("import json, os, sys; sys.path.insert(0, %r); os.environ.setdefault('DV2_THREADS', '1'); "
+                "import test_dv2max as t; calls = {c['key']: c for c in t.golden()['calls']}; "
+                "print(json.dumps({k: t.call(calls[k]).tobytes().hex() for k in %r}))" % (str(HERE), list(keys)))
+        env = dict(os.environ, DV2MAX_BUNDLE=str(BUNDLE))
+        out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+        return {k: np.frombuffer(bytes.fromhex(v), np.float32) for k, v in json.loads(out.stdout.splitlines()[-1]).items()}
+
+    def test_two_processes_same_calls(self):
+        keys = [c["key"] for c in real_calls()[:self.N]] + [golden()["calls"][-1]["key"]]
+        a, b, c = self._fresh_process(keys), self._fresh_process(keys), self._fresh_process(keys[::-1])
+        tol = golden()["meta"]["tolerance"]
+        worst = 0.0
+        for k in keys:
+            with self.subTest(k):
+                self.assertEqual(a[k].tobytes(), b[k].tobytes())       # same order: identical bytes
+                self.assertEqual(len(a[k]), len(c[k]))
+                if len(a[k]):                                           # another order: within the tolerance
+                    d = float(np.linalg.norm(a[k][:3].astype(np.float64) - c[k][:3]))
+                    worst = max(worst, d)
+                    self.assertLess(d, tol["position_cm"])
+                    self.assertLess(abs(float(a[k][3]) - float(c[k][3])), tol["score"])
+        print(f"\n[repeat] {len(keys)} calls x 3 processes: same order identical, reversed order max "
+              f"{worst:.3g} cm", file=sys.stderr)
 
 
 if __name__ == "__main__":
