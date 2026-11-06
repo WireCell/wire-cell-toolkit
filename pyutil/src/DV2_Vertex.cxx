@@ -33,15 +33,61 @@ namespace {
         return pyerr;
     }
 
+    // New reference to a bytes copy of v (nullptr if the allocation fails).
     PyObject* bytes_of(const std::vector<WCPPyUtil::FLOAT>& v)
     {
-        PyObject* b = PyBytes_FromStringAndSize(reinterpret_cast<const char*>(v.data()),
-                                                v.size() * sizeof(WCPPyUtil::FLOAT));
-        if (!b || !PyBytes_Check(b)) {
-            Py_XDECREF(b);
-            throw std::runtime_error("DV2_Vertex: failed to create a bytes buffer");
+        return PyBytes_FromStringAndSize(reinterpret_cast<const char*>(v.data()),
+                                         v.size() * sizeof(WCPPyUtil::FLOAT));
+    }
+
+    // Owns new references: Py_XDECREF of each on scope exit, also when an
+    // exception unwinds, so no error path leaks.  Capacity is reserved up
+    // front, so own() never allocates (and never throws) for <= kMax refs.
+    class PyRefs {
+      public:
+        static constexpr size_t kMax = 16;
+        PyRefs() { m_refs.reserve(kMax); }
+        PyRefs(const PyRefs&) = delete;
+        PyRefs& operator=(const PyRefs&) = delete;
+        ~PyRefs()
+        {
+            for (auto it = m_refs.rbegin(); it != m_refs.rend(); ++it) Py_XDECREF(*it);
         }
-        return b;
+        PyObject* own(PyObject* o)
+        {
+            if (m_refs.size() == kMax) {
+                Py_XDECREF(o);
+                throw std::logic_error("PyRefs: more than kMax references");
+            }
+            m_refs.push_back(o);
+            return o;
+        }
+
+      private:
+        std::vector<PyObject*> m_refs;
+    };
+
+    // The module `module` imported (owned by refs); throws if the import fails.
+    PyObject* import_module(PyRefs& refs, const std::string& module, const std::string& who)
+    {
+        PyObject* pName = refs.own(PyUnicode_FromString(module.c_str()));
+        PyObject* pModule = pName ? refs.own(PyImport_Import(pName)) : nullptr;
+        if (!pModule) {
+            throw std::runtime_error(who + ": import failed for module " + module + fetch_python_error());
+        }
+        return pModule;
+    }
+
+    // module.function (owned by refs); throws if it is missing or not callable.
+    PyObject* get_function(PyRefs& refs, PyObject* pModule, const std::string& module, const std::string& function,
+                           const std::string& who)
+    {
+        PyObject* pFunc = refs.own(PyObject_GetAttrString(pModule, function.c_str()));
+        if (!pFunc || !PyCallable_Check(pFunc)) {
+            PyErr_Clear();
+            throw std::runtime_error(who + ": function not found or not callable: " + module + "." + function);
+        }
+        return pFunc;
     }
 }
 
@@ -49,31 +95,19 @@ namespace WCPPyUtil {
     std::string DV2_Load(const std::string& module, const std::string& function, const std::string& weights)
     {
         Py_Initialize();
-
-        PyObject* pName = PyUnicode_FromString(module.c_str());
-        PyObject* pModule = PyImport_Import(pName);
-        Py_DECREF(pName);
-        if (!pModule) {
-            throw std::runtime_error("DV2_Load: import failed for module " + module + fetch_python_error());
+        PyRefs refs;
+        PyObject* pModule = import_module(refs, module, "DV2_Load");
+        PyObject* pFunc = get_function(refs, pModule, module, function, "DV2_Load");
+        PyObject* pArg = refs.own(PyUnicode_FromString(weights.c_str()));
+        if (!pArg) {
+            throw std::runtime_error("DV2_Load: could not build the Python argument" + fetch_python_error());
         }
-        PyObject* pFunc = PyObject_GetAttrString(pModule, function.c_str());   // new reference
-        if (!pFunc || !PyCallable_Check(pFunc)) {
-            Py_XDECREF(pFunc);
-            Py_DECREF(pModule);
-            PyErr_Clear();
-            throw std::runtime_error("DV2_Load: function not found or not callable: " + module + "." + function);
-        }
-        PyObject* pArg = PyUnicode_FromString(weights.c_str());
-        PyObject* pValue = PyObject_CallFunctionObjArgs(pFunc, pArg, NULL);
-        Py_XDECREF(pArg);
-        Py_DECREF(pFunc);
-        Py_DECREF(pModule);
+        PyObject* pValue = refs.own(PyObject_CallFunctionObjArgs(pFunc, pArg, NULL));
         if (!pValue) {
             throw std::runtime_error("DV2_Load: loading " + weights + " failed" + fetch_python_error());
         }
         std::string ret;
         if (PyBytes_Check(pValue)) ret.assign(PyBytes_AsString(pValue), PyBytes_Size(pValue));
-        Py_DECREF(pValue);
         return ret;
     }
 
@@ -94,53 +128,40 @@ namespace WCPPyUtil {
         }
 
         Py_Initialize();
+        PyRefs refs;   // every reference below is released on return or throw
+        PyObject* pModule = import_module(refs, module, "DV2_Vertex");
+        PyObject* pFunc = get_function(refs, pModule, module, function, "DV2_Vertex");
 
-        PyObject* pName = PyUnicode_FromString(module.c_str());
-        PyObject* pModule = PyImport_Import(pName);
-        Py_DECREF(pName);
-        if (!pModule) {
-            throw std::runtime_error("DV2_Vertex: import failed for module: " + module + fetch_python_error());
+        // braced initialisation runs left to right
+        PyObject* args[10] = {refs.own(PyUnicode_FromString(weights.c_str())),
+                              refs.own(bytes_of(input[0])),
+                              refs.own(bytes_of(input[1])),
+                              refs.own(bytes_of(input[2])),
+                              refs.own(bytes_of(input[3])),
+                              refs.own(PyLong_FromLong(n_vertex_rows)),
+                              refs.own(bytes_of(trad)),
+                              refs.own(PyFloat_FromDouble(q_scale)),
+                              refs.own(PyFloat_FromDouble(q_offset)),
+                              refs.own(PyUnicode_FromString(dtype.c_str()))};
+        // A NULL argument would end PyObject_CallFunctionObjArgs' list early.
+        for (auto* a : args) {
+            if (!a) throw std::runtime_error("DV2_Vertex: could not build the Python arguments" + fetch_python_error());
         }
-        PyObject* pFunc = PyObject_GetAttrString(pModule, function.c_str());   // new reference
-        if (!pFunc || !PyCallable_Check(pFunc)) {
-            Py_XDECREF(pFunc);
-            Py_DECREF(pModule);
-            throw std::runtime_error("DV2_Vertex: function not found or not callable: " + function);
-        }
 
-        PyObject* args[10] = {nullptr};
-        args[0] = PyUnicode_FromString(weights.c_str());
-        args[1] = bytes_of(input[0]);
-        args[2] = bytes_of(input[1]);
-        args[3] = bytes_of(input[2]);
-        args[4] = bytes_of(input[3]);
-        args[5] = PyLong_FromLong(n_vertex_rows);
-        args[6] = bytes_of(trad);
-        args[7] = PyFloat_FromDouble(q_scale);
-        args[8] = PyFloat_FromDouble(q_offset);
-        args[9] = PyUnicode_FromString(dtype.c_str());
-
-        PyObject* pValue = PyObject_CallFunctionObjArgs(pFunc, args[0], args[1], args[2], args[3], args[4],
-                                                        args[5], args[6], args[7], args[8], args[9], NULL);
-        for (auto* a : args) Py_XDECREF(a);
-        Py_DECREF(pFunc);
-        Py_DECREF(pModule);
-
+        PyObject* pValue = refs.own(PyObject_CallFunctionObjArgs(pFunc, args[0], args[1], args[2], args[3], args[4],
+                                                                 args[5], args[6], args[7], args[8], args[9], NULL));
         if (!pValue) {
             throw std::runtime_error("DV2_Vertex: Python function call failed" + fetch_python_error());
         }
         if (!PyBytes_Check(pValue)) {
-            Py_DECREF(pValue);
             throw std::runtime_error("DV2_Vertex: Python function did not return bytes");
         }
         const size_t ret_size = PyBytes_Size(pValue);
         if (ret_size % sizeof(FLOAT) != 0) {
-            Py_DECREF(pValue);
             throw std::runtime_error("DV2_Vertex: returned bytes are not a whole number of floats");
         }
         std::vector<FLOAT> ret(ret_size / sizeof(FLOAT));
         if (ret_size) std::memcpy(ret.data(), PyBytes_AsString(pValue), ret_size);
-        Py_DECREF(pValue);
         return ret;
     }
 }  // namespace WCPPyUtil

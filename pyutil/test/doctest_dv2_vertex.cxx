@@ -175,9 +175,76 @@ TEST_CASE("DV2_Vertex: a failed call leaves no Python error behind")
 {
     fake_module();
     REQUIRE(Py_IsInitialized());
-    error_of([] { call("raise"); });
+    for (const std::string w : {"raise", "ragged", "notbytes"}) {
+        CAPTURE(w);
+        CHECK_FALSE(error_of([&] { call(w); }).empty());
+        CHECK_FALSE(PyErr_Occurred());
+    }
+    CHECK_FALSE(error_of([] { call("ok", "wct_doctest_no_such_module"); }).empty());
+    CHECK_FALSE(PyErr_Occurred());
+    CHECK_FALSE(error_of([] { call("ok", kModule, "no_such_function"); }).empty());
     CHECK_FALSE(PyErr_Occurred());
     CHECK(call("ok").size() == 4);
+}
+
+namespace {
+    // Python's count of allocated memory blocks, after a full garbage collection.
+    long python_blocks()
+    {
+        REQUIRE(PyRun_SimpleString("import gc; gc.collect()") == 0);
+        PyObject* sys = PyImport_ImportModule("sys");
+        PyObject* f = sys ? PyObject_GetAttrString(sys, "getallocatedblocks") : nullptr;
+        PyObject* r = f ? PyObject_CallNoArgs(f) : nullptr;
+        const long n = r ? PyLong_AsLong(r) : -1;
+        Py_XDECREF(r);
+        Py_XDECREF(f);
+        Py_XDECREF(sys);
+        return n;
+    }
+
+    // One pass over every path of DV2_Vertex and DV2_Load: success, no prediction, each failure.
+    void every_path()
+    {
+        call("ok");
+        call("empty");
+        for (const char* w : {"raise", "ragged", "notbytes"}) error_of([&] { call(w); });
+        error_of([] { call("ok", "wct_doctest_no_such_module"); });
+        error_of([] { call("ok", kModule, "no_such_function"); });
+        WCPPyUtil::DV2_Load(kModule, "DV2_Load", "b");
+        error_of([] { WCPPyUtil::DV2_Load(kModule, "DV2_Load", "raise"); });
+        error_of([] { WCPPyUtil::DV2_Load("wct_doctest_no_such_module", "DV2_Load", "b"); });
+        error_of([] { WCPPyUtil::DV2_Load(kModule, "no_such_function", "b"); });
+    }
+}
+
+TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on any failure")
+{
+    fake_module();
+    PyObject* mod = PyImport_ImportModule(kModule);
+    REQUIRE(mod);
+    PyObject* fv = PyObject_GetAttrString(mod, "DV2_Vertex");
+    PyObject* fl = PyObject_GetAttrString(mod, "DV2_Load");
+    REQUIRE(fv);
+    REQUIRE(fl);
+    for (int i = 0; i < 20; ++i) every_path();       // warm-up: import caches, interned strings
+    const auto rc_mod = Py_REFCNT(mod), rc_fv = Py_REFCNT(fv), rc_fl = Py_REFCNT(fl);
+    const long before = python_blocks();
+    const int n = 300;                               // 13 calls per pass: 3,900 calls
+    for (int i = 0; i < n; ++i) every_path();
+    const long after = python_blocks();
+    // the module and the functions the wrapper looks up hold no extra reference
+    CHECK(Py_REFCNT(mod) == rc_mod);
+    CHECK(Py_REFCNT(fv) == rc_fv);
+    CHECK(Py_REFCNT(fl) == rc_fl);
+    // a leak of even one object per pass would add >= n blocks
+    CAPTURE(before);
+    CAPTURE(after);
+    CHECK(before > 0);
+    CHECK(after - before < n / 3);
+    CHECK_FALSE(PyErr_Occurred());
+    Py_DECREF(fl);
+    Py_DECREF(fv);
+    Py_DECREF(mod);
 }
 
 TEST_CASE("DV2_Load: returns the module's load report")
