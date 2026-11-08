@@ -11,4 +11,7 @@
 // light gate), as obsolete/wcls-img-clus-matching-pr-hits.jsonnet.  Everything up to and
 // including the truth attacher is the 1-step chain's own graph (the shared lib).
 (import 'pgrapher/experiment/sbnd/wcls-img-clus-matching-pr-lib.jsonnet')(
-    flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql')
+    flash_source='hits', xtpc_sc1_light_gate=true, xtpc_sc1_overpred_max=2.9, stage='ql',
+    // ai-helper issue 41: the truth_track table for step 2's truth match (MC; the
+    // labeler skips truth on data).  Needs larwirecell 73c79bc or later.
+    truth_detail=true)

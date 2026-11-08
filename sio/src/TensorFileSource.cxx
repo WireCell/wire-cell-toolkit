@@ -200,6 +200,7 @@ struct TFSTensor : public WireCell::ITensor {
 ITensorSet::pointer TensorFileSource::load()
 {
     int ident = -1;
+    bool have_setmd = false;
 
     Configuration setmd;
 
@@ -250,10 +251,20 @@ ITensorSet::pointer TensorFileSource::load()
         if (ident != pf.ident) {
             break;              // started reading next tensor set.
         }
+        // A second tensor-set metadata member with the SAME ident also starts
+        // the next set: one set per <prefix>tensorset_<ident>_metadata.json.
+        // Idents are not unique in general (an art event number restarts at 1
+        // in every subrun; a lar job over several subruns writes consecutive
+        // sets with equal idents) and without this the later set silently
+        // replaced the earlier one.
+        if (pf.type == ParsedFilename::set and have_setmd) {
+            break;
+        }
 
         // tensor set md 
         if (pf.type == ParsedFilename::set) {
             setmd = load_json(m_in, m_cur.fsize);
+            have_setmd = true;
             clear();
             continue;
         }

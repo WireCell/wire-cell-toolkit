@@ -870,6 +870,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // zip) create that directory themselves (PR 535 review).  The conversion is boost::format, so
 // use %1% (not %d) when the id appears more than once in one name.  Empty by
 // default => the names are literal and production is byte-identical.
+// The ID is the set ident = the art event number, which collides when one
+// process holds several subruns whose event numbers restart (gen2 BNB: 20
+// subruns x events 1..10 per lar job): the tokens {run}, {subrun}, {event}
+// and {ident} (Clus::per_event_name) name the directory by the resolved RSE,
+// e.g. evt_subdir='pr_evt{run}_{subrun}_{event}'.
 //
 // event_from_ident (default false) / rse_map (default {}): the multi-event
 // counterpart of rse_from_ident that KEEPS the real run and subrun.  When a
@@ -999,6 +1004,13 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // truth_match (ai-helper issue 41): the reco<->truth matching trees
+              // (T_truth_track, T_overlap, T_match, T_pf; blob_truth adds
+              // T_blob_truth) in tracking-pr.root.  MC only: the writer needs the
+              // labeler's truth_track table.  Default false => key omitted =>
+              // byte-identical.
+              truth_match=false,
+              blob_truth=false,
               // tcn_overrides (ai-helper issue 35): TaggerCheckNeutrino keys merged LAST,
               // over the tcn_knobs bag AND the named keys pr() sets itself, for
               // experiments from a top-level job (e.g. {dl_vtx_dual_chain: false}).
@@ -2955,6 +2967,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
+                    [if truth_match then 'truth_match']: true,   // ai-helper issue 41
+                    [if truth_match && blob_truth then 'blob_truth']: true,   // ai-helper issue 41
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,
@@ -3062,6 +3076,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     detector: 'sbnd',
                     beam_window: beam_window,
                     coords: common_corr_coords(pos_offset_on, use_sce),
+                },
+            },
+            // ai-helper issue 39: every tree of the per-event tracking-pr.root as one
+            // entry of a flat, CAF-style tree (recTreeWireCell), for merging into the
+            // flat CAF.  Must run LAST (after tracking_visitor and tagger_output, the
+            // writers of that file).  Only active when named in pipeline_names, so
+            // every compiled config is byte-identical otherwise.
+            flat_tree: {
+                type: 'RootFlatTreeVisitor',
+                name: 'pr',
+                data: {
+                    output_filename: tracking_pr_root,
+                    tree_name: 'recTreeWireCell',
+                    prefix: 'wc',
+                    drop_row_trees: false,
                 },
             },
         },

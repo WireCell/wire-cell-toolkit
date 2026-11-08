@@ -33,6 +33,7 @@
 #include "WireCellIface/IAnodePlane.h"
 #include "WireCellIface/IDetectorVolumes.h"
 #include "WireCellIface/ISCEField.h"
+#include "WireCellIface/ITensor.h"
 #include "WireCellUtil/Logging.h"
 
 #include <array>
@@ -67,6 +68,7 @@ namespace WireCell {
             // constant for every event in the group.  Set at the top of
             // visit(), which is const.
             mutable int m_evt_runNo{0};
+            mutable std::string m_evt_input_file;   // ai-helper issue 39: from the input set metadata "input_file"
             mutable int m_evt_subRunNo{0};
             mutable int m_evt_eventNo{0};
             std::vector<IAnodePlane::pointer> m_anodes;
@@ -89,6 +91,13 @@ namespace WireCell {
             // was recorded), so the file schema does not depend on the event.  False (default) => written only
             // when a call was recorded (and then only because TaggerCheckNeutrino.dl_vtx_dump was on).
             bool m_dl_vtx_dump{false};
+            // ai-helper issue 41: reco<->truth matching trees (see write_truth_match).
+            // DEFAULT FALSE => byte-identical.  blob_truth adds T_blob_truth.
+            bool m_truth_match{false};
+            bool m_blob_truth{false};
+            int m_truth_match_topk{3};
+            double m_pure_blob_min{0.5};
+            std::string m_pf_tree_name{"mc"};
             // sbnd_xin/docs/109 group 1: write TaggerCheckNeutrino's selection
             // census (Grouping::get_nu_census) as T_bundle (one row per
             // in-beam-window flash bundle, with the reason it did or did not
@@ -161,6 +170,15 @@ namespace WireCell {
             // nothing is written when no call was recorded.
             void write_dlvtx(TFile* output_tf, Clus::Facade::Grouping& grouping,
                              const Clus::Facade::Ensemble& ensemble) const;
+            // ai-helper issue 41: T_truth_track / T_overlap / T_match / T_pf
+            // (/ T_blob_truth) -- reco<->truth matching; SbndPrTruthMatch.cxx.
+            // Written only with truth_match on AND the labeler's truth_track
+            // table in the event (MC with truth_detail).
+            void write_truth_match(TFile* output_tf, Clus::Facade::Grouping& grouping,
+                                   const Clus::Facade::Ensemble& ensemble) const;
+            // the truth-table writer of write_truth, shared with write_truth_match
+            void write_truth_table_public(TFile* output_tf, const char* tname, const ITensor::pointer& ten,
+                                          int runNo, int subRunNo, int eventNo) const;
         };
     }  // namespace Root
 }  // namespace WireCell

@@ -3,6 +3,7 @@
 // Structure and tree schema deliberately track the uBooNE original; the
 // two-TPC channel scheme is copied from SbndMagnifyTrackingVisitor.
 
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/SbndPrMagnifyTrackingVisitor.h"
 #include "WireCellRoot/UbooneMagnifyTrackingVisitor.h"  // WCPointTree
 
@@ -62,11 +63,6 @@ namespace {
     /// No '%' in the name => the name is returned unchanged, so a
     /// one-event-per-process job writes exactly the file it always wrote.
     /// Same idiom as QLMatching's calib dump.
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
 }
 
 
@@ -113,6 +109,11 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
         m_sce = Factory::find_tn<ISCEField>(cfg["sce_field"].asString());
     }
     m_dl_vtx_dump = get<bool>(cfg, "dl_vtx_dump", m_dl_vtx_dump);   // ai-helper issue 35
+    m_truth_match = get<bool>(cfg, "truth_match", m_truth_match);   // ai-helper issue 41
+    m_blob_truth = get<bool>(cfg, "blob_truth", m_blob_truth);
+    m_truth_match_topk = get<int>(cfg, "truth_match_topk", m_truth_match_topk);
+    m_pure_blob_min = get<double>(cfg, "pure_blob_min", m_pure_blob_min);
+    m_pf_tree_name = get<std::string>(cfg, "pf_tree_name", m_pf_tree_name);
     // sbnd_xin/docs/109: DEFAULT FALSE / empty keep tracking-pr.root byte-identical.
     m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
     m_fix_cluster_flags = get<bool>(cfg, "fix_cluster_flags", m_fix_cluster_flags);
@@ -144,6 +145,11 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
     cfg["dl_vtx_dump"] = m_dl_vtx_dump;   // ai-helper issue 35: false = T_dlvtx_* only when a call was recorded
+    cfg["truth_match"] = m_truth_match;   // ai-helper issue 41: false = no T_truth_track/T_overlap/T_match/T_pf
+    cfg["blob_truth"] = m_blob_truth;     // ai-helper issue 41: true = also T_blob_truth (one row per blob)
+    cfg["truth_match_topk"] = m_truth_match_topk;
+    cfg["pure_blob_min"] = m_pure_blob_min;
+    cfg["pf_tree_name"] = m_pf_tree_name;
     cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["nu_provenance"] = m_nu_provenance;          // sbnd_xin/docs/109; false = no T_bundle/T_flash, no Trun census branches
     cfg["fix_cluster_flags"] = m_fix_cluster_flags;  // sbnd_xin/docs/109; false = legacy T_cluster flag columns
@@ -208,10 +214,14 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     {
         const auto rse = event_rse(ensemble, m_runNo, m_subRunNo, m_eventNo);
         m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
+        // ai-helper issue 39: the art input file of this event, stamped by
+        // larwirecell's wclsTruthInformationAttacher into the step-1 set metadata.
+        const auto& imd = ensemble.input_metadata();
+        m_evt_input_file = (imd.isObject() && imd["input_file"].isString()) ? imd["input_file"].asString() : "";
     }
 
     // Open ROOT file
-    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);   // same fallback as the flat tree (PR 544 item 10)
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);
@@ -233,6 +243,9 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     }
     write_truth(output_tf, ensemble);
     write_dlvtx(output_tf, grouping, ensemble);
+    if (m_truth_match) {
+        write_truth_match(output_tf, grouping, ensemble);
+    }
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -269,7 +282,9 @@ namespace {
         }
         static const std::set<std::string> int_cols = {
             "nu_idx", "pdg", "ccnc", "mode", "int_type", "flavor",
-            "nu_row", "trackid", "parent_trackid", "mother_trackid", "process"};
+            "nu_row", "trackid", "parent_trackid", "mother_trackid", "process",
+            // ai-helper issue 41 (truth_track)
+            "bee_trackid", "ancestor_trackid", "prong_trackid", "mother_pdg", "n_blobs_dom"};
         TTree* tree = new TTree(tname, tname);
         tree->SetDirectory(output_tf);
         tree->Branch("runNo", &runNo, "runNo/I");
@@ -290,6 +305,13 @@ namespace {
             tree->Fill();
         }
     }
+}
+
+void Root::SbndPrMagnifyTrackingVisitor::write_truth_table_public(TFile* output_tf, const char* tname,
+                                                                  const ITensor::pointer& ten,
+                                                                  int runNo, int subRunNo, int eventNo) const
+{
+    write_truth_table(output_tf, tname, ten, runNo, subRunNo, eventNo, log);
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_truth(TFile* output_tf, const Clus::Facade::Ensemble& ensemble) const
@@ -647,6 +669,12 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf, Clus::Faca
         prov_keys.push_back(key);
         prov_vals.push_back(kv.second);
     }
+    // ai-helper issue 39: the art input file (only when the input carried it, so
+    // older inputs keep the previous schema).
+    std::string input_file = m_evt_input_file;
+    if (!input_file.empty() && !tree->GetBranch("input_file")) {
+        tree->Branch("input_file", &input_file);
+    }
     if (!m_provenance.empty()) {
         tree->Branch("wct_version", &wct_version);
         for (size_t i = 0; i < prov_keys.size(); ++i) {
@@ -877,7 +905,11 @@ static void write_empty_proj_data(TFile* output_tf)
 {
     std::vector<int> v_cluster_id;
     std::vector<std::vector<int>> v_channel, v_time_slice;
-    std::vector<std::vector<double>> v_charge, v_charge_err, v_charge_pred;
+    // ai-helper issue 39: int, as write_proj_data books them -- this empty row
+    // exists to give every event the same schema, and it gave the three charge
+    // branches the type vector<vector<double>> where a non-empty event has
+    // vector<vector<int>> (one tree, two types, depending on the event).
+    std::vector<std::vector<int>> v_charge, v_charge_err, v_charge_pred;
     TTree* tree = new TTree("T_proj_data", "T_proj_data");
     tree->SetDirectory(output_tf);
     tree->Branch("cluster_id", &v_cluster_id);
