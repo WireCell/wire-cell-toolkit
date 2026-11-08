@@ -90,6 +90,9 @@ class Projection:
                 WI, SI, W = spread(s, self.tk[sel], sw, self.sig_t[sel])
                 ok = (W > 0) & (WI >= 0) & (WI < len(g["chan"])) & (SI >= 0) & (SI < self.nslices)     # inside the readout window
                 r_, k_ = np.nonzero(ok)
+                if not len(r_):         # this face's deposits all outside the plane's wires / window: no entry, so a plane no deposit
+                    del WI, SI, W, ok, r_, k_   # reaches stays None (pr_ml doc 58 sec 11.1; a zero-row entry failed _totals' ch.min())
+                    continue
                 wi = WI[r_, k_]
                 fp = self.fp_index[(an, fi, pi)]
                 ent.append((sel[r_].astype(np.int32), np.full(len(r_), fp, np.int16), wi.astype(np.int32), SI[r_, k_].astype(np.int32),

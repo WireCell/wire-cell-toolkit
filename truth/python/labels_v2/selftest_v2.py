@@ -11,6 +11,7 @@
       a shower with one segment; the mu- end under its own daughter shower stays a physical end)
   (e) a neutron's photon with a 4 mm Compton blob: a G3 LE blip cluster (class blip, own instance, origin neutron, no kp)
   (f) bad channels: W channels under part of a muon masked -> not seen in W there, still seen in U / V, still free
+  (g) every deposit past one plane's wires (pr_ml doc 58 sec 11.1): no entry in that plane (None), seen in the other two, labelled
 Run: python3 selftest_v2.py [wires file]; exit 0 when every check passes, prints FAIL lines otherwise."""
 import os, sys
 import numpy as np
@@ -215,11 +216,31 @@ def test_f():
     check(R.P.n_bad_main_entries == int(inside.sum()) or abs(R.P.n_bad_main_entries - inside.sum()) <= 20, f"bad main entries counted: {R.P.n_bad_main_entries} vs {int(inside.sum())} deposits inside")
 
 
+def test_g():
+    print("--- (g) an event that one plane does not see (every deposit past that plane's wires)")
+    # pr_ml doc 58 sec 11.1 (6e4, fdvd nc_b32052_e46 / nc_b32025_e1): every deposit past the last collection strip of its CRP, inside
+    # both induction planes; the face's entries were appended with zero rows and Projection._totals failed on ch.min().  Here: a blob
+    # just before the first SBND W wire (z < 0), inside U and V.
+    B = Builder()
+    B.particle(1, 11, 0, "primary", (-1500, -1000, -25), (-1500, -1000, -25), 1.0, blob=(20, 3.0))
+    ev = B.event(); g = ev.geo[0][0]
+    s = {pi: np.einsum("ij,j->i", ev.P3 - g[pi]["cen0"], g[pi]["pdir"]) / g[pi]["pitch"] for pi in range(3)}
+    check(ev.placed.all() and (s[2] < -1).all() and all(((s[p] > 1) & (s[p] < len(g[p]["chan"]) - 2)).all() for p in (0, 1)),
+          "setup: every deposit placed, past the W wires, inside U and V")
+    try:
+        R, pt, kps, kpt = run(ev)
+    except Exception as x:   # noqa: BLE001
+        check(False, f"labels an event that W does not see ({x!r:.80})"); return
+    check(R.P.ENT[2] is None and R.P.ENT[0] is not None and R.P.ENT[1] is not None, "no W entry (None), U and V entries")
+    check(not ev.inside.any() and not R.P.seen.any(), "outside the face's active box (W's extent): seen in no view, as the rule says")
+    check(len(pt["cls7"]) == len(ev.pts["X"]), "every point labelled")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1
