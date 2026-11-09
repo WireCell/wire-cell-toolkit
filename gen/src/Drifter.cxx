@@ -5,6 +5,7 @@
 #include "WireCellUtil/Persist.h"
 
 #include "WireCellIface/IAnodePlane.h"
+#include "WireCellIface/IDriftPlanes.h"
 #include "WireCellIface/IAnodeFace.h"
 #include "WireCellIface/IWirePlane.h"
 #include "WireCellAux/SimpleDepo.h"
@@ -76,6 +77,9 @@ WireCell::Configuration Gen::Drifter::default_configuration() const
 
     // see comments in .h file
     cfg["xregions"] = Json::arrayValue;
+
+    // Name of an IDriftPlanes to provide the xregions instead of "xregions".
+    cfg["drift_planes"] = "";
     return cfg;
 }
 
@@ -95,6 +99,14 @@ void Gen::Drifter::configure(const WireCell::Configuration& cfg)
     m_scale_factor = get<double>(cfg, "charge_scale", m_scale_factor);
 
     auto jxregions = cfg["xregions"];
+    const std::string dp_tn = get<std::string>(cfg, "drift_planes", "");
+    if (!dp_tn.empty()) {
+        if (!jxregions.empty()) {
+            raise<ValueError>("give \"xregions\" or \"drift_planes\", not both");
+        }
+        jxregions = Factory::find_tn<IDriftPlanes>(dp_tn)->xregions();
+        log->debug("{} xregions from {}", jxregions.size(), dp_tn);
+    }
     if (jxregions.empty()) {
         log->critical("no xregions given so I can do nothing");
         THROW(ValueError() << errmsg{"no xregions given"});
