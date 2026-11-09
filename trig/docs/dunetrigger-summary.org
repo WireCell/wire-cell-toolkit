@@ -1,0 +1,809 @@
+#+title: dunetrigger: trigger primitive, activity and candidate algorithms
+#+include: ../../docs/include-topic.org
+
+A summary of the DUNE =dunetrigger= package (=develop= at =b65e250=,
+2026-10) as a specification for re-implementing its trigger algorithms in
+=trig/= free of art and LArSoft.  Times are DAQ timestamp ticks (DTS, 62.5
+MHz, 16 ns) unless stated; one ADC sample is 32 DTS ticks (512 ns).
+
+* Package structure
+
+| directory                  | content                                                                     |
+|----------------------------+-----------------------------------------------------------------------------|
+| =TriggerSim/=              | art producers =TriggerPrimitiveMakerTPC=, =TriggerActivityMakerTPC=, =TriggerCandidateMakerTPC= |
+| =TriggerSim/TPAlgTools/=   | art tools implementing TP finding on =raw::RawDigit= waveforms             |
+| =TriggerSim/fcl/{hd,vd}/=  | maker configurations and jobs for HD (1x2x2, 1x2x6, PD-HD) and VD (1x8x14) |
+| =triggeralgs/=             | a copy of the DUNE-DAQ =triggeralgs= TA/TC/TD makers (no art dependence)   |
+| =TriggerAna/=              | analysis modules: TTree dumper, online/offline comparator, display, a mini back-tracker |
+| =TriggerTools/=            | =HydraFilter= (events with deposits in one TPC set), =RawDigitAna=, =geo_inspector= |
+| =channelmaps/=             | an offline TPC channel map used by PlaneCoincidence                        |
+
+The data types (namespace =dunedaq::trgdataformats=) come from DUNE's offline
+=dunedetdataformats= package, whose =detdataformats/trigger/*.hpp= are copies
+of DUNE-DAQ =trgdataformats= v1.2.5 (2024-08).  The trigger headers left the
+DAQ's own =detdataformats= in 2023 (commit =1527092=), and the current DAQ
+format (TP v2) is described in [[file:daq-streaming.org][daq-streaming.org]].
+
+** Data objects
+
+- =TriggerPrimitive= (v1 layout) :: =version=, =time_start=, =time_peak=,
+  =time_over_threshold= (all =uint64= DTS ticks; ToT a duration), =channel=
+  (=int32=, the LArSoft offline channel), =adc_integral= (=uint32=),
+  =adc_peak= (=uint16=), =detid=, =type= (=kTPC=), =algorithm=
+  (=kSimpleThreshold=, =kRunningSum=, =kAbsRunningSum=), =flag=.
+- =TriggerActivityData= :: =time_start=, =time_end=, =time_peak=,
+  =time_activity=, =channel_start=, =channel_end=, =channel_peak=,
+  =adc_integral= (=uint64=), =adc_peak=, =detid=, =type=, =algorithm=.
+  =triggeralgs::TriggerActivity= adds =std::vector<TriggerPrimitive> inputs=.
+- =TriggerCandidateData= :: =time_start=, =time_end=, =time_candidate=,
+  =detid=, =type=, =algorithm=.  =triggeralgs::TriggerCandidate= adds
+  =std::vector<TriggerActivityData> inputs= (TAs without their TPs).
+- =TriggerDecision= :: =time_start=, =time_end=, =time_trigger=,
+  =trigger_number=, run, subrun, =type=, =algorithm=, =tc_list=.  It carries no
+  readout addresses (anode/channel ranges); in the DAQ those are made by the
+  module level trigger and data-flow applications, outside =triggeralgs=.
+
+* Trigger primitive finding (=TPAlgTools=)
+
+Three working tools (and a placeholder =TPAlgTPCExample=) share one
+interface, =process_waveform(adcs, channel, detid, start_time, tps_out)=,
+called once per =raw::RawDigit= (whole channel waveform).
+
+** Common per-waveform logic
+
+1. The plane is looked up from the channel through the LArSoft
+   =WireReadoutGeom= (=ROPtoWirePlanes(ChannelToROP(ch))[0].Plane=), which
+   selects one of =threshold_tpg_plane{0,1,2}=.  A negative threshold
+   disables the plane.
+2. The pedestal is initialized to the *mode* of the whole waveform
+   (smallest value on a tie).  The state (pedestal, accumulator, hit) is reset
+   for every waveform: no state crosses waveforms or events.
+3. For each sample: update the pedestal with the "frugal streaming" median
+   (=accum= counts samples above/below the pedestal; at =±accum_limit= the
+   pedestal moves by one ADC and =accum= resets; default =accum_limit=10=),
+   subtract it, apply the tool's filter, then the hit logic.
+4. Hit logic: a sample is "over" if strictly greater than threshold.  While
+   over, add the sample to =adc_integral=, track the strictly larger peak and
+   its offset, count ticks.  On the first sample not over after a run, emit
+   a TP with
+   - =time_start = start + (i - tover) * 32=,
+   - =time_over_threshold = tover * 32=,
+   - =time_peak = start + (i - tover + peak_offset) * 32=,
+   - =adc_integral=, =adc_peak= (the filtered values, not raw ADC).
+
+   A hit still over threshold at the end of the waveform is dropped.
+5. =start_time= is the =raw::RDTimeStamp= associated to the digit, or
+   =default_timestamp= (0) if none.
+
+** The three filters
+
+| tool                     | filter applied after pedestal subtraction                                         | HD thresholds (U,V,Z) |
+|--------------------------+-----------------------------------------------------------------------------------+-----------------------|
+| =TPAlgTPCSimpleThreshold= | none                                                                             | 70, 70, 60 (VD: 45 or 36 on all) |
+| =TPAlgTPCRunningSum=     | =RS = r*div(RS,10) + div(x,10)*scale= (=r=9=, =scale=5=), int16 with saturation    | -                     |
+| =TPAlgTPCAbsRunningSum=  | as RS on =abs(x)= (=r=8=), then a second frugal pedestal on RS is subtracted; run first over =stabilisation_period=1000= samples to settle | 80, 80, 65 |
+
+=div(a,b)= is the AVX2 reciprocal-multiply division with its own rounding
+(see =TPAlgTPCTool::avx2_divide=).  Oddities:
+
+- AbsRunningSum reads =adcs[0..999]= for stabilisation without checking the
+  waveform length.
+- The overflow test of RunningSum relies on the wrap of narrowing to =int16=.
+- =TPAlgTPCExample= sets =time_over_threshold= to an absolute time and
+  =time_peak= to a duration (it is a placeholder).
+
+These are re-implemented in [[file:../inc/WireCellTrig/TPGMath.h][TPGMath.h]]
+(=avx2_divide=, =mode_pedestal=, =FrugalPedestal=, =RunningSum=,
+=AbsRunningSum=, =ThresholdHitter=) and checked against a transcription of
+SimpleThreshold in [[file:../test/doctest_tpgmath.cxx][doctest_tpgmath.cxx]].
+
+* How the art modules drive the algorithms
+
+** =TriggerPrimitiveMakerTPC=
+
+Gathers all =std::vector<raw::RawDigit>= matching a regex tag (refusing
+collections that share channels), and calls the tool on every digit.  =detid=
+is always set to =kHD_TPC=, also for VD.  Output: one flat
+=std::vector<TriggerPrimitive>= per event.
+
+** =TriggerActivityMakerTPC=
+
+- Splits the TPs by LArSoft readout plane (=ChannelToROP=), i.e. per APA/CRP
+  and plane (HD has 4 ROPs per APA: U, V and the two collection faces; VD 3).
+- Only ROPs listed in =active_rops= (default all) run, each with its own
+  =algconfig_rop<N>=.
+- For each plane: sort TPs by =(time_start, channel)=, build a *new* maker
+  instance, configure it, feed the TPs (skipping =channel_mask= channels; the
+  mask is searched with =binary_search= but never sorted), and optionally
+  =flush(UINT64_MAX)=.
+- So no TA state crosses events, and every algorithm sees time-ordered TPs of
+  one plane.  Associations TA→TP are rebuilt by matching
+  =(channel, time_start, adc_integral)=.
+- FHiCL→JSON conversion (=toJson()=, also inlined in the TC module) tries
+  =get<uint64_t>= then =get<bool>= for each key, because a =fhicl::ParameterSet=
+  does not expose value types.  Nothing in triggeralgs needs this limit; it is
+  a shortcut in the art glue.  Consequences: no float, negative or string
+  parameter can reach an algorithm (the TA module throws, the TC module prints
+  an error and skips the key).  So SWIFT's =cm_per_tick= and =wire_pitch= keep
+  their HD defaults (0.00256 cm/tick, 0.48 cm) also in the VD configuration
+  (=trigger_activity_makers_vd_cfg.fcl= sets neither), and triggeralgs
+  develop's mandatory string =tc_type_name= could not be given.
+
+** =TriggerCandidateMakerTPC=
+
+- One maker instance for the whole job (built in =beginJob=), so its state
+  crosses events although the TP times restart in each event.
+- TAs are sorted by =time_start= and re-created from =TriggerActivityData=
+  with *empty* =inputs= (the TPs are lost), which breaks every TC algorithm
+  that looks at TA inputs (see below).
+- No flush at the end of an event.
+
+There is no trigger decision step and no readout emulation in dunetrigger.
+
+* Trigger activity, candidate and decision makers (=triggeralgs/=)
+
+** Data types (detdataformats v4.4.x enums)
+Types: ~timestamp_t=uint64~, ~timestamp_diff_t=int64~, ~channel_t=int32~ (signed!),
+~detid_t=uint16~, ~version_t=uint16~. ~INVALID_TIMESTAMP=UINT64_MAX~,
+~INVALID_CHANNEL=INT32_MAX~, ~INVALID_DETID=UINT16_MAX~, ~WHOLE_DETECTOR=UINT16_MAX-1~.
+
+TriggerPrimitive (v1): ~version, time_start, time_peak, time_over_threshold~
+(all timestamp_t, ToT in ticks), ~channel~, ~adc_integral:uint32~,
+~adc_peak:uint16~, ~detid~, ~type{kUnknown,kTPC,kPDS}~,
+~algorithm{kUnknown,kSimpleThreshold,kAbsRunningSum,kRunningSum}~, ~flag:uint16~.
+
+TriggerActivityData: ~version, time_start, time_end, time_peak, time_activity~
+(default INVALID_TIMESTAMP), ~channel_start, channel_end, channel_peak~ (default
+INVALID_CHANNEL), ~adc_integral:uint64=0~, ~adc_peak:uint16=0~, ~detid~, ~type~,
+~algorithm~ enum: kUnknown0 kSupernova1 kPrescale2 kADCSimpleWindow3
+kHorizontalMuon4 kMichelElectron5 kDBSCAN6 kPlaneCoincidence7 kChannelDistance8
+kBundle9 kChannelAdjacency10 (no SWIFT value).
+~triggeralgs::TriggerActivity = TriggerActivityData + std::vector<TriggerPrimitive> inputs~.
+
+TriggerCandidateData: ~version(=2), time_start, time_end, time_candidate, detid, type, algorithm~. Type enum (relevant): kSupernova3 kPrescale5 kADCSimpleWindow6
+kHorizontalMuon7 kMichelElectron8 kPlaneCoincidence9 kDBSCAN10 kChannelDistance11
+kBundle12 kChannelAdjacency24. Algorithm enum: kSupernova1 kPrescale3
+kADCSimpleWindow4 kHorizontalMuon5 kMichelElectron6 kPlaneCoincidence7 kDBSCAN9
+kChannelDistance10 kBundle11 kChannelAdjacency12.
+~triggeralgs::TriggerCandidate = TriggerCandidateData + std::vector<TriggerActivityData> inputs~
+(TA inputs are sliced: a TC does NOT carry TPs).
+
+TriggerDecision (triggeralgs-local struct): ~time_start, time_end, time_trigger, trigger_number, run_number, subrun_number, type, algorithm, version, tc_list~.
+
+~TriggerObjectOverlay.hpp~: ~write_overlay/read_overlay/get_overlay_nbytes~ convert
+TA/TC <-> flat buffer (data header + n_inputs + flexible array of inputs).
+
+** Base classes and common machinery
+ *This copy has NO common machinery.* The bases are pure interfaces:
+
+#+begin_example
+struct TriggerActivityMaker  { virtual void operator()(const TriggerPrimitive&, std::vector<TriggerActivity>&)=0;
+                               virtual void flush(timestamp_t until, std::vector<TriggerActivity>&) {}
+                               virtual void configure(const nlohmann::json&) {} };
+struct TriggerCandidateMaker { operator()(const TriggerActivity&, std::vector<TriggerCandidate>&)=0;
+                               flush(timestamp_t, std::vector<TriggerCandidate>&) {}; configure(json) {} };
+struct TriggerDecisionMaker  { operator()(const TriggerCandidate&, std::vector<TriggerDecision>&)=0;
+                               flush(std::vector<TriggerDecision>&) {}; configure(json) {} };
+#+end_example
+
+There is no base-class prescale, ~max_time_over_threshold~ filter, latency
+monitoring, bypass, ~m_tp_count~, ~preprocess()/postprocess()~ hooks, or
+~m_prescale~ (those exist in newer upstream DUNE-DAQ triggeralgs v2.x; not here).
+Prescale, where present, is implemented per algorithm. ~operator()~ appends zero
+or more outputs to the caller's vector; outputs are copies. ~flush~ is a no-op
+except where overridden (TAM Supernova, TAM SWIFT). MichelElectron TAM and
+HorizontalMuon/MichelElectron TCM ~flush~ implementations exist but are commented
+out (~/* ... */~).
+
+ *Factory* (~AbstractFactory<T>~, ~TriggerActivityFactory~,
+~TriggerCandidateFactory~): a function-local static
+~unordered_map<string, function<unique_ptr<T>()>>~. Each ~.cpp~ ends with
+~REGISTER_TRIGGER_ACTIVITY_MAKER(TRACE_NAME, Class)~ (or ~..._CANDIDATE_...~),
+which defines a static registrar object whose ctor calls ~register_creator(name, lambda make_unique<Class>)~ at library load. Duplicate names are silently ignored
+(first wins); ~build_maker(name)~ returns ~nullptr~ if unknown (exceptions
+commented out). ~get_instance()~ lazily creates a shared singleton. Names are
+~"<ClassName>Plugin"~, e.g. ~TriggerActivityMakerSupernovaPlugin~,
+~TriggerCandidateMakerPrescalePlugin~, ~TriggerActivityMakerSWIFTPlugin~.
+~TriggerDecisionMakerSupernova~ is *not registered* (no TD factory).
+
+ *Configuration*: plain ~nlohmann::json~; each alg does
+~if (config.contains("k")) m_k = config["k"];~ (implicit conversion to member type;
+no schema, no validation). SWIFT uses ~config.value("k", default)~.
+
+ *How dunetrigger drives them* (~TriggerSim/*_module.cc~, context only):
+
+- TA module splits TPs by LArSoft readout plane (~geom->ChannelToROP(channel)~),
+  sorts each plane's TPs by ~(time_start, channel)~, builds a /fresh/ maker per
+  plane per event, ~configure(algconfig_rop<N>)~, feeds TPs (masked channels
+  skipped), optionally ~flush(UINT64_MAX)~ (fcl ~flush~, default false). So in
+  practice every TA maker sees time-ordered TPs from one plane of one APA/CRP;
+  plane/view separation is done by the caller, not the algorithm.
+- FHiCL->JSON accepts only ~uint64~ or ~bool~ values; floats cannot be passed.
+- TC module: one maker for the whole job (state persists across events); input
+  TAs sorted by ~time_start~; TAs are rebuilt from ~TriggerActivityData~ via
+  ~ExtTriggerActivity~ *with empty ~inputs~* (no TPs). Every TC algorithm that
+  looks at ~ta.inputs~ therefore misbehaves in dunetrigger (see section 4).
+
+** Window helpers
+*** TPWindow (~TPWindow.hpp/.cpp~)
+State: ~time_start:timestamp_t=0~, ~adc_integral:uint32=0~,
+~channel_states: unordered_map<channel_t,uint16>~ (hit count per channel),
+~inputs: vector<TP>~.
+
+- ~add(tp)~: ~adc_integral += tp.adc_integral; channel_states[tp.channel]++; inputs.push_back(tp)~.
+  Does NOT touch ~time_start~; no ordering enforced (append).
+- ~clear()~: empty everything, ~time_start=0, adc_integral=0~.
+- ~n_channels_hit()~: ~channel_states.size()~ (unique channels).
+- ~reset(tp)~: clear, then ~time_start=tp.time_start; adc_integral=tp.adc_integral; channel_states[tp.channel]=1; inputs={tp}~.
+- ~move(tp, L)~: scan ~inputs~ from the front; while
+  ~!(tp.time_start - x.time_start < L)~ (unsigned arithmetic) remove x
+  (subtract ADC, decrement/erase channel count); stop at first x that stays.
+  If any remain: ~time_start = inputs.front().time_start; add(tp)~; else ~reset(tp)~.
+  Assumes ~inputs~ is time-ordered; with unsigned subtraction an input TP /earlier/
+  than x gives a huge difference, so x is erased.
+
+*** TAWindow (~TAWindow.hpp/.cpp~)
+Same as TPWindow but over TAs: ~adc_integral:uint64~, ~channel_states~ counts
+ *the channels of every TP in each TA's ~inputs~*. ~add()~ inserts the TA keeping
+~inputs~ sorted by ~time_start~ (linear scan; insert before first TA with larger
+time_start; ~uint16~ index). ~move/reset/clear~ mirror TPWindow (move removes TAs
+with ~ta_in.time_start - ta.time_start >= L~, subtracting their ADC and per-TP
+channel counts).
+
+Several algorithms have their own private copies of ~Window~ (ADCSimpleWindow,
+MichelElectron TA/TC) with small differences noted below.
+
+** Trigger Activity makers
+Conventions: "first-TP init" means: if the window is empty, ~reset(tp)~ and return
+(no output). Unless stated, no flush, no plane logic, channel numbers are used
+raw (so "adjacency" assumes the caller fed one plane with contiguous wire numbering).
+
+*** ADCSimpleWindow (~TriggerActivityMakerADCSimpleWindowPlugin~)
+Purpose: test algorithm; emit a TA when the summed ADC of TPs in a time window
+exceeds a threshold.
+
+Config: ~window_length~ (timestamp_t, 100000), ~adc_threshold~ (uint32, 1200000).
+
+State: private ~Window{time_start, adc_integral:uint32, tp_list}~ (no channel map;
+~clear()~ only clears the list), ~m_primitive_count~.
+
+Per TP:
+
+1. window empty -> ~reset(tp)~, return.
+2. ~tp.time_start - win.time_start < window_length~ -> ~add(tp)~.
+3. else if ~win.adc_integral > adc_threshold~ -> emit ~construct_ta()~, ~reset(tp)~.
+4. else ~move(tp, window_length)~.
+
+So the threshold is only tested when a TP arrives /past/ the window end (a TA is
+emitted one window late, never mid-window); after emission the triggering TP starts
+a fresh window (it is not in the emitted TA).
+
+TA fields (~L~ = last TP in window): ~time_start=win.time_start~,
+~time_end=L.time_start+L.tot~, ~time_peak=time_activity=L.time_peak~,
+~channel_start=end=peak=L.channel~, ~adc_integral=win.adc_integral~,
+~adc_peak=L.adc_peak~, ~detid=L.detid~, ~type=kTPC~, ~algorithm=kADCSimpleWindow~,
+~inputs=tp_list~. (Channel/peak fields deliberately meaningless.)
+
+Ordering: assumes time-ordered TPs. Oddities: ~uint32~ ADC sum; no flush (last
+window lost). SNB: in principle a low-threshold ADC-sum trigger, but no spatial
+locality and huge default threshold; not designed for MeV events.
+
+*** BundleN (~TriggerActivityMakerBundleNPlugin~)
+Purpose: group every N consecutive TPs into one TA (testing/throughput).
+
+Config: ~bundle_size~ (uint64, 1).
+
+State: ~m_current_ta~ accumulating ~inputs~.
+Per TP: push to ~inputs~; if ~size == bundle_size~ -> fill attributes, emit, reset
+to fresh ~TriggerActivity()~. A second check ~size > bundle_size~ emits too
+(unreachable unless bundle_size==0... with 0 the first check never matches and the
+second emits a 1-TP TA every call).
+
+Attributes: ~channel_start=first.channel~, ~channel_end=last.channel~ (not min/max!),
+~time_start=first.time_start~, ~time_end=last.time_start~ (no ToT), ~detid=first.detid~,
+~algorithm=kBundle~, ~type=kTPC~, ~adc_peak=0~ then loop: ~adc_integral += tp.adc_integral~
+(starts at 0 from fresh TA), and for strictly larger ~adc_peak~ set
+~adc_peak, channel_peak, time_peak~; ~time_activity=time_peak~. If all
+~adc_peak==0~, ~channel_peak/time_peak~ stay INVALID.
+
+No flush: a partial bundle is never emitted. SNB: not a physics algorithm.
+
+*** ChannelAdjacency (~TriggerActivityMakerChannelAdjacencyPlugin~)
+Purpose: refined HorizontalMuon: in each time window find runs of (nearly)
+adjacent hit channels longer than a threshold; emit one TA per track containing
+only the track TPs; several non-overlapping TAs per window allowed.
+
+Config: ~window_length~ (8000), ~adj_tolerance~ (uint16, 3), ~adjacency_threshold~
+(uint16, 15), ~print_tp_info~ (bool, false), ~prescale~ (uint16, 1).
+
+State: ~TPWindow m_current_window~, ~m_ta_count:uint16~.
+
+Per TP:
+
+1. empty -> ~reset(tp)~, return.
+2. ~tp.time_start - win.time_start < window_length~ -> ~add(tp)~, return.
+3. else (window complete) loop:
+   - ~win_adj_max~ starts empty. Repeat: copy window, ~clear()~ it, re-~add~ every
+     TP not present in ~win_adj_max~ (match on ~channel~ AND ~time_start~);
+     ~win_adj_max = check_adjacency()~; if non-empty: ~++m_ta_count~, emit
+     ~construct_ta(win_adj_max)~ iff ~m_ta_count % prescale == 0~; loop again; else stop.
+   - Then ~m_current_window.move(tp, window_length)~ with the leftover (non-track)
+     TPs. Note ~clear()~ zeroed ~time_start~, but ~move~ recomputes it (front TP)
+     or resets. Leftover TPs therefore remain and slide.
+
+~check_adjacency()~ on ~m_current_window~:
+
+- Build ~map<channel, vector<TP>>~ and sorted unique channel list ~C~.
+- ~tol_count=0~, ~ch_adj=[]~. For ~i~ in ~0..|C|-1~: ~ch=C[i]~,
+  ~nx = C[(i+1)%|C|]~; if ~i+1==|C|~ then ~nx = ch-1~ (end sentinel).
+  ~ch_adj_max.clear()~. If ~nx==ch~ continue (cannot happen with unique list).
+  If ~ch_adj~ empty push ~ch~.
+  - if ~nx-ch == 1~: push ~nx~.
+  - else if ~0 < nx-ch <= 5~ and ~tol_count < adj_tolerance~: push ~nx~,
+    ~tol_count += nx-ch-1~ (missing wires).
+  - else if ~|ch_adj| > adjacency_threshold~: ~ch_adj_max = ch_adj~; *break*
+    (only the first qualifying run in channel order is returned).
+  - else: ~tol_count=0; ch_adj.clear()~.
+- Return a TPWindow with /all/ TPs (any time within window) on channels in
+  ~ch_adj_max~.
+- Note: tolerance is checked before adding, so total skipped wires can reach
+  ~adj_tolerance-1+4~. Hardcoded max single gap 5 channels (4 missing wires).
+  Threshold strictly ~>~.
+
+TA fields (~construct_ta~): ~detid=last.detid~, ~type=kTPC~,
+~algorithm=kChannelAdjacency~, ~inputs=track TPs~ (ordered by channel then
+arrival); ~time_start=min(ts)~, ~time_end=max(ts+tot)~,
+ *~time_activity=max(tot)~* (a duration, not a time - oddity),
+~channel_start=min~, ~channel_end=max~, peak fields from max ~adc_peak~ (strict >,
+initial 0), ~adc_integral = sum~ (TPWindow uint32).
+
+Ordering: time-ordered TPs, single plane. No flush. SNB: no - long-track finder
+(>15 wires).
+
+*** ChannelDistance (~TriggerActivityMakerChannelDistancePlugin~)
+Purpose: group TPs in a fixed time window that lie within a growing channel range;
+emit if enough TPs.
+
+Config (~config.contains~ used without ~is_object()~ check): ~min_tps~ (uint16,
+20), ~window_length~ (uint64, 8000), ~max_channel_distance~ (uint32, 50).
+
+State: ~m_current_ta~, ~m_current_lower_bound~, ~m_current_upper_bound~ (*uint32*).
+
+Per TP:
+
+1. TA empty -> ~set_new_ta(tp)~: fresh TA with ~inputs={tp}~,
+   ~lower=tp.channel-D~, ~upper=tp.channel+D~; return.
+2. if ~tp.time_start - inputs.front().time_start > window_length~: if
+   ~|inputs| >= min_tps~ set attributes and emit; then ~set_new_ta(tp)~; return.
+3. if ~tp.channel > upper || tp.channel < lower~ -> *drop TP* (it is not kept
+   anywhere, does not start another TA).
+4. else push, ~lower=min(lower, ch-D)~, ~upper=max(upper, ch+D)~.
+
+Attributes: identical recipe to BundleN (~channel_start=first.channel~,
+~channel_end=last.channel~, ~time_end=last.time_start~, sum ADC, max adc_peak),
+~algorithm=kChannelDistance~.
+
+Bugs: bounds are ~uint32~ while channel is int32 -> if ~ch < D~, ~lower~ wraps to
+~4e9 and the comparison (int vs uint32 -> unsigned) rejects everything; window
+closes on ~>~ (not ~>=~); out-of-range TPs are lost. No flush.
+SNB: closest in spirit (spatially-local cluster in a time window), but defaults
+(20 TPs, 8000 ticks, +-50 channels) target larger activity; lowering ~min_tps~ is
+possible.
+
+*** DBSCAN (~TriggerActivityMakerDBSCANPlugin~)
+Purpose: incremental DBSCAN clustering of TPs in (time, channel); each completed
+cluster becomes a TA.
+
+Config: ~min_pts~ (int, 3), ~eps~ (int, 10). ~configure()~ must be called: it
+creates ~IncrementalDBSCAN(eps, min_pts, pool_size=10000)~ (null otherwise).
+
+Per TP:
+
+- if ~tp.time_start < m_prev_timestamp~ drop (but ~m_prev_timestamp~ is never
+  updated, stays 0 -> check is dead).
+- clear ~m_dbscan_clusters~; ~add_primitive(tp, &completed)~; for every completed
+  cluster emit a TA; ~trim_hits()~.
+
+TA fields: init ~time_start=UINT64_MAX~, ~time_end=0~, ~channel_start=INT32_MAX~,
+~channel_end=0~, ~adc_integral=0~; over cluster hits (time-sorted): push TP,
+~time_start=min(ts)~, ~time_end=max(ts+tot)~, channel min/max, sum ADC,
+~detid=~ last hit's detid, peak fields from strictly larger ~adc_peak~;
+~time_activity=time_peak~, ~type=kTPC~, ~algorithm=kDBSCAN~.
+
+IncrementalDBSCAN (~src/dbscan/dbscan.cpp~, ~Hit.cpp~):
+
+- Coordinates: ~time = 0.01 * (tp.time_start - first_tp_time)~ (float; first time
+  latched when ~m_first_prim_time==0~), ~chan = tp.channel~ (int). So 1 time unit =
+  100 ticks; default eps=10 = 10 channels or 1000 ticks (Euclidean mix).
+- Neighbour test: Euclidean ~dt^2 + dch^2 < eps^2~ (strict). Core if
+  ~neighbours.size()+1 >= minPts~ (point counts itself).
+- Hits come from a ring buffer pool of 10000 ~Hit~ objects (~m_pool_end~ wraps);
+  ~m_hits~ holds pointers in time order.
+- ~add_hit(h)~: append; ~m_latest_time=h.time~; ~neighbours_sorted~ scans ~m_hits~
+  backwards, skipping ~time > h.time+eps~, stopping at ~time < h.time-eps~,
+  adding symmetric neighbour links (and promoting either side to kCore).
+  Collect clusters of neighbours that are core and in a cluster.
+  - none: if h is core, create new cluster (~static int next_cluster_index~ shared
+    by all instances), add h, ~cluster_reachable(h)~ (BFS over neighbours; adds
+    unclustered hits; expands through core points).
+  - else: add h to the lowest-index cluster; add all of h's unclustered neighbours
+    (even if h is not core - author's TODO); for neighbours that now have exactly
+    minPts, add their neighbours; merge other clusters into it (~steal_hits~, the
+    donor marked complete with empty hits).
+  - Then for each neighbour that is core but unclustered while h is unclustered,
+    seed a new cluster from it.
+  - Completion: cluster with ~latest_time < m_latest_time - eps~ is complete;
+    complete clusters with non-empty hits are copied to output and erased.
+- ~trim_hits()~: drop ~m_hits~ with time < (earliest first-hit time of active
+  clusters, or latest time if none) ~- 10*eps~.
+- Hit ~kNoise~ is never actually assigned (hits stay kUndefined).
+
+Ordering: requires time-ordered TPs. No flush -> clusters still open at end are
+lost. Pool overflow (>10000 hits alive) silently overwrites live hits. Mixed
+channel numbers across planes would cluster if fed together (caller splits planes).
+SNB: plausibly usable (general clustering, minPts=3); time/channel scaling is
+hardcoded (0.01) and eps is an int.
+
+*** HorizontalMuon (~TriggerActivityMakerHorizontalMuonPlugin~)
+Purpose: sliding window, trigger on longest run of adjacent hit channels (long
+horizontal track), optionally on ADC sum / channel multiplicity / large ToT.
+
+Config: ~trigger_on_adc~ (false), ~trigger_on_n_channels~ (false), ~adc_threshold~
+(uint32, 3000000), ~n_channels_threshold~ (uint16, 400), ~window_length~ (8000),
+~trigger_on_adjacency~ (true), ~adj_tolerance~ (uint16, 3), ~adjacency_threshold~
+(uint16, 15), ~print_tp_info~ (false), ~prescale~ (uint16, 1), ~trigger_on_tot~
+(false), ~tot_threshold~ (uint16, 5000).
+
+State: ~TPWindow~, ~ta_count:uint16~, ~m_max_adjacency~.
+
+Per TP:
+
+1. empty -> ~reset~, return.
+2. in window -> ~add~.
+3. else if ~adc_integral > adc_threshold && trigger_on_adc~ -> ~++ta_count~; if
+   ~ta_count % prescale == 0~: emit, ~reset(tp)~.
+4. else if ~n_channels_hit() > n_channels_threshold && trigger_on_n_channels~ -> same.
+5. else if ~(adj=check_adjacency()) > adjacency_threshold && trigger_on_adjacency~ -> same.
+6. else if ~trigger_on_tot && tp.tot > tot_threshold~ -> emit (no prescale),
+   ~reset(tp)~ (the big-ToT TP is /not/ in the TA).
+7. else ~move(tp, window_length)~.
+   Bug: in 3-5 when prescaled away, the window is neither reset nor moved and the
+   input TP is *dropped*; next TP re-tests the same stale window.
+
+~check_adjacency()~ (also used by MichelElectron/PlaneCoincidence variants):
+~chanList~ = channels of all TPs (with duplicates), sorted; ~adj=1,max=0,tol=0~;
+for each i: ~ch=chanList[i]~, ~nx=chanList[(i+1)%n]~; *~if (nx == 0) nx = ch-1~*
+(bug: intended ~next==0~; works by accident because wrap gives the smallest
+channel <= ch); if ~nx==ch~ continue; elif ~nx==ch+1~ ~++adj~; elif
+~nx in {ch+2..ch+5}~ and ~tol < adj_tolerance~: ~++adj; tol += (nx-ch)~ (counts
+gap size, not missing wires); else ~max=max(max,adj); adj=1; tol=0~. Return ~max~.
+(Unsigned arithmetic; if all channels equal returns 0.)
+
+TA fields (~construct_ta~, ~L~=last TP): init from L then refine over inputs:
+~time_start=min ts~, ~time_end=max(ts+tot)~, ~channel_start/end = min/max~,
+~time_activity=L.time_peak~, ~adc_integral=window sum~,
+ *~adc_peak~ initialised to ~L.adc_integral~* (bug) so peak fields only update
+for a TP whose adc_peak exceeds that integral - usually they stay at L's
+~time_peak~, ~channel~, and ~adc_peak~ = L's /integral/ (truncated to uint16).
+~type=kTPC~, ~algorithm=kHorizontalMuon~, ~inputs=window~.
+
+Header says window "holds collection hits only" but there is no plane filter.
+SNB: no.
+
+*** MichelElectron (~TriggerActivityMakerMichelElectronPlugin~)
+Purpose: long track (adjacency) + Bragg-peak + kink => Michel candidate.
+
+Config: ~trigger_on_adc~, ~trigger_on_n_channels~ (false, parsed but unused),
+~adc_threshold~ (3000000, unused), ~n_channels_threshold~ (400, unused),
+~window_length~ (*50000*), ~trigger_on_adjacency~ (true, unused),
+~adj_tolerance~ (3), ~adjacency_threshold~ (15).
+
+State: private ~Window~ (same as TPWindow except ~clear()~ only clears inputs).
+
+Per TP:
+
+1. empty -> reset, return.
+2. in window -> add.
+3. else if ~|longest_activity()| > adjacency_threshold~: if
+   ~check_bragg_peak(hits) && check_kinks(hits)~ -> emit ~construct_ta()~,
+   ~reset(tp)~. *Otherwise nothing*: TP dropped, window unchanged. Since the
+   window never changes, every later TP gives the same result -> the algorithm
+   locks up permanently (major bug).
+4. else move.
+
+~longest_activity()~: like HM adjacency but on TPs sorted by channel and collecting
+hits: start ~trackHits~ with current hit; same-channel next -> push next hit; +1 ->
+push, ++adj; +2..+5 with tolerance -> push, ++adj, ~tol += gap~; else if ~adj > max~
+-> ~finalHits = trackHits~; reset ~adj=1,tol=0,trackHits=[]~. Same ~nx==0~ bug.
+Returns hits (count includes duplicates on same channel).
+
+~check_bragg_peak(hits)~ (hits in channel order): ~convolve=6~; for each i,
+~mean_i = sum_{j=i..i+5} adc_integral[j % n] / 6~ (circular!); ~ped = mean of means~; scan means: accumulate ~charge += a~ while ~a > ped~; when ~a < ped~ and
+~charge != 0~ push charge and zero it (final open run not pushed; ~a==ped~
+ignored). Bragg if ~max(charge_dumps)~ equals first or last dump. UB if
+~charge_dumps~ empty.
+
+~check_kinks(hits)~: re-sort by channel; for ~i in [0, n-2)~: compare hit i and
+i+2; skip if same channel or same time_start, or ~|dt|>1000~ ticks or ~|dch|>6~;
+~g = (dch*4.67 mm)/(dt*0.028 mm)~ (hardcoded wire pitch 4.67 mm, 0.028 mm/tick).
+If ~>10~ gradients: running mean of adjacent pairs; if ~>10~ of those:
+~mean = |sum|/N~; kink if ~|front| + mean > 2.5*mean~ OR ~|back + mean| > 2.5*mean~
+(parenthesis bug on the back term).
+
+TA fields: like ADCSimpleWindow (L-based), ~algorithm=kMichelElectron~.
+Flush commented out. SNB: no.
+
+*** PlaneCoincidence (~TriggerActivityMakerPlaneCoincidencePlugin~)
+Purpose (README): low-energy trigger template: total ADC across U/V/Z windows
+above threshold plus a short collection-plane track.
+
+Config: ~trigger_on_adc~ (true), ~trigger_on_n_channels~ (true),
+~n_channels_threshold~ (20) - all parsed but unused; ~adc_threshold~ (uint32,
+300000), ~window_length~ (3000), ~trigger_on_adjacency~ (true, unused),
+~adj_tolerance~ (uint16, 5), ~adjacency_threshold~ (uint16, 15).
+Member ~m_channel_map_name="VDColdboxChannelMap"~ (not configurable).
+
+Plane determination: ~channelMap->get_plane_from_offline_channel(ch)~: 0=U, 1=Y(V),
+2=Z (else none). In this dunetrigger copy, ~make_map()~ *returns a null
+shared_ptr*, so the call is a virtual call through nullptr (crash). The
+implemented ~TPCChannelMap::get_plane_from_offline_channel~ would use LArSoft
+~ChannelToROP(ch).deepestIndex()~ (ROP index, not geometric plane).
+
+State: three TPWindows (U=induction1, Y=induction2, Z=collection).
+
+Per TP (plane p):
+
+1. if p's window empty -> reset it with tp, return.
+2. if in p's window time range -> add to p's window.
+3. ~collectionComplete = (tp.time_start - Zwin.time_start) > window_length~
+   (unsigned; computed for TPs of any plane).
+4. if complete and ~U.adc+Y.adc+Z.adc > adc_threshold~ and
+   ~check_adjacency(Zwin) >= adjacency_threshold~: (debug file dumps to
+   ~window_record_tam.csv~, ~triggered_coldbox_tps.txt~ in CWD), emit
+   ~construct_ta(Zwin)~, then each window: reset with tp if tp is on that plane,
+   else clear.
+5. else: ~move~ tp into its plane's window - *even if step 2 already added it*
+   (TP can be added twice: when in-window but collection not complete, step 2
+   adds and step 5 moves/adds again).
+   Adjacency variant: allowed gaps only +2/+3; ~tol += gap~; same ~nx==0~ bug.
+
+TA fields: L-based like ADCSimpleWindow from the Z window only (inputs=Z TPs,
+adc_integral=Z sum only), ~algorithm=kPlaneCoincidence~.
+SNB: nominally aimed at low-energy (Michel/SN) events, but needs a >=15-wire
+collection track and is broken here (null channel map, double-add). Requires
+all planes fed into one instance - incompatible with dunetrigger's per-ROP split.
+
+*** Prescale (~TriggerActivityMakerPrescalePlugin~)
+Purpose: one TA per every N-th TP.
+
+Config: ~prescale~ (uint64, 1).
+Per TP: ~if (count++ % prescale == 0)~ emit TA from that single TP:
+~time_start=ts~, ~time_end=ts+tot~, ~time_peak=tp.time_peak~, *~time_activity=0~*,
+channel_start/end/peak=ch, ~adc_integral~, ~adc_peak~, ~detid~, ~kTPC~,
+~kPrescale~, ~inputs={tp}~. First TP always emitted. SNB: pass-through only.
+
+*** Supernova (~TriggerActivityMakerSupernovaPlugin~)
+Purpose: greedy time/channel-proximity clustering of consecutive TPs into one TA.
+
+Config: *none* (no ~configure~). Hardcoded protected members:
+~m_time_tolerance = 250~ ticks (int64; comment says 50 MHz), ~m_channel_tolerance = 2~.
+
+State: running cluster ~m_time_start, m_time_end, m_time_peak, m_time_activity(=0, never set), m_channel_start/end/peak, m_adc_integral, m_adc_peak, m_detid, m_tp_list~.
+
+Per TP (~tend = ts + tot~):
+
+1. if ~m_time_start == 0~ (uninitialised sentinel): start cluster from tp
+   (~time_start=ts, time_end=tend, time_peak, channel_start=end=peak=ch, adc_integral, adc_peak, detid~), return. (A real TP at ts=0 confuses this.)
+2. ~time_ok~ = ~is_in_between~ (~m_time_start < tend < m_time_end~ or
+   ~m_time_start < ts < m_time_end~, strict) OR ~is_close_to_edge~ (any of
+   ~|ts - m_time_end|, |ts - m_time_start|, |tend - m_time_end|, |tend - m_time_start|~
+   ~< 250~).
+   ~channel_ok~ = ~m_channel_start < ch < m_channel_end~ OR ~|ch - m_channel_end| < 2~
+   OR ~|ch - m_channel_start| < 2~ (so only +-1 channel beyond the edge).
+3. *if ~!time_ok && !channel_ok~* -> emit current cluster, restart from tp.
+   Note the AND: a TP is merged if EITHER time OR channel is consistent. With
+   time-ordered input from a whole plane, any TP within 250 ticks of the cluster
+   edges joins regardless of channel distance, and any TP on a nearby channel
+   joins regardless of time. Clusters are therefore very permissive/greedy.
+4. else merge: extend ~time_start~ (min), ~time_end~ (max tend), peak if
+   ~adc_peak~ strictly larger (~time_peak, adc_peak, channel_peak~), channel
+   min/max, push tp, ~adc_integral +=~, *~m_detid |= tp.detid~* (bitwise OR).
+
+~flush(until, out)~: unconditionally pushes ~MakeTriggerActivity()~ (even if no TP
+was ever seen -> a TA with all zeros/empty inputs); state is NOT reset, so a
+second flush or further TPs duplicate it.
+TA fields: copy of state; ~time_activity=0~; ~type=kTPC~, ~algorithm=kSupernova~.
+
+Ordering: no explicit assumption; result depends on order. SNB: this is the
+(historical, very simple) SN TA maker; no thresholds at TA level - every cluster,
+including single TPs, becomes a TA. Selection is deferred to the TC maker
+(>2 TPs per TA, >3 TAs in window).
+
+*** SWIFT (~TriggerActivityMakerSWIFTPlugin~)
+Purpose: fixed (non-sliding) time-binned windows; classify each window by summed
+ADC (reject/inspect/accept); inspected windows accepted only if the dominant
+DBSCAN cluster's ADC passes a cut. Recent, aimed at low-energy (SN-like) activity.
+
+Config (~config.value(key, default)~; type of default determines parse type):
+
+- ~window_length~ (int->uint64, 32000 ticks; comment "32*1000 readout ticks @ 500 ns"
+  i.e. 512 us at 16 ns),
+- ~inspect_energy_threshold_sadc~ (15000), ~accept_energy_threshold_sadc~ (55000),
+- ~min_adc_peak~ (uint16, 80), ~min_samples_over_threshold~ (uint16, 256 ticks =
+  8 samples x 32 ticks; compared to ~time_over_threshold~),
+- ~cm_per_tick~ (double, 0.016*0.16 = 0.00256 cm/tick), ~wire_pitch~ (0.48 cm, HD),
+- ~min_samples~ (int, 2) -> DBSCAN minPts, ~epsilon~ (default int 2 -> parsed as
+  *int*, so fractional eps is truncated) cm,
+- ~cluster_energy_cut_sadc~ (22000).
+  Members are uninitialised until ~configure()~ is called.
+
+TP preprocessing: keep TP iff ~adc_peak > min_adc_peak~ AND
+~time_over_threshold > min_samples_over_threshold~ (strict); others ignored.
+
+State: ~m_initialised~, ~m_window_start~, ~m_window_energy_sadc~, ~m_tp_count~,
+~m_current_ta~ (inputs reused).
+
+Per kept TP: ~w = floor(ts / L) * L~ (windows aligned to absolute timestamp 0).
+First kept TP: init, ~reset_window_state(w)~.
+
+- ~w < m_window_start~: drop (late TP).
+- ~w > m_window_start~: ~close_window()~, ~reset_window_state(w)~ (gaps skipped;
+  empty windows produce nothing).
+- push TP, ~energy += adc_integral~, ~++count~.
+
+~close_window~: if no inputs return. ~E > accept~ -> accept; else ~E > inspect~ ->
+inspect; else reject. Inspect: ~extract_dominant_cluster_energy~; reject if
+~<= cluster_energy_cut~. Accept -> ~set_ta_attributes()~, emit copy.
+
+~extract_dominant_cluster_energy~: points ~z = channel * wire_pitch~,
+~t = (ts - window_start) * cm_per_tick~; classic O(N^2) DBSCAN with
+~dz^2+dt^2 <= eps^2~ (inclusive; neighbourhood includes the point itself, so
+~min_samples=2~ means one other TP within eps); border points get the cluster
+label; noise = -1. Return max over clusters of summed ~adc_integral~ (0 if none).
+
+TA fields: ~time_start=window_start~, ~time_end=window_start+L~,
+~adc_integral=window energy (all kept TPs, not just the cluster)~,
+~detid=first.detid~, ~type=kTPC~, *~algorithm=kUnknown~*, channel_start/end =
+min/max, peak fields from max ~adc_peak~ (strict >, starting 0),
+~time_activity=time_peak~, ~inputs=all kept TPs in window~.
+
+~flush~: if initialised ~close_window()~ - but does not reset the window, so more
+TPs in the same window after a flush would re-emit an overlapping TA. ~until~
+ignored.
+Plane: none (raw channel x pitch; caller must split planes; collection-plane
+pitch assumed). SNB: yes - the only TA algorithm explicitly designed around
+low-energy energy thresholds and compact clusters.
+
+** Trigger Candidate makers
+General: all assume TAs time-ordered by ~time_start~. TA->TC conversion slices
+TAs to ~TriggerActivityData~ (TPs dropped). *In dunetrigger the TC maker
+receives TAs with empty ~inputs~*, which breaks Supernova (never fires),
+ChannelDistance/DBSCAN (TP counts are 0, TC never closes), the TAWindow channel
+counts (always 0), and the ~inputs.back()~ accesses in MichelElectron and
+PlaneCoincidence ~construct_tc~ (UB on empty vector).
+
+*** ADCSimpleWindow (~TriggerCandidateMakerADCSimpleWindowPlugin~)
+1:1 TA->TC. Config: ~tc_type_name~ (string) -> ~m_tc_type~ via
+~string_to_fragment_type_value~ (kUnknown -> default kADCSimpleWindow).
+TC: ~time_start=ta.time_start~, ~time_end=ta.time_end~,
+~time_candidate=ta.time_activity~, ~detid~, ~type=m_tc_type~,
+~algorithm=kADCSimpleWindow~, ~inputs={ta}~.
+
+*** BundleN (~TriggerCandidateMakerBundleNPlugin~)
+Bundle every ~bundle_size~ (uint64, 1) TAs. TC: ~time_start=first.time_start~,
+~time_end=last.time_end~, ~time_candidate=first.time_start~, ~detid=first.detid~,
+type/algorithm kBundle. Same ~>~ fallback as TA BundleN; no flush.
+
+*** ChannelAdjacency (~TriggerCandidateMakerChannelAdjacencyPlugin~)
+Config: ~trigger_on_adc~ (false), ~trigger_on_n_channels~ (false), ~adc_threshold~
+(uint32, 1200000), ~n_channels_threshold~ (uint16, 600), ~window_length~ (80000),
+~readout_window_ticks_before~ (32768), ~readout_window_ticks_after~ (32768).
+ *With defaults (both flags false) it never emits.*
+Per TA (TAWindow): empty -> reset; elif ~ta.ts - win.ts < L~ -> add; else move.
+Then (every call, including the first): if ~adc_integral > thr && on_adc~ ->
+emit, ~clear()~; elif ~n_channels_hit() > thr && on_n_channels~ -> emit, ~clear()~.
+TC: ~time_start = win.time_start - before~, ~time_end = win.time_start + after~
+(not related to TA ends), ~time_candidate = win.time_start~, ~detid=last TA detid~,
+kChannelAdjacency, ~inputs = all TAs in window~.
+
+*** ChannelDistance / DBSCAN (~...ChannelDistancePlugin~, ~...DBSCANPlugin~)
+Identical logic, differing only in enums. Config: ~max_tp_count~ (uint16, 1000).
+State: ~m_current_tc~, ~m_current_tp_count~ (uint16).
+Per TA: if TC empty -> start with ~{ta}~, count=|ta.inputs|; elif
+~|ta.inputs| + count > max_tp_count~ -> finalize & emit current, start new with ta;
+else append and add count. So a TC is a run of consecutive TAs totalling <= 1000
+TPs, emitted only when the /next/ TA would overflow; no time criterion, no flush.
+TC: ~time_start=first.time_start~, ~time_end=last.time_end~,
+~time_candidate=last.time_start~, ~detid=first.detid~.
+
+*** HorizontalMuon (~TriggerCandidateMakerHorizontalMuonPlugin~)
+Same as ChannelAdjacency TC (identical window logic, config, defaults, TC fields),
+type/algorithm kHorizontalMuon. Warns (no throw) if both or neither flag set.
+Never emits with defaults.
+
+*** MichelElectron (~...MichelElectronPlugin~) and PlaneCoincidence (~...PlaneCoincidencePlugin~)
+Config as 4.3 but readout before/after default 30000.
+
+- Window empty (first TA, or after a clear): reset; if both flags false (default)
+  emit ~construct_tc()~ and ~clear()~ -> *1:1 TA->TC in default mode*; return.
+- elif in window -> add.
+- elif ~adc > thr && on_adc~ -> emit, ~reset(ta)~.
+- elif ~n_channels > thr && on_n_channels~ -> *no emission* (commented out),
+  ~reset(ta)~.
+- else move.
+  TC: ~time_start = win.time_start - before~,
+  ~time_end = lastTA.inputs.back().time_start + .tot + after~ (needs TPs),
+  ~time_candidate = win.time_start~, ~detid = last TA~, ~inputs = window TAs~.
+  MichelElectron's private Window: ~clear()~ only clears ~inputs~ (ADC/channel
+  counts persist until next reset - harmless since reset follows); ~move()~ that
+  empties the window calls ~add~ not ~reset~, leaving a stale ~time_start~.
+
+*** Prescale (~TriggerCandidateMakerPrescalePlugin~)
+Config: ~prescale~ (uint64, 1); ~readout_window_ticks_before/after~ (0) are only
+read *if ~prescale~ is also present*. Every N-th TA (first always):
+~time_start = ta.time_start - before~, ~time_end = ta.time_end + after~,
+~time_candidate = ta.time_start~, ~detid~, type/alg kPrescale, ~inputs={ta}~.
+
+*** Supernova (~TriggerCandidateMakerSupernovaPlugin~)
+Purpose: SN-burst "count TAs in a long sliding window" trigger.
+Config: *none*; hardcoded ~m_time_window = 500'000'000~ ticks (8 s at 62.5 MHz;
+comment says 10 s), ~m_threshold = 3~, ~m_hit_threshold = 2~.
+State: ~m_activity~ vector of TAData.
+Per TA (~t = ta.time_start~):
+
+1. ~FlushOldActivity(t)~: remove stored TAs with ~time_start < t - window~
+   (signed compare).
+2. if ~|ta.inputs| > 2~ (i.e. >= 3 TPs) store it.
+3. if ~|m_activity| > 3~ (i.e. >= 4 qualifying TAs within the window): emit TC
+   ~time_start = t - 500'000'000~ (unsigned underflow if t < 5e8),
+   ~time_end = ta.time_end~, ~time_candidate = t~, ~detid = WHOLE_DETECTOR~,
+   type/alg kSupernova, ~inputs = all stored TAs~; then clear ~m_activity~.
+   SNB: yes, the canonical (toy) burst trigger; thresholds are tiny (4 TAs) relative
+   to radiological background - realistic use needs much higher counts and a
+   background-rate model. Broken in dunetrigger because TA ~inputs~ are empty.
+
+** TriggerDecisionMakerSupernova (not registered)
+Purpose: pass-through: one TD per TC.
+Unused members: ~m_candidate~, ~m_time_window=500'000'000~, ~m_threshold=1~,
+~m_hit_threshold=1~, ~FlushOldCandidate()~.
+Per TC: ~TriggerDecision{time_start=tc.time_start, time_end=tc.time_end, time_trigger=tc.time_candidate, trigger_number=0, run=0, subrun=0, type=0, algorithm=(uint32) steady_clock-now in 62.5 MHz units (pd_clock; a wall-clock latency stamp, not an enum), version=tc.version, tc_list={tc}}~. No configure,
+no flush.
+
+** Summary table
+| TA alg           | window                       | emit condition                                           | plane logic                    | SNB-suited               |
+|------------------+------------------------------+----------------------------------------------------------+--------------------------------+--------------------------|
+| ADCSimpleWindow  | sliding TPs, ~window_length~ | window ADC sum > thr, tested when a TP falls past window | none                           | weak (no locality)       |
+| BundleN          | count N                      | every N TPs                                              | none                           | no                       |
+| ChannelAdjacency | tumbling-ish TP window       | run of >15 adjacent channels; 1 TA per run               | none (raw channel)             | no                       |
+| ChannelDistance  | fixed time from first TP     | >= min_tps within growing +-D channel range              | none                           | partially (tunable)      |
+| DBSCAN           | incremental                  | each completed cluster                                   | none                           | plausible                |
+| HorizontalMuon   | sliding                      | adjacency >15 (or ADC / nchan / big ToT)                 | none (comment says collection) | no                       |
+| MichelElectron   | sliding 50000                | long track + Bragg + kink                                | none                           | no (and locks up)        |
+| PlaneCoincidence | 3 per-plane sliding windows  | sum ADC > thr & collection adjacency >= 15               | channel map (null here)        | intended, but broken     |
+| Prescale         | none                         | every N-th TP                                            | none                           | no                       |
+| Supernova        | greedy proximity             | TP inconsistent in BOTH time and channel closes cluster  | none                           | yes (toy; no thresholds) |
+| SWIFT            | fixed aligned bins           | E>accept, or E>inspect and dominant DBSCAN cluster > cut | none (pitch-scaled channel)    | yes (designed for it)    |
+
+Recurring hardcoded numbers: adjacency max gap 5 (HM/ME/CA) or 3 (PC); ME
+4.67 mm pitch & 0.028 mm/tick, +-1000 ticks/6 channels, convolve 6, factor 2.5;
+DBSCAN time scale 0.01, pool 10000, trim 10*eps; Supernova 250 ticks / 2 ch,
+5e8-tick window, >2 TPs, >3 TAs; SWIFT HD pitch 0.48 cm, 0.00256 cm/tick.
+
+* Implications for =trig/=
+
+- Re-implement behavior faithfully first, bugs included where they change
+  results, behind a configuration switch where a fix is obvious (eg the
+  Supernova TA "either time or channel" merge, HorizontalMuon prescale drop,
+  ChannelDistance unsigned bounds), so the port can be validated bit for bit
+  against dunetrigger before it diverges.
+- The SNB-relevant starting points are SWIFT (TA), Supernova (TA and TC,
+  toy) and DBSCAN/ChannelDistance (TA, tunable).  Supernova TC needs the TA
+  inputs, which dunetrigger loses; in =trig/= TAs keep their TPs.
+- Algorithms must not determine planes themselves; the WCT TA node gives each
+  algorithm instance the TPs of one =WirePlaneId=, from =IAnodePlane=.
+  PlaneCoincidence is the one design needing all planes in one instance.
+- Configuration is native WCT JSON: floats, signed and string values are
+  allowed, and time and distance parameters are in WCT units.
+- No algorithm handles a stream boundary properly (few have =flush=, those
+  that do do not reset).  The WCT nodes must define flush/EOS and window
+  closing via the set coverage (see [[file:design.org][design.org]]).

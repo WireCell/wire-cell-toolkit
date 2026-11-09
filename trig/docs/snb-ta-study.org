@@ -1,0 +1,175 @@
+#+title: SNB trigger activity study
+#+include: ../../docs/include-topic.org
+
+The tech note in [[file:technote/][technote/]] (LaTeX, built with =make RUNS=...=)
+supersedes the results here from version 2 on: HD and VD, the neighborhood
+sum method, rare-source boosts and the per-tonne SNB reference.  This file
+keeps the v1 record.
+
+* Goal
+
+Measure how well trigger activities (TAs) select supernova neutrino burst
+(SNB) interactions against radiological backgrounds, and estimate the data
+rate of reading out the detector with each TA as the seed of a block of
+data: initially 200 µs in time over all channels of one HD APA (or VD CRU).
+
+* The job
+
+=trig/cfg/snb-ta-study.jsonnet= simulates one APA of the DUNE FD HD 1x2x6
+geometry (both faces) in independent frames of one readout window
+(=params.daq.nticks=, 6000 ticks of 500 ns):
+
+#+begin_example
+  LowEDepoSource ─▶ DepoSetFanout ─┬─▶ DepoSetDrifter ─▶ DepoTransform ─▶ Reframer
+   (MARLEY SNB +                   │   ─▶ AddNoise ─▶ Digitizer ─▶ TPFinder ─▶ TAFinder ─┐
+    radiologicals)                 │                                                     ▼
+                                   └───────────── depos (truth) ──────────────────▶ TATruth ─▶ TensorFileSink
+#+end_example
+
+=trig/cfg/run-snb-ta-study.sh OUTDIR SEED NFRAMES [-A ...]= runs one job:
+MARLEY, then =wire-cell=.  Jobs with different seeds run in parallel and
+=trig/pytools/snb_ta_metrics.py= reads all their outputs.
+
+** Kinematics
+
+- SNB :: MARLEY 1.2.1 ν_e CC on ⁴⁰Ar (=ve40ArCC_Bhattacharya2009=), as a JSON
+  file.  The spectrum is a pinched thermal ("beta-fit") of mean 11 MeV and
+  pinching 2.5 by default.  Directions are isotropic.
+- Radiologicals :: =trig/cfg/radiologicals.jsonnet=: ³⁹Ar (1.01 Bq/kg), ⁴²Ar
+  and ⁴²K, ⁸⁵Kr, and ²²²Rn with its short-lived daughters in equilibrium,
+  with simplified decay schemes.  Activities other than ³⁹Ar follow the
+  order of magnitude of the DUNE radiological model and must be checked
+  before results are quoted.  Neutrons, external gammas and surface activity
+  are not included yet.
+
+Interactions of each source are Poisson in number per frame, uniform in time
+over the readout window plus the longest drift before it (so the charge
+arriving during the readout is in steady state), and uniform in the APA's
+sensitive volume.
+
+** Boosted SNB rate
+
+The SNB rate is set far above a physical one (=snb_rate_hz=, default
+1000 Hz per APA, about 5 interactions per frame) to spend compute on
+signal.  =snb_physical_rate_hz= (default 0.5 Hz per APA: about 3000 events in
+40 kt over 10 s for a burst at 10 kpc, shared over 150 APAs per 10 kt)
+records a reference.  Their ratio, the "boost", rescales SNB rates in the
+analysis.  SNB interactions are rare enough even boosted that they seldom
+overlap each other, so only their rate, not their TAs, depends on the boost.
+
+** From particles to depos: a toy transport
+
+Without Geant4, =ToyTransport= turns final-state particles into energy
+deposits in infinite liquid argon: electron steps with a tabulated stopping
+power, bremsstrahlung and multiple scattering; photons with Klein-Nishina
+Compton, photoelectric and pair attenuation; ions deposited at once;
+neutrons dropped.  The recombination model (=BoxRecombination=) gives the
+charge.  The aim is the right topology for TPs (MeV gammas spreading energy
+over tens of cm, electron track lengths), not precision.  Neutron captures
+from SNB events are missing.  Depos from Geant4 (eg edep-sim) can replace
+the source later, provided they carry the same truth ids.
+
+** Trigger chain
+
+- TP :: =TPFinder= per frame, pedestal at the waveform mode, no filter,
+  thresholds 70, 70, 60 ADC on U, V, W as dunetrigger's HD SimpleThreshold.
+- TA :: =TAFinder= per frame, the DAQ Supernova algorithm with time AND
+  channel clustering (=both=true=), one core per plane, TPs stored.  SWIFT
+  is the alternative (=ta_algorithm=).
+
+** Truth
+
+Each interaction has an id (=64 n + source=) carried by its depos, and a
+zero-charge marker depo with its energy (the neutrino energy for SNB).
+=TATruth= projects the undrifted depos to wires and arrival times (drift
+speed, lifetime, no diffusion), adds a per-plane delay from the response
+plane to the TP start, and matches them to the TPs of each TA within one
+channel and 10 µs.  The delays were measured with the =offset_est= column:
+59, 61.5 and 64 µs for U, V, W.  Outputs per frame: tables of TAs (with
+matched charge, signal charge, dominant interaction), interactions and
+TA-interaction links.
+
+* Metrics
+
+=snb_ta_metrics.py= (numpy only) for seed TAs on one plane (default
+collection) scanned over lower cuts on TA =ninputs= and =adc_integral=:
+
+- A TA is signal if SNB sources give at least half of its matched charge.
+- An SNB interaction is visible if its charge reaches the collection plane
+  inside the readout window (50 µs margins), found if it gives at least half
+  of a selected TA's charge.  Efficiency = found / visible.
+- Background TA rate as simulated; SNB TA rate divided by the boost.
+- Purity = signal / all TA rate, as simulated and at the physical rate.
+- Data rate: blocks of 200 µs centered on each selected TA, all 2560
+  channels, merged where they overlap; the covered fraction of time times
+  2560 × 2 MHz × 1.75 B (packed 14-bit), per APA and for 150 APAs.  During a
+  burst SNB blocks add their (unboosted) coverage.
+
+* Results
+
+See the latest entry under "Runs" below.  In short (v1): a cut on TA
+=adc_integral= alone removes ³⁹Ar and ⁸⁵Kr while keeping SNB efficiency high;
+the surviving background is from the MeV-scale decays, whose modeling then
+decides the data rate.
+
+* Runs
+
+** v1 (2026-11-04)
+
+Correction (v2): the reference SNB rate of 0.5 Hz per APA assumed 150 APAs
+per 10 kt, but the simulated APA has two full drift volumes, 138 t of
+argon, so at 0.0075 Hz/t its rate is 1.03 Hz.  The boost was 970, not 2000,
+and the physical SNB TA rates and purities below are low by about 2.
+
+24 jobs × 100 frames (seeds 100–123), 2400 frames = 7.2 s of live time per
+APA, defaults (Supernova TA with both=true, thresholds 70/70/60, noise),
+SNB at 1000 Hz (boost 2000 over 0.5 Hz).  Output in the xero area,
+=topics/snbp/work/runs/v1/= (=metrics-plane2.txt=, =.json=).  About 10
+minutes on 24 cores.
+
+- 12 614 SNB interactions, 6952 visible; 1.78 M ³⁹Ar, 0.2 M ⁸⁵Kr decays.
+- Collection-plane TAs: 94 kHz of background with no cut, 83 kHz of it ³⁹Ar
+  and 10 kHz ⁸⁵Kr.  A 200 µs block per TA then covers all the time: full
+  readout, 8.96 GB/s per APA.
+- SNB interactions make 4.4 signal collection TAs each (MeV gammas and
+  broken electron tracks); median TA =adc_integral= 1950, 90% above 210.
+  Background TAs: median 630, 99% below 1960.
+
+Selected rows (seed TAs on collection; rates per APA; "data" is the
+steady-state background-seeded rate, module = 150 APAs; zero background
+means fewer than about 0.4 Hz at 95% CL):
+
+| ninputs ≥ | adc_integral ≥ | efficiency | bkg TA rate | purity (phys) | data / APA | data / module |
+|-----------+----------------+------------+-------------+---------------+------------+---------------|
+|         1 |              0 |      1.000 | 94 kHz      |       4.1e-05 | 8.96 GB/s  | 1.34 TB/s     |
+|         1 |           3000 |      0.999 | 109 Hz      |        0.015  | 185 MB/s   | 27.7 GB/s     |
+|         1 |           8000 |      0.985 | 11 Hz       |        0.081  | 19.4 MB/s  | 2.9 GB/s      |
+|         1 |          12000 |      0.947 | 0.7 Hz      |        0.51   | 1.2 MB/s   | 181 MB/s      |
+|         3 |           2000 |      0.879 | 21 Hz       |        0.030  | 36.8 MB/s  | 5.5 GB/s      |
+|         4 |           8000 |      0.614 | 0.14 Hz     |        0.72   | 0.25 MB/s  | 37 MB/s       |
+
+At loose cuts every visible SNB interaction is found, at all neutrino
+energies; with ninputs ≥ 3 the efficiency rises from 0.68 below 10 MeV to 0.94 above
+25 MeV.
+
+What survives the tight cuts is ²¹⁴Bi (β up to 3.27 MeV with gammas) and
+⁴²K (β up to 3.5 MeV): at adc ≥ 8000, 58 and 21 of 79 TAs; at ≥ 12000, 2
+and 3 of 5.  These come from the least certain inputs (the ²²²Rn activity
+of 1 mBq/kg with its chain in equilibrium in the bulk, simplified decay
+schemes, the toy transport), and the missing neutron captures (6.1 MeV
+cascades) and external gammas would add to exactly this region.  So the
+tight-cut background rates and data rates are lower bounds of the model,
+not predictions.
+
+* Limitations and next steps
+
+- Background statistics: a cut with no surviving background TAs bounds the
+  rate only to about 1/(live time).  Tight cuts need more frames, or
+  dedicated background-only runs with the fast parts only.
+- The toy transport, simplified decay schemes and the missing backgrounds
+  (neutrons, external gammas, surfaces) all bear on the tail of the
+  background that survives tight cuts, which is what matters.
+- The minimal block size is to be studied; the analysis takes =--block-us=.
+- Induction-plane TAs and coincidences between planes are not used yet.
+- VD (a CRU of =dunevd10kt-1x6x6-3view30deg=, 500 ns top) is the next
+  geometry.

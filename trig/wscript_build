@@ -1,0 +1,4 @@
+# -*- python -*-
+# DAQ trigger emulation: TP/TA/TC finders and trigger-decision readout.
+# Core WCT dependencies only (in particular, no libtorch).
+bld.smplpkg('WireCellTrig', use='WireCellAux')

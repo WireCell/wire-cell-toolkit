@@ -37,6 +37,7 @@ Additional ~README~ information is available in the WCT sub packages:
 - [[file:sio/README.org][sio]]
 - [[file:spng/README.org][spng]]
 - [[file:tbb/README.org][tbb]]
+- [[file:trig/README.org][trig]]
 - [[file:test/README.org][test]]
 - [[file:util/README.org][util]]
 - [[file:waft/README.org][waft]]

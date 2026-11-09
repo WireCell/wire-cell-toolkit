@@ -1,0 +1,137 @@
+#+title: trig: sample periods, clocks and times
+#+include: ../../docs/include-topic.org
+
+DUNE TPC readout comes with two ADC sample periods, while WCT simulates and
+processes signals at 500 ns only.  This note collects how the DAQ and
+dunetrigger deal with it and what follows for =trig/=.
+
+* Facts
+
+** The DAQ
+
+- All DAQ timestamps count the 62.5 MHz timing system clock (DTS tick, 16 ns).
+- WIBEth frames (HD, VD bottom) hold 64 samples and advance 2048 DTS ticks,
+  ie 32 ticks per 512 ns sample
+  (=fdreadoutlibs/include/fdreadoutlibs/DUNEWIBEthTypeAdapter.hpp:97-99=).
+- TDEEth frames (VD top) hold 64 samples and advance 2000 DTS ticks, ie
+  *31.25* ticks per 500 ns sample.  The type adapter carries both the
+  integer per-frame difference and the per-sample one as a =float=
+  (=fdreadoutlibs/include/fdreadoutlibs/TDEEthTypeAdapter.hpp:97-101=).
+  Frame timestamps stay exact integers because 64 × 500 ns = 32 µs = 2000
+  ticks.
+- The TPG (=tpglibs=) counts samples.  It is configured with the per-sample
+  tick difference (=TPCEthFrameProcessor.hxx:65=, =TPGenerator.hpp:37,50=) and
+  makes the TP start time as
+
+  #+begin_src c++
+    const auto offset_samples = static_cast<float>(t - tp.samples_over_threshold);
+    tp.time_start = static_cast<int64_t>(offset_samples * m_sample_tick_difference) + timestamp;
+  #+end_src
+
+  (=tpglibs/include/tpglibs/TPGenerator.hpp:117-118=) so a VD-top TP start
+  is truncated to the DTS tick below the true sample time (error < 16 ns).
+  All other TP quantities are counts of samples: =samples_over_threshold=,
+  =samples_to_peak= (=AVXPipeline.cpp=, =generate_tps()=).
+- triggeralgs develop converts sample counts back to ticks with a hardcoded
+  32 (marked FIXME) in Supernova, DBSCAN, Prescale, HorizontalMuon,
+  ADCSimpleWindow and ProtoDUNEBSMWindow, so a VD-top TA's end and peak times
+  are 2.4% off from its TPs'.  SWIFT's =min_samples_over_threshold= default is
+  still 256 (8 samples in TP v1 ticks) but is compared with a sample count.
+  The =trig/= ports take =ticks_per_sample= as configuration.
+- So, in the TPG, the clock mismatch is confined to one truncation per TP.  TA/TC
+  windows are in DTS ticks of absolute time and do not care about the sample
+  period, except where an algorithm compares a sample count, eg SWIFT's
+  =min_samples_over_threshold=.
+
+** dunetrigger
+
+- One constant for all detectors: =ADC_SAMPLING_RATE_IN_DTS = 32=
+  (=TriggerSim/TPAlgTools/TPAlgTPCTool.hh:15=), used for =time_start=,
+  =time_peak= and =time_over_threshold= by every TP tool and inverted again by
+  =TriggerAnaTree= (=TriggerAnaTree_module.cc:744,775,777=).
+- Offline simulation (WCT in LArSoft) is at 500 ns for all detectors.  So
+  every dunetrigger job on simulation labels 500 ns samples as 512 ns: TP
+  times run 2.4% fast, 0.75 DTS tick per sample, about 100 µs over a 8500
+  sample readout, and durations are 2.4% long.  VD top real data is labelled
+  the same way.  Relative times inside a TA window are scaled, absolute
+  matching to truth must invert the same factor (which =TriggerAnaTree= does
+  consistently).
+- Without a =raw::RDTimeStamp= association the start time is
+  =default_timestamp= (0), so simulated TPs have times relative to the
+  readout window start.
+
+** The TPG arithmetic, tpglibs vs dunetrigger
+
+=TPGMath.h= follows tpglibs and offers the dunetrigger behaviour as options.
+
+| item                         | tpglibs (DAQ)                     | dunetrigger tools                    |
+|------------------------------+-----------------------------------+--------------------------------------|
+| initial pedestal             | 0, converges in the stream        | mode of the whole waveform           |
+| state across waveforms       | continuous per channel            | reset per waveform, open hit dropped |
+| running sum overflow         | clamp at INT16_MAX, wrap below MIN | clamp both ways                     |
+| abs running sum              | RS of abs(x)                       | same, then a second frugal pedestal, after a 1000-sample settle |
+| per-plane parameters         | threshold, r, s, min samples over threshold | thresholds only            |
+| TP times                     | start in DTS ticks, durations in samples | all in DTS ticks at 32/sample |
+
+The tpglibs "Naive" threshold processor leaves =above_threshold= uninitialized
+below threshold (=NaiveThresholdProcessor.cpp=), the AVX one does not; we
+follow the AVX behaviour (zero below threshold).
+
+* What "all of WCT is at 500 ns" costs =trig/=
+
+Nothing in =trig/= needs the period to be 500 ns: the TPG counts samples and
+times can be made from =IFrame::time()= and =IFrame::tick()=.  The policy
+matters only for how faithful a simulated 512 ns detector is.
+
+1. Absolute times: no cost.  Times derived from the frame are exact.  For
+   500 ns the DTS equivalent is fractional, as it is in the real VD-top DAQ.
+2. Sample-count quantities on 512 ns detectors (HD, VD bottom) differ by
+   2.4%: =adc_integral= of a given charge (it is a sum over samples, ∝ 1/period),
+   =samples_over_threshold=, =samples_to_peak=.  Peak heights change little
+   (the shaped pulse is ~µs wide).
+3. Filter time constants are in samples.  The running sum memory
+   (r = 0.9: about 9.5 samples) is 4.75 µs at 500 ns and 4.86 µs at 512 ns, and
+   its frequency response shifts by 2.4%.  The frugal pedestal tracks 2.4%
+   faster in time.
+4. Thresholds and cuts tuned on 500 ns simulation therefore do not carry over
+   exactly to 512 ns hardware, or back.  Cuts on summed ADC (SWIFT's
+   "sadc" energies, ADCSimpleWindow) act like a 2.4% energy-scale shift.
+   For MeV-scale SNB activity near threshold, where efficiency rises
+   steeply, that is a percent-level efficiency bias, and the noise-driven TP
+   rate (the background) shifts too.  This is the main negative ramification.
+5. Validation against the DAQ on real 512 ns data (TPs stored in PD-HD
+   trigger records) must run =trig/= on the raw 512 ns frames, before WCT
+   resamples them.  That only needs =trig/= to honour the frame period.
+6. Selected waveforms are unaffected: the readout node can take the 500 ns
+   frames that WCT signal processing wants, whatever period fed the TPG.
+
+** Mitigation without breaking the policy
+
+For a faithful 512 ns detector, resample the simulated *analog* waveforms to
+512 ns just before digitization, on the branch feeding the TPG only:
+
+#+begin_example
+  ... → noise → ┬─▶ Digitizer(500 ns) ─────────────────▶ readout node (selected frames, 500 ns)
+                └─▶ Resampler(512 ns) ─▶ Digitizer ─▶ TP finder ─▶ ...
+#+end_example
+
+=Aux::Resampler= (LMN) exists; 512/500 = 128/125 meets its rationality
+condition when the frame length is a multiple of 125 samples.  Caveats: the
+resampling is per frame (edge effects at frame boundaries in a stream need
+overlap or padding), it costs DFTs on every channel, and the noise must be
+added before resampling (it is: noise is added to analog frames in WCT).
+
+* Decisions (2026-10-29)
+
+1. WCT stays at 500 ns for simulation and signal processing; 512 ns is
+   studied with the resampled branch above, in special tests.
+2. =trig/= cores count samples.  A core that needs the sample period is
+   *configured* with it, as the DAQ algorithms are: the DAQ does not carry the
+   period with its data.  No 32 or 31.25 constant is built in.
+3. The TP finder is configured with the period and refuses a frame whose
+   tick differs.
+4. Times in the TP interface: the start as an absolute WCT time (=double=),
+   the durations as integer sample counts as in the current DAQ TP format.
+   For a ported DAQ core the TA finder converts with a configured clock tick
+   (16 ns) and epoch: =floor((t - epoch) / 16 ns)=, the same truncation the
+   DAQ makes, and =ticks_per_sample = period / 16 ns=.

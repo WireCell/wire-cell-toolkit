@@ -1,0 +1,524 @@
+#+title: trig: the DAQ trigger streaming contract and data formats
+#+include: ../../docs/include-topic.org
+
+Research notes (2026-10-29) on how the DUNE DAQ moves TPs, TAs and TCs between stages, how that changed from DAQ v4 to develop, the current trigger data formats and how a trigger decision addresses data.  Paths are to the upstream repositories listed in the first table, as linked in the snbp topic refs.
+
+Date: 2026-10-29. Read-only survey to inform the WCT ~trig/~ streaming contract.
+
+* Sources and versions
+Path abbreviations used in citations:
+
+| tag      | path                                                                                                                       | HEAD                                                         |
+|----------+----------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------------------|
+| ~TDF~    | ~topics/snbp/refs/trgdataformats~                                                                                          | develop ~ef45970~ 2026-10-06 (latest tag v2.1.0)             |
+| ~TA~     | ~topics/snbp/refs/triggeralgs~                                                                                             | develop ~450867e~ 2026-10-06 (latest tag v1.7.0, 2026-08-25) |
+| ~TRG~    | ~topics/snbp/refs/trigger~                                                                                                 | develop ~c5f8d05~ 2026-10-22 (latest tag v2.5.6)             |
+| ~TRG@v4~ | ~git show f0edce8~1:<path>~ in ~TRG~ (= ~2e5e3a8~, 2024-02-02, last commit before the v4 Set/zipper machinery was deleted) |                                                              |
+| ~FDR~    | ~topics/snbp/refs/fdreadoutlibs~                                                                                           | develop ~26de3bc~                                            |
+| ~TPG~    | ~topics/snbp/refs/tpglibs~                                                                                                 | develop ~5314d22~                                            |
+| ~DDF~    | ~topics/snbp/refs/dunedetdataformats~                                                                                      | main ~70abf52~ 2026-01-07                                    |
+| ~DT~     | ~topics/snbp/source/dunetrigger~                                                                                           | develop ~b65e250~ 2026-10-27                                 |
+| ~DTA~    | ~DT/dunetrigger/triggeralgs~ (vendored triggeralgs copy)                                                                   |                                                              |
+| ~DAQDF~  | ~~/dune/xerosere/reference/daqdataformats~                                                                                 | develop ~d9564cf~ 2026-04-21                                 |
+
+Not available locally: ~datahandlinglibs~ (LatencyBuffer / TaskRawDataProcessorModel /
+DataSubscriberModel / request handlers), ~dfmessages~ (TriggerDecision), ~appmodel~
+(OKS config schema). Statements that depend on their internals are marked
+"(unverified)".
+
+Legacy files are read with ~git show f0edce8~1:<path>~ in the ~trigger~ repository.
+
+* Data formats: TP / TA / TC evolution
+** Where dunetrigger gets ~detdataformats/trigger/TriggerPrimitive.hpp~
+- ~DT/CMakeLists.txt:61~ does ~find_package( dunedetdataformats REQUIRED EXPORT )~;
+  sources include ~detdataformats/trigger/TriggerPrimitive.hpp~ etc.
+  (~DT/dunetrigger/TriggerSim/TriggerPrimitiveMakerTPC_module.cc:13~,
+  ~DT/dunetrigger/TriggerAna/TriggerAnaTree_module.hh:8-10~) and use namespace
+  ~dunedaq::trgdataformats~. So *~DDF~ (DUNE/dunedetdataformats) provides it*.
+- ~DDF/README.md~: "Offline-versioned files from DUNE-DAQ/detdataformats"; all format
+  versions must coexist, so newer versions are added side by side with a ~2~ suffix.
+- ~DDF/include/detdataformats/trigger/{TriggerPrimitive,TriggerActivityData,TriggerCandidateData,Types,TriggerObjectOverlay}.hpp~
+  are *byte-identical (after the include-path rename) to upstream ~trgdataformats~ v1.2.5*
+  (tag date 2024-08-22; ~DDF~ commit ~d64a7ac~ "update to trgdataformats v1.2.5").
+  TP/TA/Types/Overlay are also identical to v1.2.1; only TCData differs from v1.2.1.
+- ~DDF~ commit ~e9c6e3f~ (2025-04-09, "v4_4_5 changes with new TP, TA and TC formats v2")
+  added ~*2.hpp~ files in namespace ~dunedaq::trgdataformats2~
+  (~DDF/include/detdataformats/trigger/TriggerPrimitive2.hpp:21~) holding the upstream
+  v2.0.0 formats (trgdataformats v2.0.0, 2025-03-27).
+- ~DDF~ commit ~23c2c5d~ (2026-01-06) changed ~TriggerPrimitive2~ from bitfields to native
+  byte fields for ROOT (~TriggerPrimitive2.hpp:33-47~: three ~uint8_t channel_*byte~).
+  *Bug*: ~Channel()~ at ~TriggerPrimitive2.hpp:63~ shifts the high byte by ~<< 12~
+  (should be ~<< 16~); ~SetChannel()~ (~:65-68~) uses 16. Channels >= 4096 decode wrong.
+- Old ~source/detdataformats~ (master ~9a969fc~, 2022-04-15) has the same v1 TP struct
+  but in namespace ~dunedaq::detdataformats::trigger~
+  (~source/detdataformats/include/detdataformats/trigger/TriggerPrimitive.hpp:20-70~);
+  dunetrigger cannot use that copy (wrong namespace).
+
+** TriggerPrimitive
+ *v1* (used by dunetrigger; ~DDF/.../trigger/TriggerPrimitive.hpp:53-69~, ~Types.hpp:20-55~)
+
+| field                 | type                         | notes                                            |
+|-----------------------+------------------------------+--------------------------------------------------|
+| ~version~             | ~version_t~ = ~uint16_t~     | ~s_trigger_primitive_version = 1~ (~:56~)        |
+| ~time_start~          | ~uint64_t~                   | DTS ticks                                        |
+| ~time_peak~           | ~uint64_t~                   | absolute DTS ticks                               |
+| ~time_over_threshold~ | ~uint64_t~                   | a duration in DTS ticks                          |
+| ~channel~             | ~channel_t~ = ~int32_t~      |                                                  |
+| ~adc_integral~        | ~uint32_t~                   |                                                  |
+| ~adc_peak~            | ~uint16_t~                   |                                                  |
+| ~detid~               | ~detid_t~ = ~uint16_t~       |                                                  |
+| ~type~                | ~enum class Type~ (int)      | kUnknown/kTPC/kPDS (~:32-37~)                    |
+| ~algorithm~           | ~enum class Algorithm~ (int) | kUnknown/kTPCDefault (~:42-46~)                  |
+| ~flag~                | ~uint16_t~                   | bit names ~FlagBits::kSomehowBad~ ... (~:75-90~) |
+
+Not packed; by member layout it is 56 bytes (computed, no static_assert in source).
+dunetrigger fills ~time_over_threshold = hit_tover * 32~ and
+~time_peak = start + (i_t - tover + peak)*32~ with ~ADC_SAMPLING_RATE_IN_DTS = 32~
+(~DT/dunetrigger/TriggerSim/TPAlgTools/TPAlgTPCTool.hh:15~,
+~TPAlgTPCRunningSum.hh:162-164~).
+
+ *v2* (~TDF/include/trgdataformats/TriggerPrimitive.hpp:31-84~), introduced in
+trgdataformats v2.0.0 (2025-03-27; commits ~d31c249~ and ~58b4351~, 2025-03-24, replaced
+~time_over_threshold~ and ~time_peak~):
+
+#+begin_example
+uint64_t version : 8;                 // s_trigger_primitive_version = 2   (:33)
+uint64_t flag : 8;
+uint64_t detid : 8;
+uint64_t channel : 24;                // invalid = 0xFFFFFF                 (:38)
+uint64_t samples_over_threshold : 16; // invalid = 0xFFFF                   (:36)
+uint64_t time_start : 64;
+uint64_t samples_to_peak : 16;        // invalid = 0xFFFF                   (:37)
+uint64_t adc_integral : 32;
+uint64_t adc_peak : 16;
+#+end_example
+
+- 24 bytes, asserted (~:34~, ~:96~); little-endian only (~:99~); standard-layout and
+  trivially copyable (~:102-103~). No ~type~ or ~algorithm~ field.
+- ~operator<~ orders by ~(time_start, channel)~ (~:81-83~); ~get/set_timestamp~ = ~time_start~.
+- ~samples_*~ are in *ADC samples*, not DTS ticks. The DAQ TPG converts using the
+  frame's tick spacing: ~tp.time_start = (t - tp.samples_over_threshold) * m_sample_tick_difference + timestamp~
+  (~TPG/include/tpglibs/TPGenerator.hpp:117-118~), with
+  ~samples_tick_difference = 32~ for WIBEth (~FDR/include/fdreadoutlibs/DUNEWIBEthTypeAdapter.hpp:99~).
+  ~samples_over_threshold~ is set directly from the AVX counter
+  (~TPG/src/AVXPipeline.cpp:83~); ~samples_to_peak~ is relative to the TP start (~:82~).
+- Clock (comment only): ~timestamp_t~ is "timing system clock ticks (50 MHz for
+  ProtoDUNE-I, 62.5 MHz for ProtoDUNE-II and DUNE FD)" (~TDF/include/trgdataformats/Types.hpp:34-38~).
+- The 32 ticks/sample constant is *hard-coded throughout triggeralgs develop* with
+  ~FIXME~ notes, for example ~TA/src/TAMakerSupernovaAlgorithm.cpp:27,34~,
+  ~TAMakerDBSCANAlgorithm.cpp:52,63~, ~TAMakerPrescaleAlgorithm.cpp:29-30~,
+  ~TAMakerHorizontalMuonAlgorithm.cpp:165-166~, ~TAMakerProtoDUNEBSMWindowAlgorithm.cpp:163-164~,
+  and as ~const uint16_t k_sample_to_dts_ticks = 32~
+  (~TA/include/triggeralgs/ADCSimpleWindow/TAMakerADCSimpleWindowAlgorithm.hpp:62~).
+  SWIFT's thresholds are still in TPv1 units: ~min_samples_over_threshold~ default 256
+  "8 * 32 DTS ticks while still using TPv1 FIXME" (~TA/src/TAMakerSWIFTAlgorithm.cpp:22~)
+  but compared against ~samples_over_threshold~ (~:37~), which is now in samples.
+- ~trigger~ knows nothing about samples: ~TriggerPrimitiveTypeAdapter::expected_tick_difference = 1~
+  (~TRG/include/trigger/TriggerPrimitiveTypeAdapter.hpp:61~).
+
+Types also changed in v2.0.0 (~git diff v1.2.5 v2.0.0 -- Types.hpp~):
+~detid_t uint16→uint8~, ~channel_t int32→uint32~ (+ ~channel_diff_t int32~),
+~version_t uint16→uint8~. Develop adds ~TypeDefaults::s_invalid_*~ and
+~g_whole_detector = 0xFE~ (~TDF/.../Types.hpp:61-69~).
+
+** TriggerActivityData
+Develop (~TDF/include/trgdataformats/TriggerActivityData.hpp:24-66~), version 2, ~sizeof == 80~
+asserted (~:72-75~):
+~version, time_start, time_end, time_peak, time_activity~ (u64 ticks),
+~channel_start, channel_end, channel_peak~ (~channel_t~), ~adc_integral~ (u64),
+~adc_peak~ (u16), ~detid~, ~Type type~ (kUnknown/kTPC/kPDS), ~Algorithm algorithm~.
+Algorithm enum (~:33-48~) adds ~kSWIFT = 11~ and ~kProtoDUNEBSMWindow = 12~ relative to v1.
+v1 (~DDF/.../TriggerActivityData.hpp:42-56~) has *the same field list*; it differs only
+in version number (1), the ~Types.hpp~ widths above, and the two missing enum values.
+There is no TA-level "coverage" field: ~time_start/time_end~ are the extent of the
+activity as the algorithm defines it.
+
+** TriggerCandidateData
+Develop (~TDF/include/trgdataformats/TriggerCandidateData.hpp:32-109~), version 3,
+~sizeof == 48~ asserted (~:123-127~): ~version, time_start, time_end, time_candidate, detid, Type type, Algorithm algorithm~. ~Type~ now runs to ~kProtoDUNEBSMWindow = 39~
+plus a sentinel ~kFinalEnum~ (~:34-76~) used for compile-time checks of the name table.
+v1 dunetrigger copy (~DDF/.../TriggerCandidateData.hpp:83-95~) is version 2 with the
+same fields (wider ~detid~). TC ~time_start/time_end~ *double as the default readout
+window* (see section 4).
+
+** Overlays and the ~inputs~ vector
+- In-memory objects: ~triggeralgs::TriggerActivity : TriggerActivityData~ with
+  ~std::vector<TriggerPrimitive> inputs~ (~TA/include/triggeralgs/TriggerActivity.hpp:45-60~);
+  ~TriggerCandidate : TriggerCandidateData~ with ~std::vector<TriggerActivityData> inputs~
+  (~TriggerCandidate.hpp:83-98~). A TC holds TA /data/ only, not the TPs.
+- On-disk overlay: ~TriggerObjectOverlay<Data, Input>{ data; uint64_t n_inputs; input_t inputs[]; }~
+  (~TDF/include/trgdataformats/TriggerObjectOverlay.hpp:31-52~); conversion helpers in
+  ~TA/include/triggeralgs/TriggerObjectOverlay.hpp:153-210~.
+- The inputs are always serialized on the network (~TRG/include/trigger/TriggerActivity_serialization.hpp:36-51~,
+  ~TriggerCandidate_serialization.hpp:24-33~) and always written to the fragment buffer
+  (~TRG/include/trigger/TAWrapper.hpp:37-41~). *There is no option anywhere in
+  triggeralgs or trigger develop to not store inputs* (searched all ~config~ keys in
+  ~TA/src~, ~TA/include~, and ~trigger~ sources).
+
+* The DAQ streaming contract (trigger package)
+There are two generations. The answer to "is there a coverage concept?" is: *yes in
+DAQ v4 (2021 to Feb 2024), removed in DAQ v5*.
+
+** ~Set<T>~: the v4 envelope (still present in develop, mostly unused)
+~TRG/include/trigger/Set.hpp:21-62~:
+
+#+begin_example
+template<class T> class Set {
+  enum Type { kUnknown = 0, kPayload = 1, kHeartbeat = 2 };
+  uint64_t seqno;          // "An incremental count of how many Sets have been produced by this source"
+  run_number_t run_number;
+  SourceID origin;         // "Identify the instance creator/stream/source of this set"
+  Type type;               // "Whether this Set is a regular bag-of-objects or a heartbeat"
+  timestamp_t start_time;  // "The earliest timestamp inspected to form this Set"
+  timestamp_t end_time;    // "The latest timestamp inspected to form this Set"
+  std::vector<T> objects;
+};
+#+end_example
+
+~TPSet = Set<TriggerPrimitive>~ (~TRG/include/trigger/TPSet.hpp:20~), likewise ~TASet~,
+~TCSet~. The header comment ("A set of TPs or TAs in a given time window, defined by
+its start and end times", ~Set.hpp:21-23~) plus "earliest/latest timestamp /inspected/" is
+the coverage concept: an interval of data time the producer has looked at, not
+the extent of the contents.
+
+** v4 pipeline (~TRG@v4~, deleted in ~f0edce8~, 2024-02-17, first released in trigger v2.0.0 / coredaq v5.0.0)
+#+begin_example
+readout TP handler --TPSet(payload|heartbeat)--> [TPZipper] --> TriggerActivityMaker
+  --TASet--> [TAZipper] --> TriggerCandidateMaker --TC (bare)--> ModuleLevelTrigger --TD-->
+#+end_example
+
+Module classes: ~TriggerActivityMaker : TriggerGenericMaker<Set<TP>, Set<TA>, TAM>~
+(~TRG@v4:plugins/TriggerActivityMaker.hpp:25-28~);
+~TriggerCandidateMaker : TriggerGenericMaker<Set<TA>, TC, TCM>~
+(~TRG@v4:plugins/TriggerCandidateMaker.hpp:25-27~). TCs were not wrapped in sets and
+carried no heartbeats.
+
+ *Who set start/end on TPSets (readout side).* ~fdreadoutlibs~ ~TPCTPRequestHandler::send_tp_sets()~
+(added ~1edb8a8~ 2023-05-31 "add hearbeat TPSets", moved into ~trigger~ in ~1aef025~
+2024-02-17); the identical logic survives as ~TRG/src/TPRequestHandler.cpp:49-121~:
+
+- Window ~[m_start_win_ts, m_end_win_ts]~ with
+  ~m_end_win_ts = newest_ts_in_latency_buffer - m_ts_set_sender_offset_ticks~ (~:79-80~);
+  offset is 6 250 000 ticks = 100 ms (~TRG/src/trigger/TPRequestHandler.hpp:73~).
+- TPs in the window come from ~get_fragment_pieces(start, end)~ on the time-sorted skip-list
+  latency buffer (~:81~); boundary inclusivity lives in datahandlinglibs (unverified).
+- ~type = num_tps > 0 ? kPayload : kHeartbeat~ (~:85~).
+- Heartbeats keep the window as ~start_time/end_time~ (~:87-88~); *payload sets have
+  start/end overwritten with the first and last TP ~time_start~* (~:97-101~). So on this
+  path only heartbeats carry the window.
+- Next window starts at the previous end: windows are contiguous (~:112~).
+- ~seqno~ increments per set (~:89~); send is non-blocking and a full queue drops the set
+  with a ~DroppedTPSet~ warning (~:105-107~).
+
+~FakeTPCreatorHeartbeatMaker~ (~TRG@v4:plugins/FakeTPCreatorHeartbeatMaker.cpp:123-195~)
+inserted a zero-length heartbeat (~start_time == end_time == next payload start_time~,
+~:190-192~) before a payload whenever more than ~heartbeat_interval~ had passed since
+the last heartbeat (~:180-183~). It assumes inputs "are already ordered by start_time" (~:177~).
+
+ *Heartbeat meaning (stated explicitly).* ~TRG@v4:plugins/TriggerZipper.hpp:210-229~:
+"The heartbeat TSET encodes the information 'you have seen all TSETs with start times
+earlier than 100 (but none later)', so it must be output before the payload TSETs with
+the same start time." ~TriggerGenericMaker~ comment: "We've got a heartbeat for time T,
+so we know we won't receive any more inputs for times t < T"
+(~TRG/src/trigger/TriggerGenericMaker.hpp:352-357, 529-532~). So a heartbeat's
+~start_time~ is a *watermark*: an exclusive lower bound on future ~start_time~s.
+
+ *Merging multiple streams: the zipper* (~TRG@v4:plugins/zipper.hpp~, ~TriggerZipper.hpp~).
+
+- ~zipper::merge~ is a k-way min-heap merge on an ~ordering~ key with per-stream
+  (~identity~) occupancy tracking (~zipper.hpp:37-56, 67-92~).
+- Ordering key = ~start_time << 1 | (type != kHeartbeat)~, so on ties heartbeats
+  sort before payloads (~TriggerZipper.hpp:231-233~). Identity = subsystem plus id of
+  ~origin~ (~:48-52~).
+- Drain policy: output the heap top only when the queue is "complete", meaning every
+  known stream other than the top's has at least one queued element
+  (~zipper.hpp:261-339~). With ~max_latency_ms > 0~ (~drain_prompt~) a stream that has
+  been silent (wall clock since ~last_seen~) for longer than the max latency is treated as
+  represented, which bounds latency (~:300-327~). With ~max_latency_ms == 0~
+  (~drain_waiting~) it waits indefinitely (~TriggerZipper.hpp:273-282~).
+  ~cardinality~ = expected stream count; ~tolerate_incompleteness~ and
+  ~completeness_tolerance~ allow k-1 completeness (~zipper.hpp:330-335~;
+  schema ~TRG@v4:schema/trigger/triggerzipper.jsonnet:19-27~).
+- *Late data*: ~feed()~ rejects a node whose ordering is below the last drained
+  ~origin~ (~zipper.hpp:149-153~). The zipper counts and warns "tardy" sets and drops them
+  (~TriggerZipper.hpp:235-244~).
+- On output the zipper re-stamps ~origin.id = element_id~ and a fresh ~seqno~
+  (~TriggerZipper.hpp:255-258~).
+
+ *Consuming sets: ~TriggerGenericMaker~* (header still in develop at
+~TRG/src/trigger/TriggerGenericMaker.hpp~, but nothing includes it: dead code).
+
+- ~TimeSliceInputBuffer~ (~TRG@v4:src/trigger/TimeSliceInputBuffer.hpp:23-77~) groups
+  consecutive input Sets with equal ~start_time~ (the zipped parts of one slice). A Set
+  with a different ~start_time~ closes the slice. The slice is concatenated and
+  *sorted by ~time_start~* (~:74~) before being fed object by object to the maker.
+  Mismatched ~end_time~ in one slice gives an ~InconsistentSetTimeError~ warning (~:66-68~).
+- Payload input: warn ~OutOfOrderSets~ if ~start_time~ goes backwards, but still process
+  it (~TriggerGenericMaker.hpp:338-342~).
+- Heartbeat input (~:351-389~): flush the input buffer (fatal ~OutOfOrderSets~ if the
+  buffered ~end_time > heartbeat.start_time~, ~:362-365~), process it, then
+  *call ~maker->flush(in.end_time, elems)~* (~:383~), and forward a heartbeat to the
+  output buffer. This was the only caller of triggeralgs ~flush()~.
+- Set-to-bare output (TC maker): the heartbeat flushes the input buffer and the maker but
+  does not propagate (~:526-544~).
+
+ *Producing sets: ~TimeSliceOutputBuffer~* (~TRG@v4:src/trigger/TimeSliceOutputBuffer.hpp~).
+This is the closest DAQ analogue to the proposed coverage:
+
+- Output windows are *aligned to multiples of ~window_time~*
+  (default 625 000 ticks = 10 ms, ~:51~; config "Windows start at a multiple of this
+  value", ~TRG@v4:schema/trigger/triggeractivitymaker.jsonnet:16-19~). The first window
+  start is ~floor(first.time_start / W) * W~ (~:63-67~).
+- A payload TASet has ~start_time = k*W~, ~end_time = (k+1)*W~ (~:154-157~) and contains
+  the objects with ~start <= time_start <= end~ (~:158-166~). Both ends are inclusive,
+  so an object exactly on a boundary goes into the earlier window.
+- *Window closing is data-time driven*: ~ready()~ when
+  ~largest_seen_time - (next_window_start + W) > buffer_time~ (~:118-125~), where
+  ~largest_seen_time~ is updated by both objects and heartbeats (~:74-76, 98-100~).
+  There is no wall-clock timeout.
+- *Late objects*: an output object with ~time_start < next_window_start~ is dropped with
+  ~TardyOutputError~ (~:69-71~); same for late heartbeats (~:90-92~).
+- Heartbeats must be *aligned* (~start_time % W == 0~) or are dropped with
+  ~UnalignedHeartbeat~ (~:93-95~). Heartbeats are zero-duration, live at window
+  boundaries, and are emitted before the window that starts at the same time (~:137-152~).
+  (Readout heartbeats from ~TPCTPRequestHandler~ were not aligned, so after the TA maker
+  they would have been dropped. This is an observation from the code; I did not see it
+  documented.)
+- *Empty payload windows are not emitted*: only heartbeats or non-empty payload Sets are sent
+  (~TriggerGenericMaker.hpp:409-424~). "No news" is therefore conveyed only by heartbeats.
+- At stop, ~drain(true)~ drops buffered output because it is "stale and will cause tardy
+  warnings from the zipper downstream" (~TriggerGenericMaker.hpp:193-201~).
+
+** v5 / develop pipeline: no sets, no heartbeats, no coverage
+Commit ~f0edce8~ (2024-02-17, "use the readoutlibs data structures for the creation of
+modules with latency buffer, request handler and processor") deleted the zippers, the
+TimeSlice buffers, the TA/TC maker modules, the heartbeat maker, TCBuffer and
+ModuleLevelTrigger. Develop modules (~TRG/CMakeLists.txt:61-66~):
+~DataSubscriberModule~, ~TriggerDataHandlerModule~, ~FixedTimeTCMakerModule~,
+~RandomTCMakerModule~, ~MLTModule~, ~TPReplayModule~.
+
+Flow:
+
+#+begin_example
+TPG (fdreadoutlibs) --vector<TPTypeAdapter> per (readout unit, plane)--> TriggerDataHandlerModule[TPProcessor]
+   --TA (bare, one message per TA)--> TriggerDataHandlerModule[TAProcessor]
+   --TC (bare)--> TriggerDataHandlerModule[TCProcessor] --TriggerDecision--> MLTModule --> DFO
+#+end_example
+
+- *TP producer*: ~TPCEthFrameProcessor::find_tps~ (~FDR/include/fdreadoutlibs/detail/TPCEthFrameProcessor.hxx:719-774~)
+  appends TPs per plane in the order the TPG emits them, which is the order hits /close/,
+  not sorted by ~time_start~. It sends a plane's vector when a frame-count or TP-count
+  limit is reached (~:749-771~; config ~:170-177~). Each sink corresponds to one plane
+  (~:135-138~). The batch carries no time interval, so an empty batch is never sent
+  (~:758-760~). A failed non-blocking send drops the batch with a warning (~:765-767~).
+- *Data handler*: ~TriggerDataHandlerModule::create_readout~ builds a
+  ~TriggerDataHandlingModel<Adapter, RequestHandler, SkipListLatencyBuffer, Processor, InputType>~
+  for TP, TA and TC (~TRG/plugins/TriggerDataHandlerModule.cpp:64-131~). Every stage
+  therefore has a time-indexed *latency buffer* (skip list ordered by ~operator<~:
+  TP ~(time_start, channel)~ ~TriggerPrimitiveTypeAdapter.hpp:25-28~; TA
+  ~(time_start, channel_start)~ ~TAWrapper.hpp:44-48~; TC ~(time_start, type)~
+  ~TCWrapper.hpp:43-44~). The buffer serves DataRequests for TP/TA/TC fragments by time
+  window.
+- ~transform_payload~ keeps only the objects: a ~TPSet~ input is reduced to its
+  ~objects~ and ~type/start_time/end_time/seqno~ are discarded
+  (~TRG/include/trigger/detail/TriggerDataHandlingModel.hxx:20-39~). A heartbeat TPSet
+  becomes zero TPs.
+- *Algorithm invocation*: ~TPProcessor::conf~ registers one postprocess task per TA
+  algorithm (~TRG/src/TPProcessor.cpp:100-110~). ~find_ta~ calls ~taa->operator()(tp, tas)~
+  for every TP and sends each TA immediately (~:152-175~). The same pattern is used for TA→TC
+  (~TRG/src/TAProcessor.cpp:101-107, 150-172~). Tasks run in arrival order, not latency-buffer
+  sort order (unverified; this is TaskRawDataProcessorModel in datahandlinglibs).
+- *Multiple inputs*: no zipper. A TAProcessor fed by several TPProcessors gets their TAs
+  interleaved by network arrival. There is no merge-sort and no completeness or watermark
+  logic. Only the latency buffer is time sorted, for requests.
+- *~flush()~ is never called in develop.* The only callers are in the dead
+  ~TriggerGenericMaker.hpp:383,544~ (grep over ~TRG~). An algorithm's open window is
+  emitted only when a later input closes it.
+- *TPSet still exists in develop* for the TP request handler's periodic transmission
+  (~TRG/src/TPRequestHandler.cpp:49-121~, e.g. for TP-stream recording) and for
+  ~DataSubscriberModule~ with input type "TPSet" (~TRG/plugins/DataSubscriberModule.cpp:83-88~).
+  The trigger chain itself ignores the set metadata.
+- Ordering checks: no assertion on input time order in ~trigger~ develop. Latency
+  monitoring (~TRG/include/trigger/Latency.hpp:79-85~) records only
+  ~wallclock_now - data_ts * 16 ns~, as two opmon gauges, ~latency_in~ and ~latency_out~
+  (~TPProcessor.cpp:155-164~).
+- Dropped outputs: every inter-stage send is ~try_send(..., s_no_block)~. On failure there
+  is a warning and a counter (~TADropped~ ~TPProcessor.cpp:165-167~, ~TCDropped~
+  ~TAProcessor.cpp:163-165~).
+
+** TC → TD in develop: wall-clock windows (no heartbeat)
+~TCProcessor~ (~TRG/src/TCProcessor.cpp~, header ~TRG/src/trigger/TCProcessor.hpp:123-146~):
+
+- Each TC either merges into an overlapping ~PendingTD{contributing_tcs, readout_start, readout_end, walltime_expiration}~
+  or starts a new one (~add_tc~ ~:393-461~).
+  Overlap is tested on readout windows (~check_overlap~ ~:486-495~). Merging extends
+  the window and resets ~walltime_expiration = now + buffer_timeout~ (~:419-438~).
+  With ~ignore_overlapping_tcs~, an overlapping TC is dropped instead (~:409-415~).
+- *A pending TD closes on wall-clock timeout* (~steady_clock~ ms, ~get_ready_tds~
+  ~:497-516~) or when the readout window reaches ~td_readout_limit~ (~:537-547~).
+  A sender thread polls every 100 µs (~:343-360~). Data time and heartbeats play no part.
+- TC types can be ignored (~:269-281~). Trigger bitwords are AND-masks over TC-type bits
+  (~:585-618~). Pending TDs are discarded at stop (~:85-88, 549-561~).
+- ~m_send_timed_out_tds~ is read from config (~:137~) but never used in develop. In v4 it
+  decided whether a TD overlapping an already-sent TD was sent or dropped
+  (~TRG@v4:plugins/ModuleLevelTrigger.cpp:480-500~).
+- v4 ~ModuleLevelTrigger~ had the same wall-clock ~buffer_timeout~ logic
+  (~TRG@v4:plugins/ModuleLevelTrigger.cpp:431-500, 601-646~), so *TD formation never
+  used heartbeats in either generation*.
+
+** Summary: "each port emits in time order"?
+- v4: per-stream time order was *expected but not guaranteed*. It was enforced
+  by sorting inside a slice (TimeSliceInputBuffer), by the zipper merge (k-way on
+  ~start_time~), and by windowed output buffers. Warnings fired on violation
+  (~OutOfOrderSets~, ~TardyOutputError~, zipper "tardy") and late items were *dropped*.
+  Heartbeats were watermarks (start_time = "nothing earlier will come") and drove both
+  ~maker->flush()~ and output-window closure.
+- develop: the only ordering guarantee is the latency buffer's sort, which matters for
+  data requests. Algorithms see arrival order and assume time order themselves (below).
+  There are no watermarks or heartbeats, and windows close on wall clock (TD) or on the
+  next input (TA/TC algorithms).
+
+* triggeralgs develop base classes and algorithm inventory
+** ~TriggerActivityMaker~ (~TA/include/triggeralgs/TriggerActivityMaker.hpp~)
+- Non-virtual ~operator()(tp, out)~ runs ~preprocess(tp)~, then ~process(tp, out)~ (pure
+  virtual), then ~postprocess(out)~ (~:32-44, 52~). The dunetrigger copy has only a pure
+  virtual ~operator()~ and an empty ~configure~ (~DTA/include/triggeralgs/TriggerActivityMaker.hpp:29-31~).
+- ~preprocess~: drops a TP when ~samples_over_threshold > m_max_samples_over_threshold~
+  (~:66-73~). Config key ~max_samples_over_threshold~, default ~UINT32_MAX~ (~:120-121, 136~).
+- ~postprocess~: prescale by erasing all but every Nth TA, counted globally
+  (~m_ta_count % m_prescale~, ~:85-108~). Config key ~prescale~, default 1 (~:118-119, 131~).
+- ~flush(timestamp_t until, out)~: virtual, empty by default (~:110~).
+- ~std::atomic<uint64_t> m_data_vs_system_time, m_initial_offset~ (~:127-128~): not used
+  by the base. Only ~TCMakerPrescaleAlgorithm.cpp:39~ writes it, for opmon.
+- Not present: no bypass, no inputs-storage switch, no time-order assertion, no latency
+  code (latency lives in ~trigger~).
+- Derived classes that override ~configure~ must call the base to get prescale and max-SOT
+  (develop DBSCAN does, ~TA/src/TAMakerDBSCANAlgorithm.cpp:78~). Overriding
+  ~preprocess~ bypasses the max-SOT cut (SWIFT does, ~TA/src/TAMakerSWIFTAlgorithm.cpp:36-41~).
+
+** ~TriggerCandidateMaker~ (~TA/include/triggeralgs/TriggerCandidateMaker.hpp~)
+- Same preprocess, process, postprocess structure (~:32-44~). ~preprocess~ always passes (~:63-66~).
+  Prescale postprocess (~:78-99~), empty ~flush~ (~:100~).
+- ~configure~: ~prescale~, and *~tc_type_name~ is mandatory*. It is mapped through
+  ~string_to_trigger_candidate_type~, and ~kUnknown~ throws ~InvalidConfiguration~ (~:101-127~).
+  The output type is in ~m_tc_type_out~ (~:138~). Example: the Supernova TC now sets
+  ~tc.type = m_tc_type_out~ instead of hard-coding ~kSupernova~ (~TA/src/TCMakerSupernovaAlgorithm.cpp:34~).
+
+** Time-ordering assumptions in algorithms (develop)
+- SWIFT: "assumes TPs are strictly time-ordered" (~TA/src/TAMakerSWIFTAlgorithm.cpp:53~).
+  It uses aligned windows ~floor(t/W)*W~ (~:63~) and ~time_end = window_start + W~ (~:206~),
+  so its TA extent equals its window, which is effectively a coverage. It implements ~flush~ (~:238-242~).
+- BundleN: "Expect that TPs/TAs are inherently time ordered" (~TAMakerBundleNAlgorithm.cpp:54~, ~TCMakerBundleNAlgorithm.cpp:39~).
+- DBSCAN: "requirement that the hits are passed in time order" (~TA/include/triggeralgs/dbscan/dbscan.hpp:54-56~).
+  The TA maker has an out-of-order guard ~if (time_start < m_prev_timestamp) return;~
+  (~TA/src/TAMakerDBSCANAlgorithm.cpp:27-30~), but ~m_prev_timestamp~ is never updated
+  (only declared at ~dbscan/TAMakerDBSCANAlgorithm.hpp:31~), so the guard does nothing.
+- ADCSimpleWindow README: "monitors incoming TPs (which are time ordered)".
+- ~TAWindow~: "list time ordered by time_start" (~TA/include/triggeralgs/TAWindow.hpp:27~).
+- Supernova TA ~flush~ emits the current activity (~Supernova/TAMakerSupernovaAlgorithm.hpp:52~).
+  HorizontalMuon TC and MichelElectron TC also define ~flush~ (~TCMakerHorizontalMuonAlgorithm.cpp:197~,
+  ~TCMakerMichelElectronAlgorithm.cpp:193~).
+
+** Algorithm inventory: develop vs dunetrigger copy
+Develop TA makers: ADCSimpleWindow, BundleN, ChannelAdjacency, ChannelDistance, DBSCAN,
+HorizontalMuon, MichelElectron, PlaneCoincidence, Prescale, *ProtoDUNEBSMWindow*,
+SWIFT, Supernova. Develop TC makers: the same list without SWIFT. There is also
+~TDMakerSupernovaAlgorithm~.
+
+ *In develop but not in the dunetrigger copy: ~ProtoDUNEBSMWindow~ (TA and TC)*
+(~TA/src/TAMakerProtoDUNEBSMWindowAlgorithm.cpp~, ~TCMakerProtoDUNEBSMWindowAlgorithm.cpp~,
+plus treelite BDT models under ~TA/src/ProtoDUNEBSMWindow/~; added 2026-03, enum values
+TA 12 / TC 39). Everything else exists in both, renamed upstream from
+~TriggerActivityMakerX~ to ~TAMakerXAlgorithm~, except SWIFT, which keeps class name
+~TriggerActivityMakerSWIFT~ in both.
+
+Differences in the SNB-relevant makers (diffs ignoring include paths):
+
+- *Supernova TA/TC*: TPv1→v2 field changes only (~time_over_threshold~ becomes
+  ~samples_over_threshold*32~, ~time_peak~ becomes ~samples_to_peak*32 + time_start~),
+  ~WHOLE_DETECTOR~ becomes ~g_whole_detector~, and the TC type comes from config. The logic is
+  unchanged. The Supernova TC still sets ~time_start = time - 500'000'000~ (8 s at 62.5 MHz;
+  the comment says 10 s), ~time_end = activity.time_end~, and fires on
+  ~activity.inputs.size() > m_hit_threshold~ (~TA/src/TCMakerSupernovaAlgorithm.cpp:19-36~).
+- *DBSCAN TA*: TPv2 units, base ~configure~ now chained, ~channel_t~ casts. Logic unchanged.
+- *SWIFT TA* (dunetrigger ~fad3ea7~ 2026-09-16 vs develop):
+  - ~preprocess~: dunetrigger keeps a TP only if ~adc_peak > min AND tot > min~. Develop
+    rejects only if ~adc_peak < min AND sot < min~, i.e. keeps if either passes
+    (~TA/src/TAMakerSWIFTAlgorithm.cpp:36-41~).
+  - Thresholds: develop uses ~>=~ for accept/inspect, dunetrigger uses ~>~.
+  - Peak time: develop sets ~time_peak = tp.time_start~, dunetrigger uses ~tp.time_peak~.
+  - Algorithm enum: develop sets ~kSWIFT~, dunetrigger ~kUnknown~.
+  - Reset: dunetrigger resets with ~inputs.clear()~ and develop reassigns ~TriggerActivity()~.
+- The dunetrigger memory note already records that dunetrigger feeds TC makers TAs with
+  empty ~inputs~, which breaks Supernova/ChannelDistance/DBSCAN/MichelElectron/
+  PlaneCoincidence TCs (~notes/memory/dune-trigger.md~).
+
+* How a TD addresses data
+** TD construction (develop ~TCProcessor::create_decision~, ~TRG/src/TCProcessor.cpp:292-341~)
+- ~trigger_timestamp = time_candidate~ of the earliest contributing TC (~:295, 305, 518-535~).
+- ~trigger_number~ and ~run_number~ are left 0 and filled by the MLT (~:303-304~).
+- ~readout_type = kLocalized~ (~:306~).
+- ~trigger_type~ = a 64-bit bitword with one bit per contributing TC type (~:308-311~).
+- ~components~ holds one ~ComponentRequest{component = SourceID, window_begin, window_end}~
+  per link (~create_request_for_link~ ~:674-688~). The links are every
+  ~mandatory_source_ids~ and ~enabled_source_ids~ entry from config (~:117-125~), plus
+  group links (~:327-332~). The *same window ~[readout_start, readout_end]~ goes to every link* (~:323-325~).
+- Per-TC-type window (~TCReadoutMap~, ~parse_readout_map~ ~:620-635~):
+  ~readout_start = time_candidate - time_before~, ~readout_end = time_candidate + time_after~
+  (~:452-454~). If the type has no map entry, the window is the TC's own
+  ~[time_start, time_end]~ (~:455-458~). Merged TCs take the union of windows (~:425-436~).
+- Optional ROI mode: pick link groups at random, weighted by probability, with
+  ~trigger_timestamp ± time_window~ (~:773-807~). Group-links parsing is a TODO, so groups are
+  empty (~:127-131~).
+- HSI path: ~HSISourceModel~ builds TCs with ~time_start = ts - time_before~,
+  ~time_end = ts + time_after~ per signal (~TRG/src/trigger/HSISourceModel.hpp:103, 159-160~).
+  ~RandomTCMakerModule~ does the same (~TRG/plugins/RandomTCMakerModule.cpp:105-106, 212~).
+
+** MLT (~TRG/plugins/MLTModule.cpp~)
+- In conf, builds ~SourceID → Subdetector~ from the session's geo-id map
+  (~:98-114~) and a per-subdetector ~(time_before, time_after)~ map
+  (~subdetector_readout_map~, ~:116-136~).
+- On each TD (~trigger_decisions_callback~, ~:319-410~): set ~run_number~ and
+  ~trigger_number~ (~:333-334~). For each ~kDetectorReadout~ component whose subdetector
+  has an entry, *overwrite ~window_begin/window_end = trigger_timestamp ∓ before/after~*
+  (~:336-351~). So the final per-source window can be per-subdetector rather than per-TC-type.
+- If paused or the DFO is busy (~TriggerInhibit~ callback ~:412-420~), the TD is counted
+  and dropped (~:391-406~). Otherwise it is sent to every TD output (~:355-379~).
+- The trigger number only increments on a successful send (~:379~).
+
+** TD → data
+- ~ComponentRequest~ (~DAQDF/include/daqdataformats/ComponentRequest.hpp:25-38~, version 2):
+  ~SourceID component; timestamp_t window_begin; timestamp_t window_end;~. The
+  ~TriggerRecordHeaderData~ records ~trigger_timestamp~, ~trigger_type~,
+  ~num_requested_components~ (~DAQDF/include/daqdataformats/TriggerRecordHeaderData.hpp:44-54~),
+  followed by the ComponentRequests.
+- The DFO/dataflow turns each ComponentRequest into a DataRequest to the data handler that
+  owns that SourceID. The handler answers from its latency buffer by time window
+  (~get_fragment_pieces(start, end)~, as used in ~TPRequestHandler.cpp:81~). Trigger's
+  own TP/TA/TC data handlers also have SourceIDs, so TP/TA/TC fragments are read out by the
+  same mechanism. Dataflow internals are not in refs (unverified).
+- The relationship is *time window × SourceID list*. There is no channel-level ROI and
+  no reference to which TPs/TAs caused the trigger, except the TC→TA ~inputs~ stored in TC
+  fragments and the TA→TP ~inputs~ stored in TA fragments.
+
+* Implications for the WCT contract
+1. The proposed ~[begin, end)~ coverage plus empty-set heartbeat is *essentially DAQ v4's
+   ~Set<T>~*, but cleaner. v4 mixed meanings: payload TPSets from readout carried the
+   first/last TP time while heartbeats carried the window; heartbeats were zero-length
+   watermarks while TASet payloads carried aligned ~[kW, (k+1)W]~ windows inclusive at both
+   ends; empty payload windows were never sent. A single half-open coverage on every set,
+   empty or not, removes these special cases.
+2. DAQ v4 heartbeat semantics are "no future set will have ~start_time~ < T". In WCT
+   terms, a set with coverage ~[b, e)~ asserts that nothing with time < e remains for that
+   stream. That justifies calling ~maker->flush(e)~ and closing output windows, which is
+   exactly what v4 did (~TriggerGenericMaker.hpp:383~).
+3. For merging N streams, v4's zipper (min over streams, wait for every stream to be
+   represented, optional wall-clock staleness) maps to: output watermark = min over inputs
+   of their last coverage end. WCT has no wall clock, so the latency escape is not needed.
+4. Late or out-of-order data: v4 dropped it with a warning; develop does not detect it.
+   TPs from the DAQ TPG arrive in hit-close order, not ~time_start~ order (section 2.3), so
+   a TA node that feeds triggeralgs should sort within a coverage window, as
+   ~TimeSliceInputBuffer~ did (~:74~).
+5. TD formation in the DAQ is wall-clock based (~buffer_timeout~). In WCT the
+   data-time equivalent is: close a pending TD once the TC watermark passes
+   ~readout_end + buffer~ (in ticks).

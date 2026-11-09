@@ -1,0 +1,355 @@
+#+title: trig: truth matching, efficiency and purity
+#+include: ../../docs/include-topic.org
+
+Research notes (2026-10-29) on how dunetrigger associates simulation truth to trigger objects, what it records, and what WCT needs to measure trigger efficiency and purity for SNB activity.
+
+Sources read (read-only):
+
+- dunetrigger ~develop~ b65e250 (2026-10-27), at
+  ~topics/snbp/source/dunetrigger/dunetrigger/~. Paths below are relative to that
+  directory unless prefixed.
+- larwirecell ~features/wcls-wires~ 74edbf5, at
+  ~branches/larwirecell/features/wcls-wires/larwirecell/Components/~ ("LWC/").
+- WCT ~snbp~ b7bd2a1a, at ~branches/wire-cell-toolkit/snbp/~ ("WCT/").
+
+Short version:
+
+- Truth reaches a TP only through ~sim::SimChannel~ IDEs. The TP's channel is
+  matched, and its sample window ~[time_start/32, time_start/32 + ToT]~ (shifted
+  by a per-view empirical offset) is matched to the SimChannel TDCs. The IDEs
+  are grouped by G4 track. The track with the most electrons is the "primary
+  track", and its MCTruth block gives the generator label.
+- Only stand-alone TPs get truth. TAs and TCs get *no* truth. TPs re-dumped
+  as members of a TA are written with default (invalid) truth rows. The tree
+  keeps no TP↔TA link that could carry truth over.
+- The code computes no efficiency or purity, and no script does either. The
+  only "signal" definition anywhere is in ~scripts/plot_event.py~: a TP is
+  signal if ~bt_numelectrons != 0~, and its origin is ~bt_primary_track_id~
+  looked up in the MCTruth block / generator.
+- WCT has no SimChannel equivalent. Depo ids survive drifting (via ~prior()~),
+  but every ductor and splat loses the depo→(channel,tick) mapping. A new truth
+  node is needed: in effect ~DepoFluxWriter~ without art.
+
+* Truth association to TPs
+** Inputs and configuration
+- ~TriggerAnaTree~ consumes all ~std::vector<sim::SimChannel>~, picked by the
+  regex ~simchannel_tag~ (default ~tpcrawdecoder:simpleSC~, common fcl
+  ~tpcrawdecoder:simpleSC.*~): ~TriggerAnaTree_module.cc:75,289-295~,
+  ~fcl/triggerana_common.fcl:51~.
+- Backtracking is enabled by ~tp_backtracking~ (~.cc:71~, true in
+  ~triggerana_common.fcl:34~).
+- Per-TP-algorithm, per-view tick offsets come from ~bt_window_offsets~
+  (~.cc:79-83~). The values are empirical:
+  - HD SimpleThreshold U=8, V=4, X=-3; HD AbsRunningSum U=-1, V=-5, X=-5
+    (~triggerana_common.fcl:36-49~).
+  - VD 1x8x6 SimpleThreshold U=8, V=1, X=-7
+    (~fcl/vd/triggerana_vd_1x8x6_simpleThr.fcl:22-28~).
+  - The offsets are stored in the output ~info~ JSON (~.cc:142-148,620~).
+- One ~MiniBackTracker~ is built per SimChannel collection and mapped to each
+  TPCSet (APA/CRU set) the collection covers. A TPCSet covered by two
+  collections throws; so does a TP on a TPCSet with no SimChannels
+  (~.cc:304-386, 501-511~). This matches the per-anode ~simpleSC<k>~ products
+  that the WCT multi-sim makes.
+
+** MiniBackTracker (~TriggerAna/MiniBackTracker.hh~)
+It is deliberately small: a channel-sorted ~art::Ptr<SimChannel>~ vector with
+binary search (~findSimChannelPtr~, ~:29-35~, sort ~:63-77~), plus an
+electron-weighted mean position of a set of IDEs (~simIDEsToXYZ~, ~:39-58~;
+throws if the IDEs hold no electrons). It does no time or track logic itself.
+
+** Matching criteria (~match_simides_to_tps~, ~.cc:720-762~)
+1. The offset is picked by ~tp_tool_type~ (read from the TP producer's
+   ~tpalg.tool_type~ provenance, ~.cc:468-471~) and the TP view (U/V/W). An
+   unknown tool falls back to 0 (~.cc:725-743~).
+2. ~sample_start = tp.time_start / ADC_SAMPLING_RATE_IN_DTS~, where
+   ~ADC_SAMPLING_RATE_IN_DTS = 32~ (~TriggerSim/TPAlgTools/TPAlgTPCTool.hh:15~).
+   ~sample_end = sample_start + samples_over_threshold~. Both are shifted by
+   the offset and clamped at ≥ 0 (~.cc:744-749~).
+3. ~samples_over_threshold = time_over_threshold/32~ (~.cc:775~).
+4. The SimChannel is looked up by exact channel; none means no truth (a
+   noise-only TP) (~.cc:755-759~).
+5. ~SimChannel::TrackIDsAndEnergies(sample_start, sample_end)~ returns the IDEs
+   in that TDC range (~.cc:760~). In LArSoft this aggregates IDEs per trackID
+   over an inclusive TDC range. lardataobj source is not available locally, so
+   this is not cited.
+6. There is no channel tolerance (exactly one channel) and no extra time
+   padding beyond the offset. Neighbour-channel induction is not credited.
+
+** Tick and time conventions
+- In emulation, a TP's ~time_start~ is
+  ~start_time + (i_t - tover)*32~, where ~i_t~ is the RawDigit sample index
+  (~TriggerSim/TPAlgTools/TPAlgTPCSimpleThreshold.hh:141-143~; the same in
+  RunningSum ~:162~ and AbsRunningSum ~:190~).
+- ~start_time~ is the ~raw::RDTimeStamp~ associated with the RawDigit, else
+  ~default_timestamp~ (default 0) (~TriggerSim/TriggerPrimitiveMakerTPC_module.cc:78,116-138~).
+  The WCT/wcls sim chain does not appear to make RDTimeStamp associations (no
+  hit for ~RDTimeStamp~ in LWC/), so ~start_time = 0~.
+- The backtracker divides ~time_start~ by 32 *without subtracting
+  ~start_time~* (~.cc:744~). This only works because ~start_time~ is 0, or a
+  multiple of 32 aligned with TDC 0.
+- So "DTS ticks" in simulation are just ~32 × sample index~. The waveform tick
+  is the sim tick (500 ns). The real DTS clock (62.5 MHz, 16 ns) would make
+  32 ticks equal 512 ns.
+  - Nothing in the code converts 500↔512 ns.
+  - Inside the sim, sample index ≡ SimChannel TDC, so matching is consistent.
+  - Turning TP ~time_start~ into physical time with 16 ns/DTS would be off by
+    2.4%.
+  - ~scripts/plot_event.py:52~ labels the axis "DTS Ticks".
+- The SimChannel TDC comes from larwirecell ~DepoFluxWriter~:
+  - ~tdc = tbin + toffset_bin + m_tick_offsets[iplane]~ (~LWC/DepoFluxWriter.cxx:303~).
+  - The tick defaults to 0.5 µs (~:44,105~).
+  - Time is the depo's nominal arrival at the collection plane:
+    ~depo->time() + origin/speed~ (~:203~).
+  - Gaussian diffusion is binned in tick and pitch (~:276-306~).
+  - Per-plane offsets include ~-reference_time~ (~:136-152~).
+- So the TDC is the /charge-arrival/ tick. It has no field-response or
+  electronics shape and no TP-algorithm latency. The per-view
+  ~bt_window_offsets~ absorb that difference (induction bipolar vs collection
+  unipolar, peaking time, filter delay). They depend on the TP algorithm and
+  the detector.
+
+** Per-TP truth computed (~populate_backtracking_info~, ~.cc:782-857~)
+- IDEs with ~trackID == 0~ are dropped (~:805-810~).
+- Each IDE's trackID is mapped through
+  ~ParticleInventoryService::TrackIdToParticle_P(trackID)->TrackId()~
+  (~:823~). This turns negative (EM-shower-daughter) IDs into their saved
+  ancestor. Electrons and energy are summed per mapped track and in total
+  (~:822-828~).
+- ~bt_primary_track_id~ is the track with the *most electrons*, not the most
+  energy (~:830-833~).
+  - ~bt_primary_track_numelectron_frac~ and ~bt_primary_track_energy_frac~ are
+    that track's share of the TP's electrons and energy (~:842-843~).
+  - These are per-TP purity measures, but the denominator is truth only. Noise
+    or ADC fraction is not considered.
+- ~bt_x,y,z~ is the electron-weighted mean of all IDEs, including trackID 0
+  (~:845~). ~bt_primary_*~ is the same for the primary track's IDEs only
+  (~:846~).
+- ~bt_truth_block_id = trkid_to_truth_block.at(primary)~ and
+  ~bt_generator_name = truth_id_to_gen.at(block)~ (~:855-856~).
+
+** Generator origin
+- Each ~std::vector<simb::MCTruth>~ handle's *producer module label* is the
+  generator name (~.cc:206~). So origin is identified by fcl module label,
+  e.g. a MARLEY module vs one radiological module per isotope. Nothing reads
+  the MCTruth ~Origin()~ enum or a process.
+- MCParticle→block uses ~art::FindManyP<simb::MCParticle>(mctruthHandle, e, "largeant")~.
+  The G4 label is hard-coded (~.cc:210-218~).
+- ~truth_block_counter~ is incremented per MCTruth (~.cc:274~). But
+  ~truthBlockId_to_generator_name~ is filled once per *handle*, before the
+  inner loop (~.cc:208~).
+  - *Latent bug*: if a handle has more than one MCTruth, the later block ids
+    have no generator entry, and ~.at()~ at ~:856~ throws.
+  - It also requires ~dump_mctruths~ to be true; otherwise the maps are empty
+    and ~.at()~ throws.
+- ~mcparticles.truth_block_id~ uses ~.at(part.TrackId())~ and throws for an
+  MCParticle with no MCTruth assn (~.cc:425~).
+
+** TA and TC truth
+- There is none.
+- The TA tree dumps the ~TriggerActivityData~ fields only (~.cc:664-682~).
+- The member TPs ("~<tag>inTAs~" tree) are rewritten with
+  ~tpbt_writer.push_back()~ of a default row. The comment says "backtracking
+  not computed for association TPs" (~.cc:559-569~).
+- The TC tree holds TC fields only, plus a "~<tag>inTCs~" TA tree with
+  ~TCnumber~ (~.cc:592-609, 681-682~).
+- To give a TA truth today, the analyst must re-join the TP-in-TA rows to the
+  stand-alone backtracked TP rows on (event, channel, time_start, adc_integral).
+  That is the same key the TA maker uses to make its Assns:
+  ~sameTP~, ~TriggerSim/TriggerActivityMakerTPC_module.cc:118-120,237-255~.
+  TCs→TAs match on (detid, channel_peak, time_peak, adc_integral)
+  (~TriggerCandidateMakerTPC_module.cc:106-108~).
+- ~TriggerTPCInfoDisplay~ and ~TriggerTPCInfoComparator~ read only TP/TA/TC
+  (and DAQ copies, for offline-vs-online comparison). They touch no
+  SimChannel or MC truth (~TriggerTPCInfoComparator_module.cc:152-172~,
+  ~TriggerTPCInfoDisplay_module.cc:190-206~).
+
+* What is written (TFileService, directory ~triggerAna/~)
+The granularity is mixed. Most trees have one entry per event with
+~std::vector~ branches, one element per row (~VectorFieldsBuffer.hh:58-99~).
+The TA and TC trees have one entry per object.
+
+| tree                           | entry    | branches                                                                                                                                                                                                                                                                                      | cite                                             |
+|--------------------------------+----------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+--------------------------------------------------|
+| ~mctruths~                     | event    | event, run, subrun; per particle: pdg, process, status_code, block_id, truth_track_id, generator_name, x,y,z,t, px,py,pz,p, energy, kinetic_energy                                                                                                                                            | ~.hh:70-89~, ~.cc:89-91,249-273~                 |
+| ~mcneutrinos~                  | event    | block_id, generator_name, nupdg, leptonpdg, ccnc, mode, interactionType, target, hitnuc, hitquark, w, x, y, qsqr, pt, theta                                                                                                                                                                   | ~.hh:92-111~, ~.cc:219-240~                      |
+| ~mcparticles~                  | event    | pdg, generator_name (MCParticle producer label, normally ~largeant~, not the generator), status_code, g4_track_id, mother, truth_block_id, start/end xyzt, p, E, KE, *edep, numelectrons* (SimChannel IDE sums for +trackID), *shower_edep, shower_numelectrons* (sums for −trackID), process | ~.hh:114-141~, ~.cc:411-450~, sums ~.cc:321-322~ |
+| ~simides~                      | event    | channel, timestamp (= TDC), numelectrons, energy, x,y,z, trackID, origTrackID, readout_plane_id, readout_view, detector_element (TPCSet)                                                                                                                                                      | ~.hh:144-159~, ~.cc:348-361~                     |
+| ~simide_summary~               | event    | total_visible_energy, total_numelectrons (collection view only); per (ROP, TPCSet): energy_per_tpc, numelectrons_per_tpc                                                                                                                                                                      | ~.hh:162-178~, ~.cc:324-328,391-407~             |
+| ~event_summary~                | event    | counts of mctruths/mcparticles/mcneutrinos/simides; tot_visible_energy_rop0..3, tot_numelectrons_rop0..3 (all views, by ROP)                                                                                                                                                                  | ~.hh:54-67~, ~.cc:331-346,524-527~               |
+| ~TriggerPrimitives/<tag>~      | event    | version, flag, detid, channel, samples_over_threshold, time_start (DTS), samples_to_peak, adc_integral, adc_peak, readout_plane_id, readout_view, TPCSetID; plus ~bt_*~ (section 1.5) if backtracking is on                                                                                   | ~.hh:181-223~, ~.cc:484-519,625-650~             |
+| ~TriggerPrimitives/<tag>inTAs~ | TA       | the same TP columns for the TA's member TPs, ~bt_*~ default, ~ta_number~                                                                                                                                                                                                                      | ~.cc:548-570~                                    |
+| ~TriggerActivities/<tag>~      | TA       | version, time_start, time_end, time_peak, time_activity, channel_start/end/peak, adc_integral, adc_peak, detid, type, algorithm                                                                                                                                                               | ~.cc:653-684~                                    |
+| ~TriggerActivities/<tag>inTCs~ | TA in TC | the same as above, plus ~TCnumber~                                                                                                                                                                                                                                                            | ~.cc:596-605,681-682~                            |
+| ~TriggerCandidates/<tag>~      | TC       | version, time_start, time_end, time_candidate, detid, type, algorithm                                                                                                                                                                                                                         | ~.cc:686-708~                                    |
+| ~info~ (TNamed JSON)           | job      | geometry name, detprop (electrons_to_adc, lifetime, readout window, drift velocity), backtracker offsets, TP tool and thresholds per tag, ~mctruth_blockid_map~ (block→generator)                                                                                                             | ~.cc:128-148,457-480,282-283,620~                |
+
+Notes:
+
+- *The TA, TC, TA-in-TC and TP-in-TA trees have no event/run/subrun
+  branches.* ~ev_sbuf.make_branches~ is not called in
+  ~make_ta_tree_if_needed~/~make_tc_tree_if_needed~ (~.cc:653-708~), unlike the
+  TP trees (~.cc:642~). Events can be recovered only by entry order. For an
+  eff/purity analysis this is a real gap.
+- There is no trigger decision (TD) and no readout product anywhere in
+  TriggerSim or TriggerAna. The chain stops at TC.
+- The tree names are the producer labels, with ~:~ replaced by ~_~
+  (~.cc:631-634~; ~fcl/README.md:34-35~).
+- The TP ~version~ is forced to 2 and the fields are converted to v2 units
+  (~.cc:770-780~).
+
+* Efficiency, purity, signal definitions
+- No efficiency or purity is computed in ~TriggerAna/~, ~TriggerTools/~ or
+  ~scripts/~. A repo-wide grep for "efficien" and "purity" hits only a TODO,
+  "Find a way to estimate the efficiency for TAs and TCs"
+  (~triggeralgs/README-DUNEDAQ.md:20~).
+- ~scripts/plot_event.py~ is the only analysis of truth:
+  - signal TP: ~bt_numelectrons != 0~; noise TP: ~== 0~ (~:37,47~);
+  - TPs are coloured by MCTruth block, by testing
+    ~abs(bt_primary_track_id) ∈ {g4_track_id of mcparticles with that truth_block_id}~.
+    The block is labelled with its ~generator_name~ (~:39-46~);
+  - it reads branches ~Event~ and ~Run~ (~:18,21,36~), but the code now writes
+    lowercase ~event~ and ~run~ (~.cc:982-985~). The script is stale.
+- ~scripts/compare_trees.py~ is a regression differ between two TriggerAnaTree
+  outputs. ~generate_hd_detsim_sample.sh~ makes an e⁻ sample. Neither is
+  relevant to eff/purity.
+- ~TriggerTools/HydraFilter_module.cc:66-112~ passes an event if any
+  ~sim::SimEnergyDeposit~ ("IonAndScint", hard-coded) with ~NumElectrons()>0~
+  has its start or end inside the active box of a TPC in the chosen TPCSet
+  (~README.md:18-33~). This is a truth-level "activity in anode" predicate,
+  the analogue of WCT ~DeposOrBust~ / ~DepoSetFilter~.
+- ~RawDigitAna~ treats a channel as a signal channel if it has any IDE
+  (~TriggerTools/README.md:40-46~).
+- Implied denominators: the trees hold true visible energy per (ROP, TPCSet)
+  (~simide_summary~), per-particle ~edep~ and ~numelectrons~, and per-event
+  totals. So the natural ones are (a) per generator block the deposited
+  energy, or per event the visible energy in an anode; and (b) for TP
+  purity, ~bt_primary_track_*_frac~. The code defines neither.
+
+* What a WCT re-implementation needs
+** Truth that exists in WCT
+- ~IDepo~ has ~time, pos, charge, energy, id, pdg, prior, extent_long/tran~
+  (~WCT/iface/inc/WireCellIface/IDepo.h:16-48~).
+- ~Drifter~ makes the drifted depo with ~prior = original~ and copies ~id()~.
+  It does *not* copy pdg or energy; these live on ~prior()~
+  (~WCT/gen/src/Drifter.cxx:182-183~). ~Scaler~ copies them from ~prior~
+  (~WCT/gen/src/Scaler.cxx:88~).
+- With wcls input, ~wclsSimDepoSetSource~ sets ~id~ to the SimEnergyDeposit
+  index, or to the G4 TrackID when ~id_is_track~ is set. pdg and energy come
+  from the SED (~LWC/SimDepoSetSource.cxx:225-256,168~).
+- Native WCT sources: ~BlipSource~ sets ~id = blip count~, with no pdg or energy
+  (~WCT/gen/src/BlipSource.cxx:200~).
+- Depo persistence keeps ~id~, ~pdg~ and the prior chain (gen/child)
+  (~WCT/aux/src/DepoTools.cxx:72-86~, ~WCT/sio/src/NumpyDepoSaver.cxx:104~).
+- *No WCT node keeps a depo→(channel, tick) map.*
+  - ~DepoTransform~, ~BinnedDiffusion~ and the ductors sum into traces.
+  - ~DepoFluxSplat~ with ~sparse:true~ emits one family of ~SimpleTrace~ per
+    depo per plane, but no depo id is attached to the trace, its tags or its
+    summaries (~WCT/gen/src/DepoFluxSplat.cxx:196-206,384-410~;
+    header ~WCT/gen/inc/WireCellGen/DepoFluxSplat.h:80-93~).
+  - ~TruthTraceID~ and ~TruthSmearer~ also make summed truth frames.
+  - The only depo→channel/tick truth with ids is larwirecell
+    ~DepoFluxWriter~, which writes art SimChannels. It shares its internals
+    with ~DepoFluxSplat~ (~LWC/DepoFluxWriter.cxx:199-306~).
+- Generator origin is not carried by an ~IDepo~. In art it comes from the
+  MCTruth module label via ~TrackID → MCParticle → MCTruth~ (section 1.6).
+
+** Proposed minimal truth carrier ("WCT SimChannel")
+Add a node, call it ~DepoFluxTruth~, an ~IDepoSet → ITensorSet~ (or a set data
+type). It would reuse ~DepoFluxSplat~'s binning (same ~tick~, window,
+~reference_time~, ~time_offsets~, ~nsigma~). It would emit sparse rows of
+~(channel, tick, depo_index_or_id, charge[, energy share])~, which is the
+IDE-equivalent of ~DepoFluxWriter.cxx:303-306~ without art.
+
+- Use the *original* depo's id and index (walk ~prior()~ as
+  ~DepoFluxWriter~ does at ~:223,229-235~), so ids map back to the input
+  depo set.
+
+- Keep a per-depo side table, ~id → (pdg, energy, original pos/time, generator/source label)~. The label could come from:
+
+  - separate depo sources per generator merged with a labelling
+    ~DepoMerger~;
+  - an id range or bit-field convention;
+  - in wcls, the SED index → TrackID → MCTruth label lookup on the art side.
+
+  This replaces ~trkId_to_truthBlockId~ and ~truthBlockId_to_generator_name~.
+
+TP truth in WCT can then copy the dunetrigger rule, with sharper internals:
+
+- Use the channel, plus ~[t_start, t_start + ToT]~ in *frame ticks*. Keep TP
+  times in WCT ~double~ time, or in the frame tbin, so there is no 32×DTS or
+  500/512 ambiguity. Convert to DTS only at DAQ-format I/O.
+
+- Keep a configurable per-plane tick offset (the ~bt_window_offsets~
+  analogue). It could be measured once in WCT, by the median of TP peak tick
+  minus truth-weighted tick. An alternative is to add a padding window.
+
+- Record per TP:
+
+  - ~truth_charge~ (total electrons);
+  - the contributor list ~[(depo_id or track/generator key, electrons)]~, or
+    at least the top contributor, its fraction, and per-generator-class
+    electron sums (signal vs each background).
+
+  Per-generator sums are what purity needs. dunetrigger's single
+  "primary track" loses mixed SNB+Ar39 TPs.
+
+TA, TC and readout truth would then be derived, not looked up:
+
+- A TA carries copies of its TPs, which is the proposed ~design.org~ choice
+  (see design.org). TA truth = the sum of member-TP
+  contributor vectors. This removes the art Assns re-join problem of
+  section 1.7.
+- A TC gets truth the same way, from its TAs.
+- A trigger decision's ~ReadoutRequest~s (anode, channel range, time range)
+  (see design.org) can be scored without the readout frame at all. The
+  "selected" charge per generator is the sum over truth rows of
+  ~(anode, channel, tick)~ inside any request. This is the right
+  denominator-compatible quantity for "fraction of SNB-interaction charge read
+  out".
+
+** Metrics this enables (definitions to fix, none exist upstream)
+- *Interaction-level efficiency*:
+  - unit: one SNB interaction (a MARLEY vertex / generator block), with the
+    depos sharing its label;
+  - numerator: the interaction is "triggered" if some TD's requests cover
+    ≥ f of its collection-view truth charge, or if some TC/TA has its label as
+    the dominant contributor;
+  - denominator: all SNB interactions whose drifted charge reaches an anode
+    (cf. ~HydraFilter~ / ~DeposOrBust~ presence). Bin it in true visible
+    energy, as ~simide_summary~ does.
+- *Purity* (two flavours):
+  - object purity: SNB charge / total truth charge per TA/TC/TD, plus the
+    fraction of objects with zero truth charge (noise-only);
+  - readout purity: the fraction of read-out (channel × tick) area or charge
+    that is SNB, vs background, vs nothing.
+- *Fake rate*: TDs per unit time per anode with no SNB contributor, in
+  background-only samples.
+
+** Implications for the readout-node interface (open decision 5)
+- Truth scoring needs per-anode bookkeeping, because truth rows and
+  ~ReadoutRequest~s are both per anode. Emitting *one frame per
+  decision×anode*, with frame ident = trigger number and a tag or
+  ~detector~ = anode, makes joining truth and readout trivial. It also
+  matches the per-anode graph and the per-anode SimChannel collections
+  (~simpleSC<k>~) that TriggerAnaTree already needs (~.cc:368-385~).
+- Whichever form is chosen, the TD and readout outputs should carry (event or
+  frame ident, trigger number, anode, channel range, time range in the same
+  time base as the truth rows). Unlike dunetrigger's TA/TC trees, every
+  persisted trigger object must carry an event/frame key (section 2).
+- The readout frame itself need not hold truth. Truth is scored from requests
+  plus truth rows. Optionally, the readout node could pass through the
+  matching truth rows as a sibling tensor, for self-contained outputs.
+
+* Gotchas to avoid when porting
+1. The divide-by-32 without subtracting ~start_time~ (~.cc:744~). This breaks
+   if RDTimeStamps are ever set.
+2. "Primary" is chosen by electrons, and energy is reported alongside. The
+   ~bt_x~ position includes trackID-0 IDEs (~.cc:845~).
+3. Generator by module label, with the per-handle map bug (~.cc:206-208,274,856~).
+4. Hard-coded labels: ~largeant~ (~.cc:212~), ~IonAndScint~ (HydraFilter).
+5. There is no truth on TP-in-TA rows, and no event key on TA/TC trees.
+6. Matching is on a single channel only. An induction TP from neighbouring
+   charge, or a TP on the bipolar tail outside the offset window, scores as
+   "noise" (~bt_numelectrons == 0~). The empirical offsets are per detector
+   and per TP algorithm and must be re-derived for WCT response and
+   threshold settings.

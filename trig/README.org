@@ -1,0 +1,60 @@
+#+title: Wire-Cell Trigger
+#+include: ../docs/include-readme.org
+
+* Overview
+
+This is a Wire-Cell Toolkit package that emulates the DUNE DAQ data
+selection ("trigger") chain as WCT data flow graph nodes: trigger primitive
+(TP) finding on ADC waveforms, trigger activity (TA) and trigger candidate
+(TC) finding, the module level trigger decision (TD), and the readout of the
+waveform regions a decision selects.
+
+It re-implements, free of art and LArSoft, the algorithms of the DUNE
+=dunetrigger= package (itself a LArSoft wrapper of the DAQ =triggeralgs=), and
+is the home for new TP/TA finders aimed at supernova neutrino burst (SNB)
+activity.  The package depends only on the core WCT dependencies (no
+libtorch).
+
+The algorithm cores are plain C++ classes with no WCT node interfaces so they
+may be reused from other frameworks such as Phlex.  The WCT nodes are thin
+adapters around them.  So far:
+
+- =TPGMath.h=, =TPGChannel.h= :: per-channel trigger primitive generation
+  (pedestal, running sums, threshold hits) as in the DAQ tpglibs and the
+  dunetrigger tools.
+- =DaqTypes.h= :: mirrors of the DAQ TP, TA and TC formats.
+- =Makers.h=, =SupernovaMakers.h=, =SWIFTMaker.h= :: TA/TC maker machinery
+  and ports of the DAQ Supernova (TA, TC) and SWIFT (TA) algorithms.
+- =BurstMaker.h= :: =TCMakerBurst=, a new TC algorithm counting selected TAs
+  in a sliding window to find a supernova burst, in WCT units.
+- =DaqConvert.h= :: the DAQ clock and conversions between the WCT trigger
+  objects and the DAQ mirrors.
+- =ToyTransport.h=, =Kinematics.h= :: a toy transport of MeV particles in
+  LAr to energy deposits, beta decay spectra and decay schemes, a MARLEY
+  JSON event reader.
+
+and the WCT nodes:
+
+- =TPFinder= :: =IFrame= → =ITriggerPrimitiveSet=, per frame or streaming.
+- =TAFinder= :: =ITriggerPrimitiveSet= → =ITriggerActivitySet= with a ported
+  DAQ algorithm per wire plane.
+- =TASetFanin= :: N × =ITriggerActivitySet= → =ITriggerActivitySet=, merging
+  for example the TAs of all anodes.
+- =TCFinder= :: =ITriggerActivitySet= → =ITriggerCandidateSet= with the
+  burst algorithm or the DAQ Supernova TC port.
+- =LowEDepoSource= :: → =IDepoSet= of SNB (MARLEY) and radioactive decay
+  interactions per frame, with truth ids.
+- =TATruth= :: (=IDepoSet=, =ITriggerActivitySet=) → =ITensorSet= of truth
+  tables for the TAs.
+
+The SNB TA study job is =cfg/snb-ta-study.jsonnet= with its driver
+=cfg/run-snb-ta-study.sh= and analysis =pytools/snb_ta_metrics.py=.
+
+* Documents
+
+- [[file:docs/dunetrigger-summary.org][dunetrigger summary]] :: the TP, TA, TC and TD algorithms in =dunetrigger= and how its art modules drive them.
+- [[file:docs/design.org][design]] :: layers, decisions and proposed data and node interfaces for =trig/=.
+- [[file:docs/timing.org][timing]] :: 500 ns and 512 ns sample periods, the DAQ clock, and what they mean for =trig/=.
+- [[file:docs/daq-streaming.org][DAQ streaming]] :: how the DAQ moves TPs, TAs and TCs between stages (v4 sets and heartbeats, develop), data formats, how a decision addresses data.
+- [[file:docs/snb-ta-study.org][SNB TA study]] :: the job measuring TA efficiency, purity and seeded readout data rate for SNB over radiologicals, and its results.
+- [[file:docs/efficiency-purity.org][efficiency and purity]] :: truth matching in dunetrigger and what WCT needs to measure trigger efficiency and purity.

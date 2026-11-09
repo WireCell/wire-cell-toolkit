@@ -1,0 +1,15 @@
+#+title: SNB trigger tech note
+
+LaTeX sources of the tech note on selecting supernova neutrino interactions
+with DAQ trigger activities, simulated with =trig/=.
+
+- =snb-trigger-technote.tex=, =preamble.tex=, =sections/=, =diagrams/= :: the text.
+- =sections/revisions.tex= :: version, date and revision history.  Bump on
+  every release.
+- =tools/make_results.py= :: makes =gen/= (figures, tables, =numbers.tex=)
+  from the run outputs named in a =runs.json=.  The text quotes numbers only
+  through =\res{key}=.
+- =runs-example.json= :: the shape of =runs.json=.
+
+Build: =make RUNS=/path/runs.json OUT=/path/build=.  Needs numpy,
+matplotlib and a TeX Live with TikZ, siunitx, booktabs, cleveref.

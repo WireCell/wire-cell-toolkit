@@ -1,0 +1,335 @@
+#+title: trig: design of data and node interfaces
+#+include: ../../docs/include-topic.org
+
+* Status
+
+| piece                                | state                                                                 |
+|--------------------------------------+-----------------------------------------------------------------------|
+| TPG arithmetic, per-channel TPG chain | implemented: =TPGMath.h=, =TPGChannel.h=, checked against tpglibs and dunetrigger |
+| DAQ data mirrors                     | implemented: =DaqTypes.h= (TP v2, TA v2, TC v3)                       |
+| TA/TC maker bases                    | implemented: =Makers.h= (preprocess, prescale, =store_inputs=, flush) |
+| Supernova TA/TC, SWIFT TA            | implemented, checked field by field against triggeralgs develop       |
+| TP/TA/TC data and finder interfaces  | implemented: =iface/= =ITrigger*Set.h=, =ITrigger*Finder.h=; =aux/= =SimpleTriggerSets.h= |
+| TP finder and TA finder nodes        | implemented: =TPFinder=, =TAFinder= (no anode needed for tests)       |
+| TC finder node, TA set fanin         | implemented: =TCFinder= ("Burst", "Supernova"), =TASetFanin= (synchronous) |
+| burst TC algorithm                   | implemented: =BurstMaker.h= (=TCMakerBurst=), native WCT units         |
+| truth: depo source, TA truth tables  | implemented: =LowEDepoSource= (ids in depos), =TATruth= (projection, no diffusion); see [[file:snb-ta-study.org][snb-ta-study]] |
+| TD maker, readout                    | proposed here, deferred                                               |
+
+Supporting notes: [[file:dunetrigger-summary.org][dunetrigger-summary]],
+[[file:timing.org][timing]] (500 vs 512 ns), [[file:daq-streaming.org][daq-streaming]]
+(the DAQ stream contract and formats), [[file:efficiency-purity.org][efficiency-purity]]
+(truth matching and metrics).
+
+* Goals and constraints
+
+- Emulate the DAQ chain TP → TA → TC → TD → readout inside a WCT graph so
+  that only the selected waveform regions ever leave WCT (eg to an
+  =art::Event= or a Phlex product store).
+- Measure efficiency and purity of TA/TC selection of SNB neutrino activity
+  against radiological and other backgrounds, and develop new finders.
+- Core WCT dependencies only.
+- Approach a streaming emulation: a long time series delivered as a sequence
+  of contiguous frames, with finder state carried across frame boundaries.
+  A frame-at-a-time ("event") job remains the simple special case.
+
+* Layers
+
+1. *Algorithm cores* (=trig/inc=, namespace =WireCell::Trig=): plain C++, no
+   WCT interface types, portable to Phlex or elsewhere.
+   - Ports of DAQ algorithms work in DAQ units on the DAQ data mirrors
+     (=Trig::Daq=: DTS-tick timestamps, sample counts) so they can be
+     validated bit for bit against triggeralgs.  Where a port deviates on
+     purpose it is an option defaulting to the DAQ behaviour, or a fix
+     documented in its header.
+   - New (SNB-oriented) algorithms are free to use other units.
+2. *WCT interfaces* (=iface/=): data sets and node interfaces below.
+3. *WCT nodes* (=trig/src=): thin adapters that convert between the WCT data
+   and a core's types and drive the core with the stream contract.
+
+* Decisions
+
+| # | question                          | outcome                                                                 |
+|---+-----------------------------------+-------------------------------------------------------------------------|
+| 1 | TP as value or =shared_ptr=        | *agreed*: a value struct held in the set                                |
+| 2 | TA/TC inputs                      | *agreed*: copies; whether to store is a finder option (=store_inputs=, in =Makers.h=) |
+| 3 | time representation               | *agreed*: absolute WCT =double= times, sample counts for durations; WCT works at 500 ns, with special tests at 512 ns resampled; a core that needs the sample period is *configured* with it (the DAQ does not carry it with the data) |
+| 4 | coverage / watermark              | *agreed*: keep coverage, as below                                       |
+| 5 | readout granularity, truth        | deferred.  Truth for TAs likely from =DepoFluxSplat= (already used for true ROIs) plus a missing depo id → particle id association, in the spirit of =BlobDepoFill= |
+| - | configuration types               | *agreed*: =trig/= may use any JSON type                                 |
+
+** Inputs and their count (follows from 2)
+
+Some TC algorithms use their TAs' inputs, eg the Supernova TC counts the TPs of
+each TA.  dunetrigger loses the TPs between its TA and TC modules, which is why
+its Supernova TC never fires.  With =store_inputs=false= the same would happen.
+So a WCT TA should carry the *number* of its inputs whatever the storage
+choice, and an algorithm that needs the inputs themselves must say so.
+
+** Time representation (3)
+
+From [[file:timing.org][timing.org]]: keep WCT at 500 ns for simulation and
+signal processing; make =trig/= period-agnostic (cores count samples, nodes
+take the period from the frame).  For the WCT TP:
+
+#+begin_src c++
+  namespace WireCell {
+      struct TriggerPrimitive {
+          int channel;                     // WCT channel ident
+          double time_start;               // absolute, WCT units
+          uint16_t samples_over_threshold; // as DAQ TP v2
+          uint16_t samples_to_peak;
+          uint32_t adc_integral;
+          uint16_t adc_peak;
+          uint8_t flag;
+      };
+  }
+#+end_src
+
+as now in =ITriggerPrimitiveSet.h= (plus =flag=).  The sample period is not
+part of the data: the TP finder is configured with it and refuses frames
+with another tick, and a downstream core that converts samples to time is
+configured with it too.  This mirrors DAQ TP v2 (a start time plus sample
+counts) except for the time unit.  The node converts to
+DAQ units for a ported core: =floor((t - epoch)/16 ns)= for times (the DAQ's
+own truncation for 500 ns samples), and a per-core =ticks_per_sample=
+(32 or 31.25) where a core converts samples to ticks.
+
+** Coverage (4)
+
+See [[file:daq-streaming.org][daq-streaming.org]].  The DAQ had this concept
+and dropped it:
+
+- DAQ v4 (2021 to Feb 2024): =Set<T>= with =seqno=, =origin=, type
+  payload/heartbeat, =start_time=, =end_time= ("earliest/latest timestamp
+  inspected").  A heartbeat meant "you have seen everything earlier than T".
+  Zippers merged streams by =start_time=, slices were sorted before the
+  algorithm, heartbeats triggered =flush()= and closed output windows, late
+  data was dropped with a warning.  TCs were not in sets.  Payload and
+  heartbeat sets used =start/end= inconsistently.
+- DAQ develop (since trigger =f0edce8=, 2024-02-17): no sets in the chain, no
+  heartbeats, no watermark.  TPs arrive in the order hits close, algorithms run
+  in arrival order, =flush()= is never called, and TDs close on a wall-clock
+  timeout.  "Each port emits in time order" was the intent in v4 and is not
+  enforced in develop.
+
+WCT has no wall clock to fall back on, so it needs the data-time contract.
+Adopted, as v4's =Set<T>= made consistent:
+
+1. Every set carries a half-open coverage =[begin, end)= of data time, empty or
+   not.  Successive sets on a port are contiguous; a gap means a reset.
+2. Coverage end is a watermark: nothing earlier than =end= (less a declared
+   latency, see 4) will follow on that port.  An empty set is a heartbeat.
+3. A node with several inputs uses the minimum of their latest ends.
+4. A TP still open at a frame end is emitted in a later set.  The TP finder
+   therefore declares a latency (the longest allowed TP); objects in a set
+   may start up to that much before its =begin=.
+5. A finder sorts the objects of an input set by start time before feeding a
+   core, then calls the core's =flush(end - latency)=.
+6. EOS: =flush(∞)= and forward EOS.
+
+** Readout and efficiency/purity (5), what is needed and recommendation
+
+See [[file:efficiency-purity.org][efficiency-purity.org]].
+
+- dunetrigger computes no efficiency or purity.  Only standalone TPs get
+  truth, from =sim::SimChannel= on the TP channel over its sample window plus
+  a per-view empirical offset; TAs and TCs get none.
+- WCT has no SimChannel equivalent: depo ids survive drifting but no node
+  keeps the depo → (channel, tick) map.  A truth node is a prerequisite,
+  eg =DepoFluxTruth=, emitting =(channel, tick, depo id, charge)= rows with
+  =DepoFluxSplat='s binning, plus a depo id → generator/label table.
+- The DAQ addresses data as a time window per source id (the same window for
+  all links), from the TC's =time_candidate= and per-TC-type before/after
+  values, possibly overridden per subdetector by the MLT.  There is no channel
+  ROI.
+- With per-TP truth, TA/TC truth is the sum over their inputs (copied
+  inputs make this direct), and a TD can be scored from its requests and the
+  truth rows without looking at waveforms.
+
+Recommendation: a =ReadoutRequest= of (anode, time window), with an optional
+channel range for ROI studies beyond the DAQ, and a readout node that emits one
+frame per decision × anode (frame ident = trigger number, anode in a tag),
+which joins directly with per-anode truth.  Every persisted trigger object
+carries its frame/trigger key.
+
+* Data interfaces (=iface/=)
+
+The TP, TA and TC sets below are implemented (=ITriggerPrimitiveSet.h=,
+=ITriggerActivitySet.h=, =ITriggerCandidateSet.h=); the TP set does not
+carry the period (decision 3).  The decision types are still a proposal.
+
+** Sets
+
+#+begin_src c++
+  class ITriggerPrimitiveSet : public IData<ITriggerPrimitiveSet> {
+    public:
+      virtual int ident() const = 0;          // sequence number in the stream
+      virtual int detector() const = 0;       // anode ident
+      virtual double time_begin() const = 0;  // coverage [begin, end)
+      virtual double time_end() const = 0;
+      virtual const std::vector<TriggerPrimitive>& primitives() const = 0;
+  };
+#+end_src
+
+=ITriggerActivitySet= (=activities()=) and =ITriggerCandidateSet=
+(=candidates()=) follow the same form.
+
+** Trigger activity and candidate
+
+#+begin_src c++
+  struct TriggerActivity {
+      double time_start, time_end, time_peak, time_activity;
+      int channel_start, channel_end, channel_peak;
+      uint64_t adc_integral;
+      uint16_t adc_peak;
+      int detector;          // anode ident
+      WirePlaneId plane;     // plane the TA was made on
+      uint16_t algorithm;
+      size_t ninputs;        // whether or not inputs are stored
+      std::vector<TriggerPrimitive> inputs;
+  };
+  struct TriggerCandidate {
+      double time_start, time_end, time_candidate;
+      std::vector<int> detectors;
+      uint16_t type, algorithm;
+      size_t ninputs;
+      std::vector<TriggerActivity> inputs;  // their own inputs per their store choice
+  };
+#+end_src
+
+** Trigger decision
+
+#+begin_src c++
+  struct ReadoutRequest {
+      int detector;                     // anode ident
+      double time_begin, time_end;
+      int channel_begin{-1}, channel_end{-1};  // optional ROI, -1: whole anode
+  };
+  class ITriggerDecision : public IData<ITriggerDecision> {
+    public:
+      virtual int trigger_number() const = 0;
+      virtual double time_trigger() const = 0;
+      virtual uint64_t type() const = 0;  // bitword of contributing TC types, as the DAQ
+      virtual const std::vector<ReadoutRequest>& requests() const = 0;
+      virtual const std::vector<TriggerCandidate>& candidates() const = 0;
+  };
+#+end_src
+
+* Node interfaces (=iface/=)
+
+The three finders are implemented as queued-output nodes
+(=IQueuedoutNode=), not function nodes: in normal running each emits exactly
+one set per input set, but at end of stream it must emit a last set with what
+it held before forwarding EOS, which a function node cannot do.
+
+| interface                   | category  | in → out                                          |
+|-----------------------------+-----------+---------------------------------------------------|
+| =ITriggerPrimitiveFinder=   | queuedout | =IFrame= → =ITriggerPrimitiveSet=                 |
+| =ITriggerActivityFinder=    | queuedout | =ITriggerPrimitiveSet= → =ITriggerActivitySet=    |
+| =ITriggerActivitySetFanin=  | fanin     | N × =ITriggerActivitySet= → =ITriggerActivitySet= |
+| =ITriggerCandidateFinder=   | queuedout | =ITriggerActivitySet= → =ITriggerCandidateSet=    |
+| =ITriggerDecisionMaker=     | function  | =ITriggerCandidateSet= → =ITriggerDecisionSet=    |
+| =ITriggerReadout=           | hydra     | (=IFrame=, =ITriggerDecisionSet=) → =IFrame= queue |
+
+Each finder emits exactly one set per input set (possibly empty), keeping the
+graph synchronous; buffering across sets is internal state.  The TA finder
+holds one core per =WirePlaneId= (planes from =IAnodePlane=), with per-plane
+configuration, as =TriggerActivityMakerTPC= does per readout plane.
+
+The TD maker closes a pending decision once the TC watermark passes its
+readout end plus a buffer, the data-time version of the DAQ's wall-clock
+=buffer_timeout=.
+
+The readout is a hydra node (frames arrive before the decisions about them,
+and a decision may span frames): it drops a frame once the decision watermark
+passes its end, executes a decision once the frame watermark passes its
+window end, and emulates finite front-end buffers with a maximum depth.
+
+#+begin_example
+  per anode:  frames ─┬─▶ TP finder ─▶ TA finder ─┐
+                      │                            ├─▶ TA fanin ─▶ TC finder ─▶ TD maker ─┐
+  other anodes ...    │                     ...  ─┘                                      │
+                      └──────────────────────────────────────────────────▶ readout ◀─────┘
+                                                                              │
+                                                              one frame per decision × anode
+#+end_example
+
+* TC finding: the burst trigger
+
+A supernova burst shows as an excess in the rate of SNB-like TAs over the
+whole detector, so the first native TC algorithm, =TCMakerBurst=
+(=BurstMaker.h=), counts selected TAs in a sliding window and makes a TC when
+the count reaches a threshold.
+
+- Selection :: TA algorithm list, bounds on the number of TPs and on the ADC
+  integral, upper bounds on channel and time span.  The upper bounds are
+  there to reject cosmic-ray TAs, the lower ones radiological TAs.  Defaults
+  select everything.
+- Window :: =window= (default 1 s), a TA at t counts with those in
+  (t - window, t].  Checking at each TA finds every crossing, as the count
+  rises only then.
+- Holdoff :: no TC before the last =time_candidate= + =holdoff= (default the
+  window).  The window keeps sliding.  A burst lasting longer than the
+  holdoff makes several TCs; the TD maker will decide what that means for
+  readout.
+- TC :: =time_candidate= is the TA that crossed, =time_start= / =time_end=
+  span the TAs in the window, =ninputs= is the count, =detectors= those of the
+  TAs.  Type =kSupernova= (3), algorithm =kCustom= (8) by default.
+- Fake rate :: with a selected background rate b the count is Poisson of mean
+  b·window.  The threshold for a given fake TC rate follows from that, and
+  the efficiency for a burst at distance d from the expected selected SNB TA
+  count in the window.  This is where TA selection pays: purity of the
+  selection lowers b.
+
+It works in WCT units on the WCT objects, unlike the DAQ ports, and the
+DAQ's =TCMakerSupernova= remains available for comparison.  Differences from
+that one: it fires when the count reaches the threshold (the DAQ one needs more than it), its window slides instead of being
+cleared after a TC, it can select on more than the TP count, and it handles
+out-of-order TAs.
+
+** TA time order
+
+TA sets are not ordered by TA time across sets: a TA is emitted when its
+finder closes it, which can be long after its =time_start= (a Supernova TA
+cluster in either-or mode stays open until it is broken).  So a TA set's
+coverage end is *not* a watermark on the =time_start= of the TAs still to
+come.  =TCMakerBurst= therefore buffers TAs and processes them in time order
+only up to =flush(until)=, which the =TCFinder= calls with the set end less a
+configured =lateness=.  A TA arriving later than that is still counted if it
+falls in the current window, otherwise it is dropped and counted as dropped
+(logged at end of stream).  Choosing =lateness= trades TC latency against
+dropped TAs; it should come from the TA finder's actual emission delay, which
+we should measure in the first simulation job.
+
+** Detector coverage
+
+One =TCFinder= should see the TAs of all anodes, which =TASetFanin= merges.
+It is synchronous: all inputs must have the same coverage, as when every
+anode's frames share the readout windows.  The merged detector is -1 unless
+all inputs share one.  To convert TAs to the DAQ form (the "Supernova" port)
+the anode ident goes into the 8-bit =detid= when it fits (0..253).
+
+Open questions:
+
+- Several (window, threshold) pairs, for bursts at different distances, are
+  now several =TCFinder= nodes on the same TA stream.  A multi-level core may
+  be cheaper if it matters.
+- Background-subtracted or likelihood-based trigger statistics, and a
+  per-detector-unit (eg per-APA) counting before the global one, are natural
+  next variants.
+
+* Plan
+
+1. +Interfaces in =iface/=, simple sets in =aux/=.+ Done.
+2. +TP finder node.+ Done (=TPFinder=).
+3. +TA finder node.+ Done (=TAFinder=).  +TC finder node and TA set fanin.+
+   Done (=TCFinder=, =TASetFanin=); the fanin is synchronous, an asynchronous
+   one (watermark = min of input ends) if streams ever differ in coverage.
+4. +Jsonnet configuration and a first job on simulated frames.+  Done:
+   [[file:snb-ta-study.org][snb-ta-study]].
+5. +Truth.+  First version done with interaction ids carried by the depos
+   and a geometric projection (=TATruth=), instead of =DepoFluxSplat=.
+6. TD maker and readout node; persistence of sets.
+7. The 512 ns resampled branch for special tests ([[file:timing.org][timing]]).
+8. New SNB-oriented finders.
