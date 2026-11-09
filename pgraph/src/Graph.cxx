@@ -1,3 +1,4 @@
+#include <ctime>
 #include "WireCellPgraph/Graph.h"
 #include "WireCellUtil/Type.h"
 #include "WireCellUtil/String.h"
@@ -12,6 +13,13 @@
 using WireCell::demangle;
 using WireCell::String::format;
 using namespace WireCell::Pgraph;
+
+static double thread_cpu_seconds()
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return ts.tv_sec + 1e-9 * ts.tv_nsec;
+}
 
 Graph::Graph()
   : l(Log::logger("pgraph"))
@@ -181,14 +189,17 @@ bool Graph::execute()
 
         NVTX_SCOPED_RANGE((node->instance_name()).c_str());
         auto core = std::clock();
+        const double tcpu = thread_cpu_seconds();
         auto wall = std::chrono::high_resolution_clock::now();
 
         bool ok = call_node(node);
 
-        m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
-        auto delta = std::chrono::high_resolution_clock::now() - wall;
-        const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
-        m_nodes_timer[node].wall += wall_ms / 1000.0;
+        auto& timer = m_nodes_timer[node];
+        timer.core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+        timer.tcpu += thread_cpu_seconds() - tcpu;
+        // Keep sub-ms resolution: a cast to whole milliseconds drops short calls.
+        timer.wall += std::chrono::duration<double>(std::chrono::high_resolution_clock::now() - wall).count();
+        if (ok) ++timer.calls;
 
         if (!ok) {
             // Was not actually runnable; it will be re-offered when a
@@ -255,15 +266,17 @@ void Graph::print_timers(bool include_execmon) const
 
     double total_wall = 0;
     double total_core = 0;
+    double total_tcpu = 0;
     for (auto it = m.rbegin(); it != m.rend(); ++it) {
         auto [node, tc] = it->second;
 
-        l_timer->info("Timer: {:.3f} wall-sec, {:.3f} core-sec:  ({}) \"{}\"",
-                      tc.wall, tc.core, node->cpptype_name(), node->instance_name());
+        l_timer->info("Timer: {:.6f} wall-sec, {:.6f} core-sec, {:.6f} thread-sec, {} calls:  ({}) \"{}\"",
+                      tc.wall, tc.core, tc.tcpu, tc.calls, node->cpptype_name(), node->instance_name());
         total_wall += tc.wall;
         total_core += tc.core;
+        total_tcpu += tc.tcpu;
     }
-    l_timer->info("Timer: Total {:.3f} wall-sec, {:.3f} core-sec", total_wall, total_core);
+    l_timer->info("Timer: Total {:.6f} wall-sec, {:.6f} core-sec, {:.6f} thread-sec", total_wall, total_core, total_tcpu);
 
     if (include_execmon) {
         l_timer->debug("ExecMon:\n{}", m_em.summary());

@@ -7,8 +7,8 @@ std::ostream& WireCellTbb::operator<<(std::ostream& os, const WireCellTbb::NodeI
 
     std::string tname = WireCell::type(*(n.get()));
 
-    const double rtmax = std::chrono::duration_cast<std::chrono::milliseconds>(info.max_runtime()).count();
-    const double rttot = std::chrono::duration_cast<std::chrono::milliseconds>(info.runtime()).count();
+    const double rtmax = std::chrono::duration<double, std::milli>(info.max_runtime()).count();
+    const double rttot = std::chrono::duration<double, std::milli>(info.runtime()).count();
     const size_t num = info.calls();
     double rtmean = 0;
 
@@ -19,7 +19,8 @@ std::ostream& WireCellTbb::operator<<(std::ostream& os, const WireCellTbb::NodeI
        << "time=" << rttot << " "
        << "mean=" << rtmean << " "
        << "max=" << rtmax << " [wall-ms] "
-       << "core=" << info.coretime() << " [s] " 
+       << "core=" << info.coretime() << " [s] "
+       << "thread=" << info.threadtime() << " [s] " 
        << "[" << tname << "] \"" << info.instance_name() << "\"";
 
     return os;

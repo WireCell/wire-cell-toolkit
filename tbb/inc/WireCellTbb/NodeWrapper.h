@@ -1,6 +1,7 @@
 #ifndef WIRECELLTBB_NODEWRAPPER
 #define WIRECELLTBB_NODEWRAPPER
 
+#include <ctime>
 #include "WireCellIface/INode.h"
 #include "WireCellIface/INamed.h"
 #include "WireCellUtil/TupleHelpers.h"
@@ -64,6 +65,7 @@ namespace WireCellTbb {
         void start() {
             m_wall = std::chrono::high_resolution_clock::now();
             m_core = std::clock();
+            m_tcpu0 = thread_cpu_seconds();
 
         }
         void stop() {
@@ -74,6 +76,7 @@ namespace WireCellTbb {
             }
 
             m_coretime = m_coretime + ((double) (std::clock() - m_core)) / CLOCKS_PER_SEC;
+            m_threadtime += thread_cpu_seconds() - m_tcpu0;
             ++m_calls;
         }
 
@@ -87,6 +90,16 @@ namespace WireCellTbb {
         double coretime() const {
             return m_coretime;
         };
+        // CPU seconds of the TBB worker threads that ran the node (unlike
+        // coretime(), which is process-wide and overcounts under concurrency).
+        double threadtime() const {
+            return m_threadtime;
+        };
+        static double thread_cpu_seconds() {
+            struct timespec ts;
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+            return ts.tv_sec + 1e-9 * ts.tv_nsec;
+        }
         // Maximum runtime for any execution.
         duration_t max_runtime() const {
             return m_maxrt;
@@ -106,6 +119,7 @@ namespace WireCellTbb {
         // also keep std::clock which counts core-seconds
         std::clock_t m_core;
         double m_coretime{0};
+        double m_tcpu0{0}, m_threadtime{0};
 
 
         size_t m_calls{0};

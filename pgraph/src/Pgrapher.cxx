@@ -1,3 +1,4 @@
+#include <chrono>
 #include "WireCellPgraph/Pgrapher.h"
 #include "WireCellPgraph/Factory.h"
 #include "WireCellIface/INode.h"
@@ -74,9 +75,12 @@ void Pgrapher::configure(const WireCell::Configuration& cfg)
 
 void Pgrapher::execute()
 {
-    log->debug("executing graph");
+    // At info level so job startup (configuration until here) can be timed.
+    log->info("graph execution start");
+    const auto t0 = std::chrono::steady_clock::now();
     m_graph.execute();
-    log->debug("graph execution complete");
+    log->info("graph execution end: {:.6f} s",
+              std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
     if (m_verbosity) {
         m_graph.print_timers(m_verbosity == 2);
     }

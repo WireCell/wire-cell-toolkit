@@ -1,3 +1,4 @@
+#include <chrono>
 #include "WireCellTbb/DataFlowGraph.h"
 
 #include "WireCellUtil/Type.h"
@@ -109,18 +110,26 @@ bool DataFlowGraph::connect(INode::pointer tail, INode::pointer head, size_t spo
 
 bool DataFlowGraph::run()
 {
-    for (auto it : m_factory.seen()) {
-        //log->debug("Initialize node of type: {}", demangle(it.first->signature()));
-        it.second->initialize();
-    }
-
+    // Limit threads before initialize(): that activates the sources, which
+    // start running at once.
     std::unique_ptr<tbb::global_control> gc;
     if (m_thread_limit) {
         gc = std::make_unique<tbb::global_control>(
             tbb::global_control::max_allowed_parallelism,
             m_thread_limit);
     }
+    // At info level so job startup (configuration until here) can be timed.
+    log->info("graph execution start, thread limit {}", m_thread_limit);
+    const auto t0 = std::chrono::steady_clock::now();
+
+    for (auto it : m_factory.seen()) {
+        //log->debug("Initialize node of type: {}", demangle(it.first->signature()));
+        it.second->initialize();
+    }
+
     m_graph.wait_for_all();
+    log->info("graph execution end: {:.6f} s",
+              std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
 
     if (m_summary) {
         double coretot_s = 0;
@@ -135,7 +144,7 @@ bool DataFlowGraph::run()
             const auto& info = node->info();
 
             coretot_s += info.coretime();
-            walltot_ms += std::chrono::duration_cast<std::chrono::milliseconds>(info.runtime()).count();
+            walltot_ms += std::chrono::duration<double, std::milli>(info.runtime()).count();
 
             std::stringstream ss;
             ss << info;

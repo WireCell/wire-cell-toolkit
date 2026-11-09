@@ -80,8 +80,10 @@ namespace WireCell {
             Log::logptr_t l;
             Log::logptr_t l_timer;
             struct TimerClocks {
-                double wall{0};
-                double core{0};
+                double wall{0};  // wall seconds
+                double core{0};  // process CPU seconds (std::clock, all threads)
+                double tcpu{0};  // CPU seconds of the calling thread
+                size_t calls{0}; // calls that ran (returned true)
 		double dur{0};
             };
             std::unordered_map<Node*, TimerClocks> m_nodes_timer;
