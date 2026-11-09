@@ -178,7 +178,7 @@ namespace WireCell::SPNG {
         md["period"] = iframe->tick();
         md["datatype"] = "frame";
         auto fullpath = m_basepath / m_frame_relpath;
-        auto fullpathstr = fmt::format(fullpath.string(), fmt::arg("ident", ident));
+        auto fullpathstr = fmt::format(fmt::runtime(fullpath.string()), fmt::arg("ident", ident));
         log->debug("frame tensor datapath: {}", fullpathstr);
         md["datapath"] = fullpathstr;
         // no parent, no batches

@@ -46,7 +46,7 @@ namespace WireCell::SPNG {
         out = std::make_shared<SimpleTorchTensor>(out->tensor(), md);
 
         if (m_config.debug_filename.size() && m_to_save.size()) {
-            std::string filename = fmt::format(m_config.debug_filename, fmt::arg("ident", get_count()));
+            std::string filename = fmt::format(fmt::runtime(m_config.debug_filename), fmt::arg("ident", get_count()));
             auto data = torch::pickle_save(m_to_save);
             std::ofstream output_file(filename, std::ios::binary);
             output_file.write(data.data(), data.size());

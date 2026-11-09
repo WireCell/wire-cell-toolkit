@@ -128,20 +128,36 @@ namespace WireCell::SPNG {
             base class or as a class member variable eg named "log".  
         */
         template <typename... Args>
-        void debug(Args&&... args) {
-            log->debug(std::forward<Args>(args)...);
+        void debug(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+            log->debug(fmt, std::forward<Args>(args)...);
+        }
+        template <typename T>
+        void debug(const T& msg) {
+            log->debug(msg);
         }
         template <typename... Args>
-        void info(Args&&... args) {
-            log->info(std::forward<Args>(args)...);
+        void info(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+            log->info(fmt, std::forward<Args>(args)...);
+        }
+        template <typename T>
+        void info(const T& msg) {
+            log->info(msg);
         }
         template <typename... Args>
-        void warn(Args&&... args) {
-            log->warn(std::forward<Args>(args)...);
+        void warn(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+            log->warn(fmt, std::forward<Args>(args)...);
+        }
+        template <typename T>
+        void warn(const T& msg) {
+            log->warn(msg);
         }
         template <typename... Args>
-        void critical(Args&&... args) {
-            log->critical(std::forward<Args>(args)...);
+        void critical(spdlog::format_string_t<Args...> fmt, Args&&... args) {
+            log->critical(fmt, std::forward<Args>(args)...);
+        }
+        template <typename T>
+        void critical(const T& msg) {
+            log->critical(msg);
         }
 
         LoggerConfig config() { return m_config; }
