@@ -6,6 +6,8 @@
 #include <chrono>
 #include <set>
 #include <unordered_set>
+#include <unordered_map>
+#include <array>
 #include "WireCellUtil/PointTree.h"
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellClus/ClusteringFuncs.h"
@@ -21,6 +23,98 @@ WIRECELL_FACTORY(CreateSteinerGraph, WireCell::Clus::Steiner::CreateSteinerGraph
 using namespace WireCell;
 using namespace WireCell::Clus;
 using namespace WireCell::Clus::Facade;
+
+// pr_ml doc 71 (graph_export).  Three local point clouds on the source cluster `src`, made from the retiled copy `rt` the Steiner
+// graph is built on and from its base graph `g` (vertex i of g == point i of rt == row i of graph_pc):
+//   graph_pc     x, y, z (default scope), x_raw, y_raw, z_raw (the "3d" cloud), wpid, blob (row of graph_blobs),
+//                {u,v,w}wire_index, {u,v,w}charge_val, {u,v,w}charge_unc  (the names of the blobs' "3d" cloud)
+//   graph_blobs  one row per retiled blob, in order of first appearance along the points: charge, npoints, wpid,
+//                slice_index_min/max, {u,v,w}_wire_index_min/max
+//   graph_edges  src, dst (rows of graph_pc), weight (the edge weight of g), in boost::edges order; absent when g has no edge
+// Existing clouds of these names are replaced.  Returns the number of edges.  Deterministic: points and edges in index order, the
+// blob table keyed by first appearance (never by pointer order).
+static size_t export_graph_clouds(Cluster& src, const Cluster& rt, const Graphs::Weighted::graph_type& g)
+{
+    const size_t np = rt.npoints();
+    if (boost::num_vertices(g) != np) {
+        raise<ValueError>("CreateSteinerGraph graph_export: cluster %d: %d graph vertices but %d points",
+                          src.ident(), boost::num_vertices(g), np);
+    }
+    std::vector<double> x(np), y(np), z(np), xr(np), yr(np), zr(np);
+    std::vector<int> wpid(np), blob(np);
+    std::array<std::vector<int>, 3> wi;
+    std::array<std::vector<double>, 3> qv, qu;
+    for (int p = 0; p < 3; ++p) { wi[p].resize(np); qv[p].resize(np); qu[p].resize(np); }
+    std::unordered_map<const Blob*, int> blob_row;   // lookup only; rows are numbered by first appearance
+    std::vector<const Blob*> blobs;
+    for (size_t i = 0; i < np; ++i) {
+        const auto p = rt.point3d(i);
+        const auto r = rt.point3d_raw(i);
+        x[i] = p.x(); y[i] = p.y(); z[i] = p.z();
+        xr[i] = r.x(); yr[i] = r.y(); zr[i] = r.z();
+        wpid[i] = rt.wire_plane_id(i).ident();
+        const Blob* b = rt.blob_with_point(i);
+        auto it = blob_row.find(b);
+        if (it == blob_row.end()) { it = blob_row.emplace(b, (int) blobs.size()).first; blobs.push_back(b); }
+        blob[i] = it->second;
+        for (int pl = 0; pl < 3; ++pl) {
+            wi[pl][i] = rt.wire_index(i, pl);
+            qv[pl][i] = rt.charge_value(i, pl);
+            qu[pl][i] = rt.charge_uncertainty(i, pl);
+        }
+    }
+    PointCloud::Dataset pc;
+    pc.add("x", PointCloud::Array(x)); pc.add("y", PointCloud::Array(y)); pc.add("z", PointCloud::Array(z));
+    pc.add("x_raw", PointCloud::Array(xr)); pc.add("y_raw", PointCloud::Array(yr)); pc.add("z_raw", PointCloud::Array(zr));
+    pc.add("wpid", PointCloud::Array(wpid)); pc.add("blob", PointCloud::Array(blob));
+    const char* pn[3] = {"u", "v", "w"};
+    for (int pl = 0; pl < 3; ++pl) {
+        pc.add(std::string(pn[pl]) + "wire_index", PointCloud::Array(wi[pl]));
+        pc.add(std::string(pn[pl]) + "charge_val", PointCloud::Array(qv[pl]));
+        pc.add(std::string(pn[pl]) + "charge_unc", PointCloud::Array(qu[pl]));
+    }
+
+    const size_t nb = blobs.size();
+    std::vector<double> bq(nb);
+    std::vector<int> bn(nb), bw(nb), s0(nb), s1(nb), u0(nb), u1(nb), v0(nb), v1(nb), w0(nb), w1(nb);
+    for (size_t i = 0; i < nb; ++i) {
+        const Blob* b = blobs[i];
+        if (!b) raise<ValueError>("CreateSteinerGraph graph_export: cluster %d: a point without a blob", src.ident());
+        bq[i] = b->charge(); bn[i] = b->npoints(); bw[i] = b->wpid().ident();
+        s0[i] = b->slice_index_min(); s1[i] = b->slice_index_max();
+        u0[i] = b->u_wire_index_min(); u1[i] = b->u_wire_index_max();
+        v0[i] = b->v_wire_index_min(); v1[i] = b->v_wire_index_max();
+        w0[i] = b->w_wire_index_min(); w1[i] = b->w_wire_index_max();
+    }
+    PointCloud::Dataset bl;
+    bl.add("charge", PointCloud::Array(bq)); bl.add("npoints", PointCloud::Array(bn)); bl.add("wpid", PointCloud::Array(bw));
+    bl.add("slice_index_min", PointCloud::Array(s0)); bl.add("slice_index_max", PointCloud::Array(s1));
+    bl.add("u_wire_index_min", PointCloud::Array(u0)); bl.add("u_wire_index_max", PointCloud::Array(u1));
+    bl.add("v_wire_index_min", PointCloud::Array(v0)); bl.add("v_wire_index_max", PointCloud::Array(v1));
+    bl.add("w_wire_index_min", PointCloud::Array(w0)); bl.add("w_wire_index_max", PointCloud::Array(w1));
+
+    std::vector<int> es, ed;
+    std::vector<double> ew;
+    const auto wmap = boost::get(boost::edge_weight, g);
+    auto [ei, ee] = boost::edges(g);
+    for (; ei != ee; ++ei) {
+        es.push_back((int) boost::source(*ei, g));
+        ed.push_back((int) boost::target(*ei, g));
+        ew.push_back(wmap[*ei]);
+    }
+
+    auto& lpcs = src.local_pcs();
+    lpcs.erase("graph_pc"); lpcs.erase("graph_blobs"); lpcs.erase("graph_edges");
+    if (np == 0) return 0;   // no zero-row local cloud (cf. the empty steiner_pc guard below)
+    lpcs.emplace("graph_pc", std::move(pc));
+    lpcs.emplace("graph_blobs", std::move(bl));
+    if (!es.empty()) {
+        PointCloud::Dataset ed_ds;
+        ed_ds.add("src", PointCloud::Array(es)); ed_ds.add("dst", PointCloud::Array(ed)); ed_ds.add("weight", PointCloud::Array(ew));
+        lpcs.emplace("graph_edges", std::move(ed_ds));
+    }
+    return es.size();
+}
 
 Steiner::CreateSteinerGraph::CreateSteinerGraph()
     : Aux::Logger("CreateSteinerGraph", "clus")
@@ -102,6 +196,9 @@ void Steiner::CreateSteinerGraph::configure(const WireCell::Configuration& cfg)
         if (!*m_terminals_dump) raise<IOError>("CreateSteinerGraph: cannot write terminals_dump_file %s", m_terminals_dump_file);
         log->info("configure: terminals_dump_file {}", m_terminals_dump_file);
     }
+    // pr_ml doc 71: C++ default false; absent key => no cloud is built or attached => byte-identical.
+    m_graph_export = get(cfg, "graph_export", m_graph_export);
+    if (m_graph_export) log->info("configure: graph_export on (graph_pc, graph_blobs, graph_edges on each processed cluster)");
     // doc pdvd/37 R1: cross-blob minimum-separation thinning of the terminal
     // set, in the WCT system of units.  C++ default 0 = no thinning, so a
     // config without the key runs bit-for-bit as before.
@@ -206,6 +303,7 @@ Configuration Steiner::CreateSteinerGraph::default_configuration() const
     cfg["path_filter_skip"] = m_grapher_config.path_filter_skip;
     cfg["terminals_inject_file"] = m_terminals_inject_file;
     cfg["terminals_dump_file"] = m_terminals_dump_file;
+    cfg["graph_export"] = m_graph_export;   // pr_ml doc 71; false = nothing attached
     // doc pr/29 D12: step the terminal filter's adjacent-slice lookup by the
     // face's ticks-per-slice instead of by 1.  The map is tick-keyed, so the
     // legacy step of 1 never matches and the fallback is dead.  false = legacy.
@@ -436,6 +534,12 @@ void Steiner::CreateSteinerGraph::visit(Ensemble& ensemble) const
         sg.remove_same_blob_steiner_edges("ctpc_ref_pid");
         if (m_perf) SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph timing: [{}] remove_same_blob_steiner_edges took {} ms", tag, MS(Clock::now() - t0).count());
         SPDLOG_LOGGER_TRACE(log, "CreateSteinerGraph [{}]: ctpc_ref_pid with {} vertices and {} edges.", tag, boost::num_vertices(graph), boost::num_edges(graph));
+
+        // pr_ml doc 71: before create_steiner_tree, so a cluster whose tree comes out empty still carries its cloud and base graph.
+        if (m_graph_export) {
+            const auto ne = export_graph_clouds(*src, new_cluster, graph);
+            log->debug("CreateSteinerGraph [{}]: graph_export {} points, {} edges", tag, new_cluster.npoints(), ne);
+        }
 
         t0 = Clock::now();
         sg.create_steiner_tree(src, path_point_indices, "ctpc_ref_pid", "steiner_graph", false, "steiner_pc");

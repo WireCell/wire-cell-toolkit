@@ -737,6 +737,15 @@ TEST_CASE("clus knob defaults: CreateSteinerGraph skip_flags is EMPTY")
     CHECK(cfg["skip_flags"].size() == 0);
 }
 
+TEST_CASE("clus knob defaults: CreateSteinerGraph graph_export is OFF")
+{
+    // pr_ml doc 71.  false = no graph_pc / graph_blobs / graph_edges cloud is built
+    // or attached to any cluster, which is what makes a config without the key
+    // byte-identical (the pctree sink writes every local cloud it finds).
+    auto cfg = defaults_of("CreateSteinerGraph");
+    CHECK_KNOB_BOOL(cfg, "graph_export", false);
+}
+
 // ---------------------------------------------------------------------------
 // The clustering visitors added or extended by the port.
 // ---------------------------------------------------------------------------

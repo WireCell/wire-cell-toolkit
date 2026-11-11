@@ -87,6 +87,11 @@ namespace WireCell::Clus::Steiner {
         std::string m_terminals_dump_file;
         std::shared_ptr<std::ofstream> m_terminals_dump;
 
+        // pr_ml doc 71: persist the retiled cloud the Steiner graph is built on, and its base graph ("ctpc_ref_pid" after the
+        // same-blob Steiner edges are removed), as three local point clouds on the source cluster: graph_pc (one row per base-graph
+        // vertex), graph_blobs (one row per retiled blob), graph_edges (one row per base-graph edge).  C++ default false = nothing is
+        // built or attached, so a config without the key is byte-identical.
+        bool m_graph_export{false};
 
     public:
         CreateSteinerGraph();
