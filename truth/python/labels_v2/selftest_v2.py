@@ -79,8 +79,8 @@ class Builder:
         return ev
 
 
-def run(ev):
-    R = rules.label_event(ev, "sbnd")
+def run(ev, params=None):
+    R = rules.label_event(ev, "sbnd", params)
     pt = points.link(ev, R)
     kps, kpt = keypoints.build(ev, R, R.table)
     return R, pt, kps, kpt
@@ -236,11 +236,31 @@ def test_g():
     check(len(pt["cls7"]) == len(ev.pts["X"]), "every point labelled")
 
 
+def test_h():
+    print("--- (h) start / end of a particle whose deposits tie in time (a ms-scale cosmic, float32 times)")
+    # pr_ml doc 71: PDHD / PDVD cosmic tracks, about 50 deposits over 16 mm share one stored time; the stored start was the first of the
+    # run in file order, more than 10 mm past the true first point in a third of the tracks.  Here: a 300 mm muon whose times are
+    # quantised to runs of 60 mm, the deposits stored last-first so that file order is the wrong way round inside every run.
+    B = Builder()
+    a, b = np.array([-1500.0, -1000.0, 100.0]), np.array([-1500.0, -1000.0, 400.0])
+    B.particle(1, 13, 0, "primary", a, b, 1000.0)
+    tid, P, T, q, e = B.dep[-1]; s = np.linalg.norm(P - a, axis=1); T = T[0] + np.floor(s / 60.0) * 60.0 / C
+    B.dep[-1] = (tid, P[::-1].copy(), T[::-1].copy(), q, e)
+    ev = B.event(); own = dep_of(ev, 1); first = own[np.argmin(np.linalg.norm(ev.P3[own] - a, axis=1))]; last = own[np.argmin(np.linalg.norm(ev.P3[own] - b, axis=1))]
+    out = {}
+    for nm, prm in (("off", None), ("on", dict(start_tie_order=True))):
+        R = run(ev, prm)[0]; i = inst_of(R, 1); t = R.table
+        out[nm] = (np.array([t[f"inst_start_{c}"][i] for c in "xyz"]), np.array([t[f"inst_end_{c}"][i] for c in "xyz"]), R.prm)
+    check(np.linalg.norm(out["off"][0] - ev.Xreco[first]) > 30 and "start_tie_order" not in out["off"][2], "off: the stored start is the file-order first of the tied run (over 30 mm past the true first), no new key in params")
+    check(np.linalg.norm(out["on"][0] - ev.Xreco[first]) < 1.0, "on: the stored start is the particle's first deposit")
+    check(np.linalg.norm(out["on"][1] - ev.Xreco[last]) < 1.0, "on: the stored end is the particle's last deposit")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1

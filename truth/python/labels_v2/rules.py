@@ -461,6 +461,8 @@ def instance_table(ev, T, R, NI, uroots, inst):
             own_i = mem_i[np.isfinite(Xr[mem_i, 0])]
         if len(own_i):
             o_i = own_i[np.argsort(ev.T0[own_i], kind="stable")]
+            if R.prm.get("start_tie_order"):   # pr_ml doc 71: the depo file stores float32 times, a ms-scale (cosmic) particle's deposits tie over cm;
+                o_i = o_i[tie_order(ev.T0[o_i], ev.P3[o_i])]   # order each tied run along the track before taking the first / last.  Absent = as before.
             fcols["start_x"][i], fcols["start_y"][i], fcols["start_z"][i] = Xr[o_i[0]]; fcols["end_x"][i], fcols["end_y"][i], fcols["end_z"][i] = Xr[o_i[-1]]
         fcols["g4_start_x"][i], fcols["g4_start_y"][i], fcols["g4_start_z"][i] = T.S0[r]; fcols["g4_end_x"][i], fcols["g4_end_y"][i], fcols["g4_end_z"][i] = T.S1[r]
         cols["cls_obj"][i] = R.cls_row[r]; cols["pdg"][i] = T.pdg[r]

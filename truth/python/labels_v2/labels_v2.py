@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """labels_v2.py -- the truth labeler v2 for one campaign event (pr_ml docs 50a / 50b secs 2.1-2.8; built in doc 54).
 
-  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T]
+  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order]
       -> <out dir>/<event>.labels_v2.npz; prints "<event> ok|empty|fail <why>"
+      --start-tie-order (default off = byte-identical; pr_ml doc 71): the instance table's start / end are taken after ordering
+      each run of equal-time own deposits along the track (steiner_truth.tie_order).  The depo file stores float32 times, so a
+      ms-scale (cosmic) particle's deposits tie over centimetres and the first in file order is not the first along the track.
+      When set, meta params gain "start_tie_order": true.
   labels_v2.py --selftest                                 (see selftest_v2.py)
 
 Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 stub, 3 EM segment, 4 EM blip, 5 Michel,
@@ -43,7 +47,7 @@ def peak_rss_mb():
     return -1
 
 
-def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det=None, tmpdir=None):
+def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det=None, tmpdir=None, params=None):
     t0 = time.time()
     try:
         ev = evio.Event(d, root=root, wires_dir=wires_dir, stagea_root=stagea_root, tmpdir=tmpdir)
@@ -56,7 +60,7 @@ def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det
         if not len(ev.pts["X"]):
             return "empty", "no points in the pctree"
         t1 = time.time()
-        R = rules.label_event(ev, det)
+        R = rules.label_event(ev, det, params)
         t2 = time.time()
         pt = points.link(ev, R)
         kps, kpt = keypoints.build(ev, R, R.table)
@@ -96,7 +100,8 @@ def main():
     d, outdir = args[0], args[1]
     ev = os.path.basename(d.rstrip("/"))
     try:
-        st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"))
+        st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"),
+                        dict(start_tie_order=True) if "--start-tie-order" in sys.argv else None)
     except Exception as x:   # noqa: BLE001
         import traceback
         st, why = "fail", repr(x)[:200] + " | " + traceback.format_exc().splitlines()[-3].strip()[:200]
