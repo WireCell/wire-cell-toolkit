@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """labels_v2.py -- the truth labeler v2 for one campaign event (pr_ml docs 50a / 50b secs 2.1-2.8; built in doc 54).
 
-  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order]
+  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points]
       -> <out dir>/<event>.labels_v2.npz; prints "<event> ok|empty|fail <why>"
       --start-tie-order (default off = byte-identical; pr_ml doc 71): the instance table's start / end are taken after ordering
       each run of equal-time own deposits along the track (steiner_truth.tie_order).  The depo file stores float32 times, so a
       ms-scale (cosmic) particle's deposits tie over centimetres and the first in file order is not the first along the track.
       When set, meta params gain "start_tie_order": true.
+      --kink-points (default off = byte-identical; pr_ml doc 71 sec 6): adds the members kink_x / kink_y / kink_z, kink_inst,
+      kink_angle, kink_to_end -- the hard scatters of one track particle (>= 15 deg between the 30 mm chords behind and ahead on
+      its true trajectory, both chords full, the deposit seen), where a segment boundary is allowed but not required.  The
+      key-point table and every other member are unchanged; meta gains params "kink_points": true and n_kinks.
   labels_v2.py --selftest                                 (see selftest_v2.py)
 
 Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 stub, 3 EM segment, 4 EM blip, 5 Michel,
@@ -80,7 +84,12 @@ def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det
         # timings and memory go to a separate member, so that `meta` and every array are byte-reproducible run to run (the SDCC
         # gate compares all members but `run`; two runs of one event differed only in wall_s, campaign session 2026-11-05)
         run = dict(wall_s=dict(load=round(t1 - t0, 2), rules=round(t2 - t1, 2), points_kp=round(t3 - t2, 2)), peak_rss_mb=peak_rss_mb())
+        kk = keypoints.kinks(ev, R, R.table) if R.prm.get("kink_points") else None   # before meta is frozen below
+        if kk is not None:
+            meta["n_kinks"] = int(len(kk["kink_inst"]))
         A = writer.assemble(ev, R, pt, kps, kpt, meta)
+        if kk is not None:
+            A.update(kk)
         A["run"] = np.frombuffer(json.dumps(run, sort_keys=True).encode(), np.uint8)
         os.makedirs(outdir, exist_ok=True)
         writer.write_npz(f"{outdir}/{ev.ev}.labels_v2.npz", A)
@@ -101,7 +110,7 @@ def main():
     ev = os.path.basename(d.rstrip("/"))
     try:
         st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"),
-                        dict(start_tie_order=True) if "--start-tie-order" in sys.argv else None)
+                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points")) if f in sys.argv} or None)
     except Exception as x:   # noqa: BLE001
         import traceback
         st, why = "fail", repr(x)[:200] + " | " + traceback.format_exc().splitlines()[-3].strip()[:200]

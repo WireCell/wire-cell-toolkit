@@ -26,6 +26,53 @@ KP = {"track_end": 1, "stub_start": 2, "shower_start": 3, "michel_start": 4, "de
 PHYS_MM = 10.0
 RADIUS_MM = 10.0
 VERTEX_MM = 10.0
+KINK_W_MM = 30.0
+KINK_DEG = 15.0
+
+
+def kinks(ev, R, table, w_mm=KINK_W_MM, deg=KINK_DEG):
+    """Hard scatters of ONE particle (pr_ml doc 71 sec 6: a segment boundary allowed there, not required).  Only called with the
+    option kink_points; its members are written beside the key-point table, which is untouched (no new kp_kind, pt_kp_* as before).
+
+    Per visible, resolved instance of class track: its own deposits with a true position, ordered in time, equal-time runs ordered
+    along the track (steiner_truth.tie_order; the depo file stores float32 times), zero-length steps dropped, are its trajectory.  At
+    every vertex the angle between the chord from the point w_mm behind to it and from it to the point w_mm ahead; a kink = a local
+    maximum of that angle within +- w_mm at or above deg, with both chords at their full length (at least w_mm of trajectory on
+    either side), whose deposit is seen (G7) and has a reco position.
+    -> kink_x / kink_y / kink_z (reco frame, mm), kink_inst, kink_angle (deg), kink_to_end (mm of trajectory after the kink)."""
+    from .rules import tie_order
+    T = R.T; Xr = ev.Xreco; o_r, st_r = R.o_r, R.st_r; seen = R.P.seen.any(1); out = []
+    for i in range(len(table["inst_q"])):
+        r = int(table["inst_root_row"][i])
+        if r < 0 or T.kind[r] != KIND["TRACK"] or int(table["inst_cls_obj"][i]) != OBJ["track"]:
+            continue
+        fl = int(table["inst_flags"][i])
+        if not (fl & FL_VISIBLE) or fl & (FL_BURIED | FL_SWALLOWED | FL_UNRESOLVED):
+            continue
+        mem = o_r[st_r[r]:st_r[r + 1]]; own = mem[(ev.otid[mem] == T.tt[r]) & np.isfinite(ev.P3[mem]).all(1)]
+        if len(own) < 3:
+            continue
+        own = own[np.argsort(ev.T0[own], kind="stable")]; own = own[tie_order(ev.T0[own], ev.P3[own])]; V = ev.P3[own]
+        keep = np.r_[True, np.linalg.norm(V[1:] - V[:-1], axis=1) > 0]; own, V = own[keep], V[keep]; n = len(V)
+        if n < 3:
+            continue
+        s = np.r_[0.0, np.cumsum(np.linalg.norm(V[1:] - V[:-1], axis=1))]; m = np.arange(1, n - 1)
+        if s[-1] < 2 * w_mm:
+            continue
+        j = np.clip(np.searchsorted(s, s[m] - w_mm, side="right") - 1, 0, None); k = np.clip(np.searchsorted(s, s[m] + w_mm, side="left"), None, n - 1)
+        b, a = V[m] - V[j], V[k] - V[m]; nb, na = np.linalg.norm(b, axis=1), np.linalg.norm(a, axis=1)
+        ok = (s[m] >= w_mm) & (s[-1] - s[m] >= w_mm) & (nb > 0) & (na > 0)
+        ang = np.zeros(n); ang[m[ok]] = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", a, b)[ok] / (na * nb)[ok], -1, 1)))
+        for c in np.flatnonzero(ang >= deg).tolist():
+            w = np.arange(np.searchsorted(s, s[c] - w_mm, side="left"), np.searchsorted(s, s[c] + w_mm, side="right")); w = w[w != c]
+            if np.any(ang[w] > ang[c]) or np.any((ang[w] == ang[c]) & (w < c)):
+                continue
+            d = int(own[c])
+            if seen[d] and np.isfinite(Xr[d]).all():
+                out.append((Xr[d, 0], Xr[d, 1], Xr[d, 2], i, ang[c], s[-1] - s[c]))
+    A = np.array(out, np.float64).reshape(-1, 6)
+    return dict(kink_x=A[:, 0].astype(np.float32), kink_y=A[:, 1].astype(np.float32), kink_z=A[:, 2].astype(np.float32),
+                kink_inst=A[:, 3].astype(np.int32), kink_angle=A[:, 4].astype(np.float32), kink_to_end=A[:, 5].astype(np.float32))
 
 
 def build(ev, R, table):

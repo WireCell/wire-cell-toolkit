@@ -256,11 +256,36 @@ def test_h():
     check(np.linalg.norm(out["on"][1] - ev.Xreco[last]) < 1.0, "on: the stored end is the particle's last deposit")
 
 
+def test_i():
+    print("--- (i) hard scatter of one particle (kink points, pr_ml doc 71 sec 6)")
+    # one muon: 200 mm along z, then 200 mm at 30 deg (a kink in the middle, both chords full); a second muon bends 30 deg only 10 mm
+    # before its end (no point with both 30 mm chords full sees 15 deg: no kink); a third is straight.  Deposits stored in time order.
+    B = Builder(); th = np.radians(30.0); u = np.array([0.0, np.sin(th), np.cos(th)])
+
+    def bent(tid, a, l1, l2):
+        m = a + np.array([0.0, 0.0, l1]); b = m + l2 * u
+        B.particle(tid, 13, 0, "primary", a, b, 1000.0)
+        _, P, T, q, e = B.dep[-1]; n = len(P); s = np.linspace(0, l1 + l2, n)
+        P = np.where((s <= l1)[:, None], a + np.outer(s, [0.0, 0.0, 1.0]), m + np.outer(s - l1, u)); B.dep[-1] = (tid, P, T[0] + s / C, q, e)
+        return m
+    m1 = bent(1, np.array([-1500.0, -1000.0, 100.0]), 200.0, 200.0)
+    bent(2, np.array([-1300.0, -500.0, 100.0]), 200.0, 10.0)
+    B.particle(3, 13, 0, "primary", np.array([-1100.0, 0.0, 100.0]), np.array([-1100.0, 0.0, 500.0]), 1000.0)
+    ev = B.event(); R, pt, kps, kpt = run(ev)
+    K = keypoints.kinks(ev, R, R.table); i1 = inst_of(R, 1)
+    check(len(K["kink_inst"]) == 1 and int(K["kink_inst"][0]) == i1, "one kink, on the bent muon (none on the straight one, none where the bend is 10 mm from the end)")
+    if len(K["kink_inst"]):
+        p = np.array([K["kink_x"][0], K["kink_y"][0], K["kink_z"][0]])
+        check(np.linalg.norm(p - m1) < 3.0 and abs(float(K["kink_angle"][0]) - 30.0) < 3.0, "the kink is at the bend (within 3 mm), angle 30 deg")
+        check(abs(float(K["kink_to_end"][0]) - 200.0) < 3.0, "distance to the trajectory's end 200 mm")
+    check(not any(k.startswith("kink") for k in kps) and "kink_points" not in R.prm, "off: the key-point table and params carry nothing new")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1
