@@ -105,11 +105,20 @@ namespace WireCell {
         /// main thread.
         ///
         /// init_configure() applies the configuration to every
-        /// IConfigurable.  Components' configure() may still look up
-        /// (and, via Factory::lookup, create) other components or
-        /// read data files, so concurrent calls from several Main
-        /// instances in one process must be serialized by the host.
-        /// It releases the bulk configuration data afterwards.
+        /// IConfigurable and then releases the bulk configuration
+        /// data.  It may run on any thread.
+        ///
+        /// Both are serialized across all Main instances in the
+        /// process by one mutex, so several Mains may call them
+        /// concurrently.  (The individual init_*() steps below are
+        /// not locked.)
+        ///
+        /// Components are process-wide singletons per type:name.  If
+        /// a component is in the configuration of more than one live
+        /// Main, the first to configure it owns it: the others skip
+        /// it if their configuration is identical and throw if it
+        /// differs, and only the owner finalizes it.  This keeps one
+        /// Main from reconfiguring a component another may be running.
         ///
         /// Each must be called exactly once, in this order.
         void init_preconfig();
