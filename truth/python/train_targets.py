@@ -12,6 +12,12 @@ file.  The rules, in this order (the distance cut must see the delta / Michel no
      points' charge); dir = the drift direction of the point's face (+1 when the face's U plane lies at larger x than
      its W plane, i.e. the drift volume is on the +x side); v = the label-frame drift speed.  A cluster without a
      labelled point keeps its position (frame_valid 0).
+     frame_t_ref_us (default absent = 0 = the rule above, byte-identical): the time, in us, by which the reconstruction's
+     time zero precedes Geant4's.  A reconstructed point sits at x_g + dir * v * (t_g + t_ref); the rule above assumes
+     t_ref = 0, which holds for FD-HD, FD-VD and SBND and not for the ProtoDUNE lanes, whose simulated frames start about
+     250 us before Geant4's zero with a reconstruction time offset of 0 (pr_ml doc 71: PDHD 249.562, PDVD 249.763 us,
+     measured from the drifted deposits and their priors).  When set, every point -- with or without a label, the frame
+     being a property of the detector lane -- moves by a further -dir * v * t_ref.
   2. em-daughter distance cut (Michel and delta nodes alike, R = radius_mm): a point of a Michel or delta node whose
      particle (orig_tid) is not the node's root particle and that lies farther than R from the root's own points
      (in the corrected frame) leaves the node.  Its branch -- the root's child it descends from -- becomes a shower
@@ -96,6 +102,10 @@ def targets(P, truth, speed_mmus, params=None):
     S["frame"] = dict(clusters=int(len(np.unique(cl))), shifted=len(t0_cl),
                       dominant_share_p10=float(np.percentile(dom_share, 10)) if dom_share else None,
                       clusters_dominant_below_0p9=int(sum(d < 0.9 for d in dom_share)))
+    tref = float(p.get("frame_t_ref_us", 0.0))   # absent or 0: nothing is computed and no key is written (byte-identical)
+    if tref != 0.0:
+        X[:, 0] -= dirx * speed_mmus * tref
+        S["frame"]["t_ref_us"] = tref
 
     # node bookkeeping (pr_truth parent logic): majority node per track key, node root
     inst = np.where(lab & (pfn >= 0), pfn, -1).astype(np.int64)
@@ -324,6 +334,14 @@ def selftest():
     ok.append(("track point beyond the d_traj cut masked", (~out["mask_cls"][offt]).all() and (~out["mask_inst"][offt]).all()))
     gh = np.flatnonzero(P["tid"] == -1)
     ok.append(("ghost stays ghost and in the class loss", (out["cls"][gh] == GHOST).all() and out["mask_cls"][gh].all()))
+    # frame_t_ref_us: a raw frame whose time zero is 250 us before Geant4's (the ProtoDUNE lanes) comes back to the true positions
+    tref = 250.0
+    Pr = dict(P, X=X + np.column_stack([A[:, 4] * v * tref, np.zeros(len(A)), np.zeros(len(A))]))
+    outr, Sr = targets(Pr, dict(mother=mother, start_t_ns=start, nvis_q=nvis), v, dict(frame_t_ref_us=tref))
+    ok.append(("frame_t_ref_us: a frame 250 us early back to the true positions, nothing else changed",
+               np.allclose(np.column_stack([outr["x"], outr["y"], outr["z"]]), Xtrue) and Sr["frame"].get("t_ref_us") == tref
+               and all(np.array_equal(out[k], outr[k]) for k in out if k != "x")))
+    ok.append(("frame_t_ref_us absent: no key in the summary", "t_ref_us" not in S["frame"] and "frame_t_ref_us" not in S["params"]))
     orp = np.flatnonzero(P["tid"] == 7)
     ok.append(("orphan nucleus, orphan_le off: labeler class -1 passes through (reads as GHOST), counted",
                (out["cls"][orp] == GHOST).all() and S["orphan"]["points"] == 2 and not S["orphan"]["to_le"]))
@@ -360,12 +378,17 @@ def main():
     ap.add_argument("--pctree"); ap.add_argument("--truth"); ap.add_argument("--wires"); ap.add_argument("--speed-mmus", type=float)
     ap.add_argument("--radius-mm", type=float, default=PARAMS["radius_mm"]); ap.add_argument("--dtraj-cut-mm", type=float, default=PARAMS["dtraj_cut_mm"])
     ap.add_argument("--orphan-le", action="store_true", help="rule 5: nucleus points without a PF node -> LE (default off)")
+    ap.add_argument("--frame-t-ref-us", type=float, default=None,
+                    help="rule 1: the time (us) by which the reconstruction's time zero precedes Geant4's (default absent = 0)")
     ap.add_argument("--out"); ap.add_argument("--json")
     a = ap.parse_args()
     if a.selftest:
         sys.exit(0 if selftest() else 1)
     P, truth = read_event(a.pctree, a.truth, a.wires)
-    out, S = targets(P, truth, a.speed_mmus, dict(radius_mm=a.radius_mm, dtraj_cut_mm=a.dtraj_cut_mm, orphan_le=a.orphan_le))
+    par = dict(radius_mm=a.radius_mm, dtraj_cut_mm=a.dtraj_cut_mm, orphan_le=a.orphan_le)
+    if a.frame_t_ref_us:
+        par["frame_t_ref_us"] = a.frame_t_ref_us
+    out, S = targets(P, truth, a.speed_mmus, par)
     if a.out:
         np.savez_compressed(a.out, **out, params=json.dumps(S["params"]))
     txt = json.dumps(S, indent=1)
