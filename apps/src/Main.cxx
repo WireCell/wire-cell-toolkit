@@ -249,9 +249,22 @@ void Main::add_path(const std::string& dirname) { m_load_path.push_back(dirname)
 
 void Main::initialize()
 {
-    // Here we got thought the boot-up sequence steps.
-    // std::cerr << "initialize wire-cell\n";
+    init_preconfig();
+    init_configure();
+}
 
+void Main::init_preconfig()
+{
+    init_logging();
+    init_load_config();
+    init_main_config();
+    init_plugins();
+    init_instantiate();
+    init_names();
+}
+
+void Main::init_logging()
+{
     // Maybe make this cmdline configurable.  For now, set all
     // backends the same.
     Log::set_pattern("[%H:%M:%S.%03e] %L [%^%=8n%$] %v");
@@ -259,8 +272,10 @@ void Main::initialize()
     // Log::set_level("debug", "main");
     Log::set_pattern("[%H:%M:%S.%03e] %L [  main  ] %v", "main");
     log->debug("logging to \"main\"");
+}
 
-    // Load configuration files
+void Main::init_load_config()
+{
     for (auto filename : m_cfgfiles) {
         log->debug("loading config file {}: extvars={} extcode={} tlavars={} tlacode={} load_paths={}",
                    filename, m_extvars.size(), m_extcode.size(),
@@ -275,7 +290,10 @@ void Main::initialize()
         log->debug("config file {} merged into cfgmgr", filename);
     }
     log->debug("all config files loaded ({} total)", m_cfgfiles.size());
+}
 
+void Main::init_main_config()
+{
     // Find if we have our own special configuration entry
     int ind = m_cfgmgr.index("wire-cell");
     Configuration main_cfg = m_cfgmgr.pop(ind);
@@ -293,7 +311,10 @@ void Main::initialize()
         log->critical("no apps given");
         THROW(ValueError() << errmsg{"no apps given"});
     }
+}
 
+void Main::init_plugins()
+{
     // Load any plugin shared libraries requested by user.
     PluginManager& pm = PluginManager::instance();
     for (const auto& plugin : m_plugins) {
@@ -305,10 +326,10 @@ void Main::initialize()
         }
         pm.add(pname, lname);
     }
+}
 
-    // Apply any component configuration sequence.
-
-    // Instantiation
+void Main::init_instantiate()
+{
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
@@ -326,7 +347,10 @@ void Main::initialize()
         log->debug("constructing app: \"{}\"", c);
         Factory::lookup_tn<IApplication>(c);
     }
+}
 
+void Main::init_names()
+{
     // Give any named components their name.
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
@@ -344,9 +368,12 @@ void Main::initialize()
     // We do this after setting names as INamed may have created a logger.
     apply_log_config();
     Log::fill_levels();
+}
 
-    // Finally, ask any configurables for their default, merge with
-    // user config and give back.
+void Main::init_configure()
+{
+    // Ask any configurables for their default, merge with user config
+    // and give back.
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
