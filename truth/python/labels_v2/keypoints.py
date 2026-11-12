@@ -38,7 +38,8 @@ def kinks(ev, R, table, w_mm=KINK_W_MM, deg=KINK_DEG):
     along the track (steiner_truth.tie_order; the depo file stores float32 times), zero-length steps dropped, are its trajectory.  At
     every vertex the angle between the chord from the point w_mm behind to it and from it to the point w_mm ahead; a kink = a local
     maximum of that angle within +- w_mm at or above deg, with both chords at their full length (at least w_mm of trajectory on
-    either side), whose deposit is seen (G7) and has a reco position.
+    either side), placed at the nearest own deposit within RADIUS_MM along the trajectory that is seen (G7) and has a reco
+    position (the kink's own deposit when it is seen); none: no kink.
     -> kink_x / kink_y / kink_z (reco frame, mm), kink_inst, kink_angle (deg), kink_to_end (mm of trajectory after the kink)."""
     from .rules import tie_order
     T = R.T; Xr = ev.Xreco; o_r, st_r = R.o_r, R.st_r; seen = R.P.seen.any(1); out = []
@@ -67,8 +68,10 @@ def kinks(ev, R, table, w_mm=KINK_W_MM, deg=KINK_DEG):
             w = np.arange(np.searchsorted(s, s[c] - w_mm, side="left"), np.searchsorted(s, s[c] + w_mm, side="right")); w = w[w != c]
             if np.any(ang[w] > ang[c]) or np.any((ang[w] == ang[c]) & (w < c)):
                 continue
-            d = int(own[c])
-            if seen[d] and np.isfinite(Xr[d]).all():
+            near = np.arange(np.searchsorted(s, s[c] - RADIUS_MM, side="left"), np.searchsorted(s, s[c] + RADIUS_MM, side="right"))
+            near = near[seen[own[near]] & np.isfinite(Xr[own[near]]).all(1)]      # the kink's own deposit may sit in an unseen pixel of a seen track:
+            if len(near):                                                        # take the nearest seen own deposit within RADIUS_MM along the trajectory
+                d = int(own[near[np.argmin(np.abs(s[near] - s[c]))]])
                 out.append((Xr[d, 0], Xr[d, 1], Xr[d, 2], i, ang[c], s[-1] - s[c]))
     A = np.array(out, np.float64).reshape(-1, 6)
     return dict(kink_x=A[:, 0].astype(np.float32), kink_y=A[:, 1].astype(np.float32), kink_z=A[:, 2].astype(np.float32),

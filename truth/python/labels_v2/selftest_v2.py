@@ -279,6 +279,14 @@ def test_i():
         check(np.linalg.norm(p - m1) < 3.0 and abs(float(K["kink_angle"][0]) - 30.0) < 3.0, "the kink is at the bend (within 3 mm), angle 30 deg")
         check(abs(float(K["kink_to_end"][0]) - 200.0) < 3.0, "distance to the trajectory's end 200 mm")
     check(not any(k.startswith("kink") for k in kps) and "kink_points" not in R.prm, "off: the key-point table and params carry nothing new")
+    # the deposit at the bend is not seen (FD-VD nc_b11009_e27, a 52 deg pion kink whose own deposit sat in an unseen pixel while 91 % of the
+    # track was seen): the kink goes to the nearest seen own deposit within 10 mm along the trajectory; none within 10 mm: no kink
+    own = dep_of(ev, 1); dm = np.linalg.norm(ev.P3[own] - m1, axis=1); keep = R.P.seen.copy()
+    R.P.seen[own[dm < 4.0]] = False; K = keypoints.kinks(ev, R, R.table)
+    check(len(K["kink_inst"]) == 1 and 3.0 < np.linalg.norm(np.array([K["kink_x"][0], K["kink_y"][0], K["kink_z"][0]]) - m1) < 10.0, "bend deposit unseen over 4 mm: the kink moves to the nearest seen own deposit")
+    R.P.seen[own[dm < 15.0]] = False; K = keypoints.kinks(ev, R, R.table)
+    check(len(K["kink_inst"]) == 0, "nothing seen within 10 mm of the bend: no kink")
+    R.P.seen[:] = keep
 
 
 def main():
