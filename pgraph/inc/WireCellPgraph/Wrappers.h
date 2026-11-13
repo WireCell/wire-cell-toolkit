@@ -337,13 +337,22 @@ namespace WireCell {
                 auto& iports = input_ports();
                 size_t nin = iports.size();
 
-                // 0) Hydra needs all input ports full to be ready.
-                // For EOS, the concrete INode better retain the
-                // terminating nullptr in its input stream.
+                // 0) Hydra is ready when ANY input port has data.  A
+                // hydra synchronizes its ports itself and may consume
+                // and buffer what it is given (eg Aux::FrameSync).
+                // Waiting for ALL ports would strand data arriving on
+                // one port after the hydra emptied the others (an EOS
+                // never delivered).  TbbFlow likewise calls a hydra per
+                // message on any port.
+                bool any = false;
                 for (size_t ind = 0; ind < nin; ++ind) {
-                    if (iports[ind].empty()) {
-                        return false;
+                    if (!iports[ind].empty()) {
+                        any = true;
+                        break;
                     }
+                }
+                if (!any) {
+                    return false;
                 }
 
                 // 1) fill input any queue vector
@@ -378,20 +387,26 @@ namespace WireCell {
                 // WARNING: this trimming assumes calller only
                 // pop_front's.  Really should hunt for which ones
                 // have been removed.
+                bool progress = false;
                 for (size_t ind = 0; ind < nin; ++ind) {
                     size_t want = inqv[ind].size();
                     while (iports[ind].size() > want) {
                         iports[ind].get();
+                        progress = true;
                     }
                 }
 
                 // 5) send out output any queue vectors
                 for (size_t ind = 0; ind < nout; ++ind) {
                     Edge edge = oports[ind].edge();
+                    progress = progress || !outqv[ind].empty();
                     edge->insert(edge->end(), outqv[ind].begin(), outqv[ind].end());
                 }
 
-                return true;
+                // Neither consumed nor produced: not runnable until a
+                // neighbor changes its ports (else the scheduler would
+                // call it again forever, now that one port suffices).
+                return progress;
             }
         };
 
