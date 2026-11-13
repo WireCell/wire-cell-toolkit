@@ -7,6 +7,7 @@
 #include "WireCellAux/SimpleFrame.h"
 
 #include <iostream>
+#include <map>
 
 WIRECELL_FACTORY(FrameFanin, WireCell::Gen::FrameFanin, WireCell::IFrameFanin, WireCell::IConfigurable)
 
@@ -52,6 +53,23 @@ WireCell::Configuration Gen::FrameFanin::default_configuration() const
 
     return cfg;
 }
+static bool has_traces(const IFrame::pointer& fr)
+{
+    auto traces = fr->traces();
+    return traces && !traces->empty();
+}
+
+// The ruleset index for an input port: its own, or the last one given when
+// there are fewer rulesets than ports (0, giving no tags, when none).
+static size_t rule_index(const tagrules::Context& ft, size_t port, const std::string& name)
+{
+    const size_t n = ft.nrules(name);
+    if (n == 0) {
+        return 0;
+    }
+    return port < n ? port : n - 1;
+}
+
 std::string Gen::FrameFanin::tag(size_t port) const
 {
     if (m_tags.empty()) return "";
@@ -140,7 +158,10 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         const auto& fr = invec[iport];
         info << "input " << iport << ": " << Aux::taginfo(fr) << " ";
 
-        if (!one) {
+        // The output frame's ident, time and tick are those of the first
+        // input frame with traces: an empty frame (eg DeposOrBust's for an
+        // anode without depos) has no meaningful time or tick.
+        if (!one || (!has_traces(one) && has_traces(fr))) {
             one = fr;
         }
         auto traces = fr->traces();
@@ -151,8 +172,7 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
            // tag based on user rules.
             auto fintags = fr->frame_tags();
             fintags.push_back("");
-            const size_t n = m_ft.nrules("frame");
-            auto fo = m_ft.transform(iport >= n ? n-1 : iport, "frame", fintags);
+            auto fo = m_ft.transform(rule_index(m_ft, iport, "frame"), "frame", fintags);
             fouttags.insert(fo.begin(), fo.end());
         }
 
@@ -160,8 +180,7 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         // collect transformed trace tags, any trace summary and their
         // offset trace indeices. annoying_factor *= 10;
         for (auto inttag : fr->trace_tags()) {
-            const size_t n = m_ft.nrules("frame");
-            tagrules::tagset_t touttags = m_ft.transform(iport >= n ? n-1 : iport, "trace", inttag);
+            tagrules::tagset_t touttags = m_ft.transform(rule_index(m_ft, iport, "trace"), "trace", inttag);
             if (touttags.empty()) {
                 continue;
             }
@@ -204,8 +223,29 @@ bool Gen::FrameFanin::operator()(const input_vector& invec, output_pointer& out)
         sf->tag_frame(ftag);
     }
 
-    for (auto ttt : stash) {
-        sf->tag_traces(get<0>(ttt), get<1>(ttt), get<2>(ttt));
+    // Several ports may give traces to the same output tag (eg each
+    // anode's "gauss" into one detector-wide "gauss"): the tag covers the
+    // traces of all of them.  A summary is kept only if every contribution
+    // to the tag has one aligned with its traces.
+    std::map<tagrules::tag_t, std::pair<IFrame::trace_list_t, IFrame::trace_summary_t>> merged;
+    std::map<tagrules::tag_t, bool> summarized;
+    for (const auto& ttt : stash) {
+        const auto& ot = get<0>(ttt);
+        const auto& inds = get<1>(ttt);
+        const auto& summ = get<2>(ttt);
+        auto& [minds, msumm] = merged[ot];
+        auto sit = summarized.emplace(ot, true).first;
+        sit->second = sit->second && summ.size() == inds.size();
+        minds.insert(minds.end(), inds.begin(), inds.end());
+        msumm.insert(msumm.end(), summ.begin(), summ.end());
+    }
+    for (auto& [ot, is] : merged) {
+        if (summarized[ot] && !is.second.empty()) {
+            sf->tag_traces(ot, is.first, is.second);
+        }
+        else {
+            sf->tag_traces(ot, is.first);
+        }
     }
 
     out = IFrame::pointer(sf);
