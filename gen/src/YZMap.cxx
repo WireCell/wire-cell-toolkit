@@ -46,6 +46,10 @@ void Gen::YZMap::configure(const WireCell::Configuration& cfg)
     m_nbinsy     = get<int>   (cfg, "nbinsy",     m_nbinsy);
     m_nbinsz     = get<int>   (cfg, "nbinsz",     m_nbinsz);
 
+    if (m_nbinsy <= 0 || m_nbinsz <= 0 || m_bin_width <= 0 || m_bin_height <= 0) {
+        THROW(ValueError() << errmsg{"YZMap: nbinsy, nbinsz, bin_width and bin_height must be positive"});
+    }
+
     auto jmap = Persist::load(filename);
 
     m_map.clear();
@@ -57,10 +61,19 @@ void Gen::YZMap::configure(const WireCell::Configuration& cfg)
             auto& grid = plane_map[plane];
             const auto& jgrid = jplanes[plane_str];
             const int nbinsz = jgrid.size();
+            if (nbinsz != m_nbinsz) {
+                THROW(ValueError() << errmsg{"YZMap: " + anode_name + " plane " + plane_str + " has "
+                        + std::to_string(nbinsz) + " z bins, configured nbinsz=" + std::to_string(m_nbinsz)});
+            }
             grid.resize(nbinsz);
             for (int binz = 0; binz < nbinsz; ++binz) {
                 const auto& jrow = jgrid[binz];
                 const int nbinsy = jrow.size();
+                if (nbinsy != m_nbinsy) {
+                    THROW(ValueError() << errmsg{"YZMap: " + anode_name + " plane " + plane_str + " z bin "
+                            + std::to_string(binz) + " has " + std::to_string(nbinsy)
+                            + " y bins, configured nbinsy=" + std::to_string(m_nbinsy)});
+                }
                 grid[binz].resize(nbinsy);
                 for (int biny = 0; biny < nbinsy; ++biny) {
                     grid[binz][biny] = jrow[biny].asDouble();
@@ -89,8 +102,9 @@ double Gen::YZMap::value(const std::string& anode_name,
     int biny = (int)std::floor((y + m_yoffset) / m_bin_height);
     int binz = (int)std::floor((z + m_zoffset) / m_bin_width);
 
-    biny = std::clamp(biny, 0, m_nbinsy);
-    binz = std::clamp(binz, 0, m_nbinsz);
+    // Outside the map: use the nearest edge bin.
+    biny = std::clamp(biny, 0, m_nbinsy - 1);
+    binz = std::clamp(binz, 0, m_nbinsz - 1);
 
     return grid[binz][biny];
 }
