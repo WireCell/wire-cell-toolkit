@@ -1,4 +1,5 @@
-bld.smplpkg('WCPPyUtil', use='PYTHON')
+# test_use: the doctests (test/doctest_*.cxx) need WireCellUtil's doctest.h and logging
+bld.smplpkg('WCPPyUtil', use='PYTHON', test_use='WireCellUtil')
 
 # Install Python modules so they are on PYTHONPATH at runtime.
 # SCN_Vertex.py is the top-level inference script called by the C++ SCN_Vertex wrapper.
@@ -7,3 +8,8 @@ bld.install_files('${PREFIX}/python',
                   bld.path.ant_glob('python/*.py'))
 bld.install_files('${PREFIX}/python/SCN',
                   bld.path.ant_glob('python/SCN/*.py'))
+# DV2_Vertex.py (installed by the python/*.py rule above) is the entry point the
+# C++ DV2_Vertex wrapper calls; dv2max_vertexer/ is its vendored inference package.
+bld.install_files('${PREFIX}/python',
+                  bld.path.ant_glob('python/dv2max_vertexer/**/*.py'),
+                  cwd=bld.path.find_dir('python'), relative_trick=True)
