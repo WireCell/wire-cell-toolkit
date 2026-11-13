@@ -84,7 +84,9 @@ bool DepoSetDrifter::operator()(const input_pointer& in, output_pointer& out)
     log->debug("depos out, pos: {} -> {}", bb_out.bounds().first, bb_out.bounds().second);
     log->debug("depos out, t/D: {} -> {}", tt_out.bounds().first, tt_out.bounds().second);
 
-    out = std::make_shared<Aux::SimpleDepoSet>(m_count, all_depos);
+    // Keep the input's ident: it names the event (calls need not be in
+    // event order).
+    out = std::make_shared<Aux::SimpleDepoSet>(in->ident(), all_depos);
     ++m_count;
     return true;
 }
