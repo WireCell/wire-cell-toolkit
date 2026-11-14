@@ -2403,6 +2403,7 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // hash in Trun: add a line for a new bundle (sha256sum bundle.json).  dv2_bundle_sha256 in tcn_overrides wins.
         local dv2_bundle_sha256 = {
             'dv2max/sbnd/r7_cloud/bundle.json': 'bfb095ca286b20077c142e3e6bdd363ce6a83fbc548bfe76f4bb53d50ae12a6b',
+            'dv2max/sbnd/aurora_space/bundle.json': '51588842984919b5d8146f007287a5e7841be6bbc709263b10cdb39046ff8a74',
         },
         local dv2_sha_eff = if std.objectHas(tcn_overrides, 'dv2_bundle_sha256') then tcn_overrides.dv2_bundle_sha256
                             else if std.objectHas(dv2_bundle_sha256, dv2_bundle_eff) then dv2_bundle_sha256[dv2_bundle_eff]
@@ -2923,6 +2924,11 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if vm_eff != 'original' then 'vertex_method']: vm_eff,   // checked by the pr() object assert
                   [if vm_eff != 'original' then 'dv2_bundle']: dv2_bundle_eff,
                   [if vm_eff != 'original' && dv2_sha_eff != '' then 'dv2_bundle_sha256']: dv2_sha_eff,
+                  // A space-point bundle (aurora_space) also takes the Bee points of the clusters touching each
+                  // call's cloud, read in the scope of this PR's Bee clustering layer (the T_dlvtx_space writer's).
+                  // Unused by a cloud-only bundle (r7_cloud).
+                  [if vm_eff != 'original' then 'dv2_space_pcname']: '3d',
+                  [if vm_eff != 'original' then 'dv2_space_coords']: common_corr_coords(pos_offset_on),
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
