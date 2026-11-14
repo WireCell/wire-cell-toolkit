@@ -71,7 +71,8 @@ wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-p
 ## Entry point
 
 ```python
-DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32") -> bytes
+DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32",
+           space_x=None, space_y=None, space_z=None, space_q=None, space_cluster_id=None) -> bytes
 ```
 
 | argument | meaning |
@@ -79,6 +80,7 @@ DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="f
 | `weights` | absolute path of `bundle.json` |
 | `x, y, z, q` | bytes of the cloud floats: cm, raw reco frame; `q = dQ * q_scale + q_offset`; the first `n_vertex_rows` points are the PR-graph vertex rows |
 | `trad` | bytes of 3 floats: the traditional vertex, NaN if none |
+| `space_*` | only for a space-point bundle (below): bytes of the call's space points, x / y / z / q floats and int32 cluster ids; all five or none |
 
 It returns bytes of `[x, y, z, score]` in the raw reco frame. It returns empty bytes when no prediction is
 made: fewer than 5 points or no candidate. The caller then keeps the traditional vertex. Any other error raises;
@@ -192,6 +194,31 @@ hash is 7e4ef1400541, the same as offline. Training: 20,320 events / 1,649,599 r
 
 The isotonic map was re-fit the same way. Both calibration halves stop at the same iteration in either mode
 (126 and 419). Every mode combination gives the same map to within 3.3e-5.
+
+## Space-point bundles (format `dv2max-bundle-v2`, e.g. `aurora_space`)
+
+A v2 bundle's model also takes the call's **space points**: the Bee clustering-layer points of every in-scope
+imaging cluster that has a point within `space.touch_cm` (1 cm) of a cloud point. This is the r7_space input
+(sbnd-vertexer `r7/export_r7_space.py`), recorded in production as `T_dlvtx_space` (HaiwangYu's
+SbndPrMagnifyTrackingVisitor `dl_vtx_dump_space`), on which `aurora_space` was trained.
+
+- **Collected in C++** by `PatternAlgorithms::dv2_collect_space` at the DL call, from the call's grouping, with
+  `BeeClusterPoints` (the same functions as the `T_dlvtx_space` writer): clusters in increasing cluster id, each
+  cluster's points in Bee order, Bee charge. Scope = the PR Bee clustering layer's (`TaggerCheckNeutrino`
+  `dv2_space_pcname` / `dv2_space_coords` / `dv2_space_filter`, set by `clus.jsonnet`). `TaggerCheckNeutrino`
+  learns that the bundle takes space points, and the touch distance, from the `space` section of the `DV2_Load`
+  report; a cloud-only bundle (v1, r7_cloud) gets no space points and the C++ collects none.
+- **Added in Python** by `vertexer.add_space`, exactly as the training cache was built
+  (`r7/prep_r7_space_cache.add_space`; `aurora/prep_aurora_cache.add_space`): space points first (x-shifted, raw
+  q, ids renumbered by cluster size), then the cloud (`dQ * space.q_ratio`, the id of the nearest space point within
+  `space.match_cm`, else 3 cm components numbered after the space clusters). A call with no touching cluster is
+  the cloud-only event with dQ unscaled (the training rule).
+- **Checks.** A v2 bundle called without space points, a v1 bundle called with them, or partial / ragged space
+  arguments raise. `input_digest` covers the space bytes; cloud-only digests are unchanged.
+- **The bundle** adds a `space` section (`touch_cm`, `match_cm`, `q_ratio`, `link_cm`, the cache it was measured
+  on, the rule) and uses that cache's x shift (`aurora_space`: 0.29 cm, `q_ratio` 0.2474433061809911).
+  `make_bundle.py --model-dir <saved ranker dir> --space-cache <cache_info.json>` builds it.
+- **Validation:** `validate_space.py` (validate_r7's steps; extract also reads the `.space.h5` shards).
 
 ## Tests
 

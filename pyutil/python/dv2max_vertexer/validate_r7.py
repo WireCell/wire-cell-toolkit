@@ -34,6 +34,7 @@ EXPORT = "/lus/eagle/projects/neutrinoGPU/snehadri/dlvtx/r7_export"
 PRED = "/lus/eagle/projects/neutrinoGPU/snehadri/sbnd-vertexer/dv2max/runs/r7_cloud/pred_dv2max.csv"
 INPUTS = {"nue": ["r7_mc-nuecc.h5"], "bnb": ["r7_mc-cv.h5", "r7_mc-cv-fix.h5"]}
 X_SHIFT_CM = 0.31
+MODEL_NAME = "r7_cloud"           # report title (validate_space.py sets its bundle's)
 
 
 def to_label(p):
@@ -264,7 +265,7 @@ def report(a):
         stem = "report_" + stem
     (out / f"{stem}.json").write_text(json.dumps(rep, indent=1))
     e = rep["eff_vs_label"]
-    lines = [f"# DV2_Vertex vs offline r7_cloud ({rep['n_calls']} calls, {rep['n_empty']} without prediction)", "",
+    lines = [f"# DV2_Vertex vs offline {MODEL_NAME} ({rep['n_calls']} calls, {rep['n_empty']} without prediction)", "",
              "distance to the offline pick: " + ", ".join(f"{k} {v}" for k, v in rep["dist_to_offline_pick"].items()),
              f"score |diff|: {rep['score_abs_diff']}", "",
              "| calls | n | eff<1cm DV2_Vertex | eff<1cm offline | only DV2_Vertex | only offline |", "|---|---|---|---|---|---|"]
