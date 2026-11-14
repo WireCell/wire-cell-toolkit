@@ -220,6 +220,44 @@ SbndPrMagnifyTrackingVisitor `dl_vtx_dump_space`), on which `aurora_space` was t
   `make_bundle.py --model-dir <saved ranker dir> --space-cache <cache_info.json>` builds it.
 - **Validation:** `validate_space.py` (validate_r7's steps; extract also reads the `.space.h5` shards).
 
+### Space-point validation results (`aurora_space`, 2026-11-14)
+
+**Hold-out replay.** All 30,000 calls of the `aurora_space` hold-out (15,000 labeled events never trained on:
+7,397 BNB + 7,603 nue CC; pass 0 and pass 1) were run through `DV2_Vertex` with their space-point bytes, in
+pyenv-dl at 1 thread per worker on Polaris. The offline predictions came from the training pipeline (GPU).
+
+| quantity | value |
+|---|---|
+| picks < 0.01 / 0.05 / 0.1 / 1 cm from the offline pick | 0.927 / 0.961 / 0.987 / 0.999 |
+| median / p99 distance | 3.4e-4 / 0.12 cm |
+| calibrated score \|diff\|: median / p90 / p99 / max | 0 / 0.0011 / 0.035 / 0.20 |
+
+| calls | n | < 1 cm DV2_Vertex | < 1 cm offline | only DV2_Vertex | only offline |
+|---|---|---|---|---|---|
+| pass 0 | 15000 | 0.9293 | 0.9288 | 13 | 5 |
+| pass 1 | 15000 | 0.9287 | 0.9284 | 11 | 6 |
+| all | 30000 | 0.9290 | 0.9286 | 24 | 11 |
+
+The 385 calls (1.3 %) more than 0.1 cm from the offline pick are near-tie top-1 flips (median 0.17 cm). Every
+call gave a prediction.
+
+**CPU time per call** (1 thread, 1,500 random hold-out calls, 32 workers on 32 cores): median 1.8 s, mean 3.2 s,
+p90 7.4 s, max 87 s; stage medians: pass 1 0.34 s, pass 2 1.2 s, features + ranker 0.16 s. In the chain run
+below, on the same 339 calls and the same node: median 1.7 s vs 0.53 s with `r7_cloud` (3.2x per call), mean
+2.3 s vs 0.56 s.
+
+**In the chain** (the 372 `r7/inchain` fold-0 events, build `@vaurora`):
+- `original` and `dv2_split_move` with `r7_cloud` give the same `tracking-pr.root` as the PR #543 build on every
+  finished event (336 and 337; the same 36 and 35 failed, the known `ParticleInfo` crash).
+- With `aurora_space` the call collects the space points; 339 calls in 337 events, all with space points.
+- **Same points as the writer.** A test-only build that also writes `T_dlvtx_space` (HaiwangYu's
+  sbnd-dlvtx-space-44 merged in) was run on the same events. For all 339 calls the `DV2_Vertex` input digest
+  (cloud + space bytes) equals the digest of the dumped `T_dlvtx_call` / `T_dlvtx_cloud` / `T_dlvtx_space` rows
+  (1,331,448 space points), and every listed cluster passes the 1 cm touch test. Its DL inputs and outputs are
+  identical to `@vaurora`'s on all 337 events.
+- The 339 dumped calls replayed outside the chain give the in-chain float32 output bit for bit in 334 calls; the
+  other 5 agree to 1.6e-5 cm and 3e-8 in score (the call-order effect, see Repeatability).
+
 ## Tests
 
 Automated tests (run with the WCT test suite; each skips with the reason when what it needs is missing):
@@ -229,6 +267,9 @@ Automated tests (run with the WCT test suite; each skips with the reason when wh
 | `pyutil/test/test_dv2max.py` | the algorithm, 33 tests: call -> Event (x shift and back, charge decoding, PR-vertex candidate rows, traditional vertex, 3 cm clusters), NMS, bundle loading (contents, sha256 check, format, feature names), the isotonic calibration, the `DV2_Vertex` / `DV2_Load` API (input checks, `DV2_STRICT`, no prediction, output frame, repeatability, `DV2_HOOK_LOG`, `DV2_THREADS`), per-stage invariants on held-out calls, the golden replay, and run-to-run repeatability in fresh processes | numpy, scipy, torch, lightgbm; the bundle on `WIRECELL_PATH` (or `DV2MAX_BUNDLE`) for 24 of them |
 | `pyutil/test/doctest_dv2_vertex.cxx` (`wcdoctest-pyutil`) | the C++ wrapper against a fake module (argument marshalling, empty = no prediction, every Python error reaches C++ with its type and message), and 5 golden calls through the wrapper with the real model | the golden case: the bundle and the Python packages |
 | `clus/test/doctest_vertex_method.cxx` | method names, the payload check behind the fallback (empty, wrong size, NaN), the configure-time failures (bad method, missing bundle, failed import) | -- |
+| `pyutil/test/test_dv2max_space.py` | space-point bundles, 20 tests: `add_space` against a verbatim copy of the training rule (order, charge scale, cluster ids by size, unmatched-point components, the no-space case), the input digest (cloud-only digests unchanged), the v2 manifest checks, the `DV2_Vertex` space API (load report, missing / partial / ragged space arguments, the empty set, a v1 bundle given space points), and the golden replay | numpy, scipy, torch, lightgbm; the `aurora_space` bundle for the API and golden tests |
+| `pyutil/test/doctest_dv2_vertex_space.cxx` (`wcdoctest-pyutil`) | the space overload of the C++ wrapper against a fake module: the five arrays in order (ids as int32), the empty set, no space arguments from the cloud-only overload, size checks before Python is called, a Python error's message | -- |
+| `clus/test/doctest_dv2_space.cxx` (`wcdoctest-clus`) | reading the touch distance from the `DV2_Load` report (and its errors), and the touch test: a cluster is taken whole if any point is within `touch_cm` (inclusive), across cell edges | -- |
 | `clus/test/doctest_pattern_recognition.cxx`, suite "dv2 placements [B]" | `dv2_place_point` and `dv2_place_main_vertex` on the fixture [B] PR graph: snap, split at a fit point (incl. the long-muon sets), split_move reuse within 1.5 cm, the move onto P and when it declines | fixture [B] |
 
 The golden fixture `pyutil/test/data/dv2max_golden.json` holds 26 held-out fold-0 calls (BNB and nue, both
@@ -236,6 +277,10 @@ passes, three cloud sizes, two without a traditional vertex) and 3 synthetic no-
 of the code at the time; tolerances 0.01 cm and 0.001 in score.  Only calls whose top-1 candidate wins by a
 ranker-score margin of at least 0.5 are used, so the answers do not depend on floating-point details.  Regenerate
 it with `pyutil/test/make_dv2max_golden.py` (see its header) when the model or the inference changes on purpose.
+The space-point fixture `pyutil/test/data/dv2max_space_golden.json` holds 10 `aurora_space` hold-out calls (BNB
+and nue, both passes, two without a traditional vertex; 50-329 cloud and 330-1,804 space points), selected the
+same way (margin >= 0.5), tolerances 0.001 cm and 0.001 in score; made by `pyutil/test/make_dv2max_space_golden.py`.
+Every hold-out call has space points, so the no-space case is covered by the unit tests only.
 Accuracy itself (< 1 cm efficiency on all 5,038 held-out calls) is too slow for the test suite: that is
 `validate_r7.py` below.
 
