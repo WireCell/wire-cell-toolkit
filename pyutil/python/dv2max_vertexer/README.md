@@ -1,4 +1,4 @@
-# dv2max_vertexer: DV2-MAX (r7_cloud) inference for the in-chain DL-vertex step
+# dv2max_vertexer: DV2-MAX inference for the in-chain DL-vertex step
 
 Inference-only copy of the DV2-MAX vertexer, called by WCT through `pyutil/python/DV2_Vertex.py`
 (`WCPPyUtil::DV2_Vertex`). One call = one neutrino candidate's DL-vertex cloud. The result is the DV2-MAX
@@ -15,8 +15,9 @@ top-1 vertex in the raw reco frame plus a calibrated P(< 1 cm).
   lightgbm 4.7 has no wheel for glibc 2.17; 4.6.0 reads this bundle's ranker (`ranker_fold0.txt`) and gives the
   same results.
 - Nothing is imported from sbnd-vertexer.
-- Model bundle: `dv2max/sbnd/r7_cloud/` in [wire-cell-data](https://github.com/WireCell/wire-cell-data) (`bundle.json`
-  and the files it lists, each with its sha256), not in this repository. A `dv2_*` method needs that wire-cell-data
+- Model bundles: `dv2max/sbnd/aurora_space/` (SBND default, space points, format v2) and `dv2max/sbnd/r7_cloud/`
+  (cloud only) in [wire-cell-data](https://github.com/WireCell/wire-cell-data) (`bundle.json` and the files it
+  lists, each with its sha256), not in this repository. A `dv2_*` method needs the selected wire-cell-data
   directory on `WIRECELL_PATH`; without it the job fails at configure ("not found on WIRECELL_PATH").
 
 ## Choosing the vertexing method
@@ -58,7 +59,9 @@ wire-cell ... --tla-str vertex_method=original -c pgrapher/experiment/sbnd/wct-p
   - `dv2_split` can split a track one fit spacing (about 0.6 cm) from an existing vertex, which leaves a short
     stub segment between the two;
   - a split long-muon segment stays the long muon: its two halves replace it.
-- `dv2_bundle` (default `dv2max/sbnd/r7_cloud/bundle.json`, resolved through `WIRECELL_PATH`) picks the model.
+- `dv2_bundle` (SBND jsonnet default `dv2max/sbnd/aurora_space/bundle.json`, resolved through `WIRECELL_PATH`)
+  picks the model; `--tla-str dv2_bundle=dv2max/sbnd/r7_cloud/bundle.json` selects the cloud-only model. The C++
+  default (configs that set no `dv2_bundle`) stays `r7_cloud`.
   `clus.jsonnet` holds the sha256 of each known bundle manifest (`bundle.json`, which carries the sha256 of every
   other bundle file). `TaggerCheckNeutrino` fails at configure if the manifest it loads has another sha256
   (`dv2_bundle_sha256`), and `Trun/dl_weights` records `<vertex_method>:<dv2_bundle>@sha256:<that hash>`.
