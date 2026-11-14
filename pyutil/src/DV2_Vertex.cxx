@@ -42,12 +42,19 @@ namespace {
                                          v.size() * sizeof(WCPPyUtil::FLOAT));
     }
 
+    // The cluster ids travel as int32 (DV2_Vertex.py reads them with np.int32).
+    static_assert(sizeof(int) == 4, "DV2_Vertex: space_cluster_id is passed as 4-byte ints");
+    PyObject* bytes_of(const std::vector<int>& v)
+    {
+        return PyBytes_FromStringAndSize(reinterpret_cast<const char*>(v.data()), v.size() * sizeof(int));
+    }
+
     // Owns new references: Py_XDECREF of each on scope exit, also when an
     // exception unwinds, so no error path leaks.  Capacity is reserved up
     // front, so own() never allocates (and never throws) for <= kMax refs.
     class PyRefs {
       public:
-        static constexpr size_t kMax = 16;
+        static constexpr size_t kMax = 24;
         PyRefs() { m_refs.reserve(kMax); }
         PyRefs(const PyRefs&) = delete;
         PyRefs& operator=(const PyRefs&) = delete;
@@ -113,13 +120,26 @@ namespace WCPPyUtil {
         return ret;
     }
 
-    std::vector<FLOAT> DV2_Vertex(const std::string& module, const std::string& function,
-                                  const std::string& weights,
-                                  const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
-                                  const std::vector<FLOAT>& trad, double q_scale, double q_offset,
-                                  const std::string& dtype)
+    // Both DV2_Vertex overloads: space / space_cluster_id are nullptr for the cloud-only call.
+    static std::vector<FLOAT> dv2_call(const std::string& module, const std::string& function,
+                                       const std::string& weights,
+                                       const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
+                                       const std::vector<FLOAT>& trad, double q_scale, double q_offset,
+                                       const std::string& dtype,
+                                       const std::vector<std::vector<FLOAT> >* space,
+                                       const std::vector<int>* space_cluster_id)
     {
         if (input.size() != 4) throw std::runtime_error("DV2_Vertex: input.size() != 4");
+        if (space) {
+            if (space->size() != 4) throw std::runtime_error("DV2_Vertex: space.size() != 4");
+            const size_t ns = (*space)[3].size();
+            for (size_t i = 0; i < 3; ++i) {
+                if ((*space)[i].size() != ns) throw std::runtime_error("DV2_Vertex: space size mismatch");
+            }
+            if (!space_cluster_id || space_cluster_id->size() != ns) {
+                throw std::runtime_error("DV2_Vertex: space_cluster_id size mismatch");
+            }
+        }
         const size_t npts = input[3].size();
         for (size_t i = 0; i < 3; ++i) {
             if (input[i].size() != npts) throw std::runtime_error("DV2_Vertex: input size mismatch");
@@ -150,8 +170,24 @@ namespace WCPPyUtil {
             if (!a) throw std::runtime_error("DV2_Vertex: could not build the Python arguments" + fetch_python_error());
         }
 
-        PyObject* pValue = refs.own(PyObject_CallFunctionObjArgs(pFunc, args[0], args[1], args[2], args[3], args[4],
-                                                                 args[5], args[6], args[7], args[8], args[9], NULL));
+        PyObject* pValue = nullptr;
+        if (space) {
+            PyObject* sargs[5] = {refs.own(bytes_of((*space)[0])),
+                                  refs.own(bytes_of((*space)[1])),
+                                  refs.own(bytes_of((*space)[2])),
+                                  refs.own(bytes_of((*space)[3])),
+                                  refs.own(bytes_of(*space_cluster_id))};
+            for (auto* a : sargs) {
+                if (!a) throw std::runtime_error("DV2_Vertex: could not build the Python arguments" + fetch_python_error());
+            }
+            pValue = refs.own(PyObject_CallFunctionObjArgs(pFunc, args[0], args[1], args[2], args[3], args[4],
+                                                           args[5], args[6], args[7], args[8], args[9],
+                                                           sargs[0], sargs[1], sargs[2], sargs[3], sargs[4], NULL));
+        }
+        else {
+            pValue = refs.own(PyObject_CallFunctionObjArgs(pFunc, args[0], args[1], args[2], args[3], args[4],
+                                                           args[5], args[6], args[7], args[8], args[9], NULL));
+        }
         if (!pValue) {
             throw std::runtime_error("DV2_Vertex: Python function call failed" + fetch_python_error());
         }
@@ -165,5 +201,27 @@ namespace WCPPyUtil {
         std::vector<FLOAT> ret(ret_size / sizeof(FLOAT));
         if (ret_size) std::memcpy(ret.data(), PyBytes_AsString(pValue), ret_size);
         return ret;
+    }
+
+    std::vector<FLOAT> DV2_Vertex(const std::string& module, const std::string& function,
+                                  const std::string& weights,
+                                  const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
+                                  const std::vector<FLOAT>& trad, double q_scale, double q_offset,
+                                  const std::string& dtype)
+    {
+        return dv2_call(module, function, weights, input, n_vertex_rows, trad, q_scale, q_offset, dtype,
+                        nullptr, nullptr);
+    }
+
+    std::vector<FLOAT> DV2_Vertex(const std::string& module, const std::string& function,
+                                  const std::string& weights,
+                                  const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
+                                  const std::vector<FLOAT>& trad, double q_scale, double q_offset,
+                                  const std::string& dtype,
+                                  const std::vector<std::vector<FLOAT> >& space,
+                                  const std::vector<int>& space_cluster_id)
+    {
+        return dv2_call(module, function, weights, input, n_vertex_rows, trad, q_scale, q_offset, dtype,
+                        &space, &space_cluster_id);
     }
 }  // namespace WCPPyUtil

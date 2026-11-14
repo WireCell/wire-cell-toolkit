@@ -1130,6 +1130,18 @@ namespace WireCell::Clus::PR {
         bool   m_dv2_target_valid{false};
         WireCell::Point m_dv2_target;
         double m_dv2_score{-1.0};
+        // DV2-MAX space points, for a bundle that takes them (format
+        // dv2max-bundle-v2, e.g. aurora_space; TaggerCheckNeutrino sets these
+        // from the bundle's DV2_Load report and its own configuration).  Each
+        // call then also passes the Bee clustering-layer points of every
+        // in-scope cluster of the grouping that has a point within
+        // m_dv2_space_touch_cm of a cloud point (dv2_collect_space: the
+        // T_dlvtx_space rule the model was trained with).  touch 0 = the
+        // bundle takes no space points: nothing is collected.
+        double m_dv2_space_touch_cm{0.0};                                      // cm
+        std::string m_dv2_space_pcname{"3d"};                                  // Bee layer scope: point cloud
+        std::vector<std::string> m_dv2_space_coords{"x_t0cor", "y", "z"};      // Bee layer scope: coordinates
+        int m_dv2_space_filter{1};                                             // 1 in-scope, 0 all, -1 complement
 
         // P8 -- endpoint-consistency check on PR::add_segment.
         // The prototype refuses a vertex/segment connection whose vertex wcpt
@@ -3633,6 +3645,24 @@ namespace WireCell::Clus::PR {
             double score{-1.0};
         };
         static Dv2Payload dv2_parse_payload(const std::vector<float>& dnn_vtx);
+
+        // vertex_method dv2_* with a space-point bundle: the call's space
+        // points.  The clusters of `grouping` in the scope (m_dv2_space_pcname,
+        // m_dv2_space_coords, m_dv2_space_filter: bee_cluster_in_scope) are
+        // taken whole when any of their Bee points lies within
+        // m_dv2_space_touch_cm of a cloud point (bee_touching_clusters), in
+        // increasing cluster id, each cluster's points in Bee order with the
+        // Bee charge (bee_cluster_points) -- the points the DL-vertex dump
+        // writes to T_dlvtx_space for this call (SbndPrMagnifyTrackingVisitor
+        // dl_vtx_dump_space), in that order.  Coordinates in cm.
+        struct Dv2Space {
+            std::vector<float> x, y, z, q;   // cm; Bee charge
+            std::vector<int> cluster_id;     // get_cluster_id() of each point's cluster
+            size_t n_clusters{0};            // touching clusters
+            size_t n_in_scope{0};            // candidate clusters
+        };
+        Dv2Space dv2_collect_space(const Facade::Grouping& grouping, const std::vector<float>& cloud_x,
+                                   const std::vector<float>& cloud_y, const std::vector<float>& cloud_z) const;
 
         // vertex_method dv2_*: the main-vertex placement of the DV2-MAX point
         // P (determine_overall_main_vertex_DL).  Candidates: cand_vertices

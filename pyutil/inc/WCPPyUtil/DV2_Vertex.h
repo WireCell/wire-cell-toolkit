@@ -32,5 +32,22 @@ namespace WCPPyUtil {
                                   const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
                                   const std::vector<FLOAT>& trad, double q_scale, double q_offset,
                                   const std::string& dtype = "float32");
+
+    /// The same call for a bundle that also takes the call's space points
+    /// (format dv2max-bundle-v2; DV2_Load reports its "space" section).
+    /// space:            4 arrays x, y, z, q of the space points (cm, raw reco
+    ///                   frame, Bee charge), empty = no touching cluster.
+    /// space_cluster_id: the cluster id of each space point.
+    /// Points in the order the model was trained with: clusters in increasing
+    /// id, each cluster's points in Bee order (see
+    /// PatternAlgorithms::dv2_collect_space).  Throws std::runtime_error on a
+    /// size mismatch or any Python failure (including a cloud-only bundle).
+    std::vector<FLOAT> DV2_Vertex(const std::string& module, const std::string& function,
+                                  const std::string& weights,
+                                  const std::vector<std::vector<FLOAT> >& input, int n_vertex_rows,
+                                  const std::vector<FLOAT>& trad, double q_scale, double q_offset,
+                                  const std::string& dtype,
+                                  const std::vector<std::vector<FLOAT> >& space,
+                                  const std::vector<int>& space_cluster_id);
 }
 #endif

@@ -166,6 +166,29 @@ std::string TaggerCheckNeutrino::dv2_bundle_sha256_error(const std::string& load
     return "";
 }
 
+double TaggerCheckNeutrino::dv2_space_touch_cm(const std::string& load_report, std::string& err)
+{
+    err.clear();
+    Json::Value rep;
+    try {
+        rep = Persist::loads(load_report);
+    }
+    catch (const std::exception&) {
+        err = "the DV2_Load report is not JSON";
+        return 0;
+    }
+    if (!rep.isObject()) { err = "the DV2_Load report is not a JSON object"; return 0; }
+    const Json::Value& sp = rep["space"];
+    if (sp.isNull()) return 0;                       // cloud-only bundle (or a report without the field)
+    if (!sp.isObject() || !sp["touch_cm"].isNumeric()) {
+        err = "the DV2_Load report's space section has no numeric touch_cm";
+        return 0;
+    }
+    const double t = sp["touch_cm"].asDouble();
+    if (!(t > 0) || !std::isfinite(t)) { err = "the DV2_Load report's space.touch_cm is not > 0"; return 0; }
+    return t;
+}
+
 void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
 {
     m_grouping_name = get(config, "grouping_name", m_grouping_name);
@@ -511,8 +534,32 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
             raise<ValueError>("TaggerCheckNeutrino: vertex_method %s, DV2-MAX bundle %s: %s",
                               m_vertex_method.c_str(), m_dv2_bundle.c_str(), sha_err.c_str());
         }
+        // A space-point bundle (its report has a "space" section): every call
+        // also passes the Bee points of the clusters touching its cloud, read
+        // in this scope.
+        std::string sp_err;
+        m_dv2_space_touch_cm = dv2_space_touch_cm(load_ms, sp_err);
+        if (!sp_err.empty()) {
+            raise<ValueError>("TaggerCheckNeutrino: vertex_method %s, DV2-MAX bundle %s: %s",
+                              m_vertex_method.c_str(), m_dv2_bundle.c_str(), sp_err.c_str());
+        }
+        m_dv2_space_pcname = get(config, "dv2_space_pcname", m_dv2_space_pcname);
+        m_dv2_space_filter = get(config, "dv2_space_filter", m_dv2_space_filter);
+        if (config["dv2_space_coords"].isArray()) {
+            m_dv2_space_coords.clear();
+            for (const auto& jc : config["dv2_space_coords"]) m_dv2_space_coords.push_back(jc.asString());
+        }
+        if (m_dv2_space_touch_cm > 0 && m_dv2_space_coords.size() != 3) {
+            raise<ValueError>("TaggerCheckNeutrino: dv2_space_coords must name 3 arrays, got %d",
+                              static_cast<int>(m_dv2_space_coords.size()));
+        }
         SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: vertex_method {}, DV2-MAX bundle {}, module {}, loaded (ms: {})",
                            m_vertex_method, m_dv2_bundle, m_dv2_py_module, load_ms);
+        if (m_dv2_space_touch_cm > 0) {
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: DV2-MAX bundle takes space points: clusters within {} cm of the cloud, scope {} [{}, {}, {}] filter {}",
+                               m_dv2_space_touch_cm, m_dv2_space_pcname, m_dv2_space_coords[0], m_dv2_space_coords[1],
+                               m_dv2_space_coords[2], m_dv2_space_filter);
+        }
 #endif
     }
     // doc sbnd_xin/docs/pr/112 sec 11: the dual chain (exclusion-free PR pass
@@ -1139,6 +1186,10 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["dv2_bundle"]              = m_dv2_bundle;         // dv2_* methods: DV2-MAX bundle manifest (WIRECELL_PATH-relative)
     cfg["dv2_py_module"]           = m_dv2_py_module;      // dv2_* methods: Python module holding DV2_Vertex()
     cfg["dv2_bundle_sha256"]       = m_dv2_bundle_sha256;  // dv2_* methods: expected sha256 of the bundle manifest; "" = not checked
+    cfg["dv2_space_pcname"]        = m_dv2_space_pcname;   // dv2_* + space-point bundle: Bee layer scope, point cloud
+    cfg["dv2_space_coords"]        = Json::arrayValue;     // dv2_* + space-point bundle: Bee layer scope, coordinates
+    for (const auto& sc : m_dv2_space_coords) cfg["dv2_space_coords"].append(sc);
+    cfg["dv2_space_filter"]        = m_dv2_space_filter;   // dv2_* + space-point bundle: 1 in-scope clusters, 0 all, -1 the rest
     cfg["dl_vtx_dual_chain"]       = m_dl_vtx_dual_chain;       // doc pr/112 sec 11: false = legacy (no exclusion-free second pass)
     cfg["dual_chain_mode"]         = m_dual_chain_mode;         // doc pr/112 sec 11: snap | voxels | union
     cfg["dual_chain_transfer"]     = m_dual_chain_transfer;     // doc pr/112 sec 11: false = probe (pass runs, nothing moves)
@@ -3324,6 +3375,10 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
         // neutrino vertexing method (validated in configure)
         PatternAlgorithms::parse_vertex_method(m_vertex_method, pattern_algos.m_vertex_method);
         pattern_algos.m_dv2_py_module     = m_dv2_py_module;
+        pattern_algos.m_dv2_space_touch_cm = m_dv2_space_touch_cm;   // 0 = cloud-only bundle
+        pattern_algos.m_dv2_space_pcname   = m_dv2_space_pcname;
+        pattern_algos.m_dv2_space_coords   = m_dv2_space_coords;
+        pattern_algos.m_dv2_space_filter   = m_dv2_space_filter;
         pattern_algos.m_graph_endpoint_tol       = m_graph_endpoint_tol * units::cm;   // cm -> internal
         pattern_algos.m_oov_prototype_parity     = m_oov_prototype_parity;
         pattern_algos.m_first_seg_local_pca      = m_first_seg_local_pca;
