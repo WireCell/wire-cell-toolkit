@@ -1,0 +1,164 @@
+'''
+DV2-MAX neutrino vertex for one DL-vertex call (called by WCPPyUtil::DV2_Vertex through the embedded interpreter).
+
+DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32") -> bytes
+  weights        absolute path of the model bundle manifest (e.g. <wire-cell-data>/dv2max/sbnd/r7_cloud/bundle.json)
+  x, y, z, q     bytes of `dtype` arrays: the call's point cloud (cm, raw reco frame; q = dQ * q_scale + q_offset,
+                 i.e. the floats the DL-vertex dump writes); the first n_vertex_rows points are the PR-graph
+                 vertex rows
+  n_vertex_rows  int
+  trad           bytes of 3 `dtype` values: the traditional main vertex (cm, raw reco frame), NaN if none
+  q_scale, q_offset  float
+Returns bytes of 4 `dtype` values [x, y, z, score]: the DV2-MAX top-1 vertex in the RAW reco frame and its calibrated
+P(< 1 cm) in [0, 1]; empty bytes when no prediction is made (fewer than 5 points or no candidate).  The caller then
+keeps the traditional vertex.  Any other error raises, which fails the job; DV2_STRICT=0 instead reports it on stderr
+and returns empty bytes (the traditional vertex for that call).
+
+DV2_Load(weights) -> bytes
+  Imports the model code and loads the bundle (the caller's configure step), so a broken environment (missing package,
+  bad bundle, sha256 mismatch) fails at startup instead of at the first event.  Raises on any error, whatever
+  DV2_STRICT says.  Returns JSON bytes: the load-time breakdown, torch_threads, and bundle_sha256 (the sha256 of
+  the manifest, which TaggerCheckNeutrino checks against dv2_bundle_sha256).
+
+Environment: DV2_THREADS (torch / LightGBM threads, default 1, interop threads 1; torch's setting is per PROCESS;
+0 = leave torch's thread settings alone), DV2_HOOK_LOG=<path>
+(append one JSON line per call: n, n_vertex_rows, input_sha1, pred [raw frame], score, score_raw, source, n_cand,
+stage_ms, ms; the call that loads the models also carries first_call_ms = import / load breakdown; input_sha1 =
+input_digest() of the call's arguments, so an in-chain call can be matched with its standalone replay), DV2_DEBUG (print a summary per call to stdout), DV2_VERIFY=0 (skip the sha256 check
+of the bundle files at load).  Models are loaded once per process and manifest path.
+'''
+import time
+
+_T0 = time.perf_counter()
+import hashlib  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import sys  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+_CACHE = {}
+_THREADS = None
+_LAST = {}                 # the last call's record (what DV2_HOOK_LOG writes), for tests
+
+
+_FIRST = {"import_numpy": round(1e3 * (time.perf_counter() - _T0), 1)}   # load-time breakdown (ms), reported once
+
+
+def _threads():
+    """torch's thread pools belong to the whole PROCESS: what is set here applies to every torch user in it (the
+    SCN_Vertex net of the original method sets 1 the same way).  DV2_THREADS=N (default 1): N intra-op threads, 1
+    inter-op thread.  DV2_THREADS=0: torch's settings are left as the process (or another component) chose them.
+    The values before and after go into the load report (DV2_Load, first_call_ms of DV2_HOOK_LOG)."""
+    global _THREADS
+    if _THREADS is None:
+        t0 = time.perf_counter()
+        import torch
+        _FIRST["import_torch"] = round(1e3 * (time.perf_counter() - t0), 1)
+        raw = os.environ.get("DV2_THREADS", "1") or "1"
+        try:
+            n = int(raw)
+        except ValueError:
+            n = 1
+        before = {"intra": torch.get_num_threads(), "interop": torch.get_num_interop_threads()}
+        if n <= 0:                      # leave torch's thread settings alone
+            n = before["intra"]
+        else:
+            torch.set_num_threads(n)
+            try:
+                torch.set_num_interop_threads(1)
+            except RuntimeError:        # already set, or inter-op work has started in this process
+                pass
+        _FIRST["torch_threads"] = {"DV2_THREADS": raw, "before": before,
+                                   "after": {"intra": torch.get_num_threads(),
+                                             "interop": torch.get_num_interop_threads()}}
+        _THREADS = n
+    return _THREADS
+
+
+def _vertexer(weights):
+    v = _CACHE.get(weights)
+    if v is None:
+        n = _threads()
+        t0 = time.perf_counter()
+        from dv2max_vertexer.vertexer import Vertexer
+        t1 = time.perf_counter()
+        v = Vertexer(weights, verify=os.environ.get("DV2_VERIFY", "1") != "0", threads=n)
+        _FIRST.update(import_dv2max_vertexer=round(1e3 * (t1 - t0), 1),
+                      load=round(1e3 * (time.perf_counter() - t1), 1), load_steps=v.load_ms)
+        _CACHE[weights] = v
+    return v
+
+
+def DV2_Load(weights):
+    v = _vertexer(weights)
+    rep = {k: val for k, val in _FIRST.items() if k != "reported"}
+    rep["bundle_sha256"] = v.manifest_sha256
+    return json.dumps(rep).encode()
+
+
+def _strict():
+    return os.environ.get("DV2_STRICT", "1") != "0"
+
+
+def _hook(rec):
+    path = os.environ.get("DV2_HOOK_LOG")
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+
+
+def input_digest(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
+    """sha1 (hex) of one call's exact arguments: the x, y, z, q and trad bytes in that order, then the ASCII text
+    '<n_vertex_rows>:<repr(float(q_scale))>:<repr(float(q_offset))>:<dtype>'.  A call and its replay with the same
+    bytes (e.g. dv2max_vertexer/validate_r7.py) give the same digest."""
+    h = hashlib.sha1()
+    for b in (x, y, z, q, trad):
+        h.update(b)
+    h.update(f"{int(n_vertex_rows)}:{float(q_scale)!r}:{float(q_offset)!r}:{dtype}".encode())
+    return h.hexdigest()
+
+
+def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
+    global _LAST
+    t0 = time.perf_counter()
+    dt = np.dtype(dtype)
+    X = np.frombuffer(x, dtype=dt)
+    Y = np.frombuffer(y, dtype=dt)
+    Z = np.frombuffer(z, dtype=dt)
+    Q = np.frombuffer(q, dtype=dt)
+    T = np.frombuffer(trad, dtype=dt)
+    nv = int(n_vertex_rows)
+    rec = {"n": int(len(Q)), "n_vertex_rows": nv,
+           "input_sha1": input_digest(x, y, z, q, nv, trad, q_scale, q_offset, dtype)}
+    try:
+        if not (len(X) == len(Y) == len(Z) == len(Q)) or len(T) != 3 or not 0 <= nv <= len(Q):
+            raise ValueError(f"bad input sizes x {len(X)} y {len(Y)} z {len(Z)} q {len(Q)} trad {len(T)} "
+                             f"n_vertex_rows {nv}")
+        v = _vertexer(weights)
+        from dv2max_vertexer.vertexer import event_from_call, unshift_x
+        ev = event_from_call(X, Y, Z, Q, nv, T, float(q_scale), float(q_offset), v.x_shift_cm, v.link_cm)
+        r = v.run(ev)
+        if r is None:
+            out = b""
+            rec.update(pred=None, reason="no prediction (too few points or no candidate)")
+        else:
+            p = unshift_x(r["xyz"], v.x_shift_cm)
+            out = np.array([p[0], p[1], p[2], r["score"]], dtype=dt).tobytes()
+            rec.update(pred=[float(c) for c in p], score=r["score"], score_raw=r["score_raw"], source=r["source"],
+                       n_cand=r["n_cand"], stage_ms=r["ms"])
+    except Exception as e:                 # noqa: BLE001 - DV2_STRICT=0: the chain keeps the traditional vertex
+        if _strict():
+            raise
+        print(f"DV2_Vertex: {type(e).__name__}: {e} (no DV2-MAX vertex for this call)", file=sys.stderr, flush=True)
+        out = b""
+        rec.update(pred=None, reason=f"error: {type(e).__name__}: {e}")
+    rec["ms"] = round(1e3 * (time.perf_counter() - t0), 2)
+    if "load" in _FIRST and not _FIRST.get("reported"):
+        rec["first_call_ms"] = {k: v for k, v in _FIRST.items() if k != "reported"}
+        _FIRST["reported"] = True
+    _LAST = rec
+    _hook(rec)
+    if os.environ.get("DV2_DEBUG"):
+        print("DV2_Vertex:", json.dumps(rec), flush=True)
+    return out

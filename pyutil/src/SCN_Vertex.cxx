@@ -2,6 +2,8 @@
 
 #include "WCPPyUtil/SCN_Vertex.h"
 
+#include "GIL.h"
+
 #include <iostream>
 #include <vector>
 #include <stdexcept>
@@ -44,8 +46,9 @@ namespace WCPPyUtil {
 
         PyObject *pName, *pWeights, *pDtype, *pModule, *pDict, *pFunc, *pValue;
 
-        // Initialize the Python interpreter (safe to call multiple times)
-        Py_Initialize();
+        // Start the interpreter once (WCPPyUtil::ensure_interpreter) and hold the
+        // GIL for this call only, so the call is safe from any thread.
+        GIL gil;
 
         pName    = PyUnicode_FromString(module.c_str());
         pWeights = PyUnicode_FromString(weights.c_str());

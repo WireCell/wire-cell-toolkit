@@ -173,6 +173,13 @@ function(params)
             uses: [$.dft, fr, $.elec_resp_for(n), $.rc_resp, $.sys_resp],
         } for plane in [0,1,2]], $.fields),
 
+    // An optional IDriftPlanes.  When set, the anodes (and sim's drifter)
+    // take their anode/response/cathode planes from it instead of from
+    // params.det.volumes[].faces.  Eg:
+    //
+    //   tools_maker(params) { drift_planes:: {type: "DriftPlanes", ...} }
+    drift_planes :: null,
+
     // One anode per detector "volume"
     anodes : [{
         type : "AnodePlane",
@@ -184,10 +191,10 @@ function(params)
             nimpacts: params.sim.nimpacts,
             // The wire schema file
             wire_schema: wc.tn($.wires),
-
-            faces : vol.faces,
-        },
-        uses: [$.wires],
+        } + (if $.drift_planes == null
+             then { faces : vol.faces }
+             else { drift_planes : wc.tn($.drift_planes) }),
+        uses: [$.wires] + (if $.drift_planes == null then [] else [$.drift_planes]),
     } for vol in params.det.volumes],
 
     // Arbitrarily call out the first anode to make single-anode

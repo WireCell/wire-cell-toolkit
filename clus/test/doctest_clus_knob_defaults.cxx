@@ -411,6 +411,10 @@ TEST_CASE("clus knob defaults: TaggerCheckNeutrino switches are all OFF")
     CHECK_KNOB_BOOL(cfg, "main_vertex_graph_audit", false);
     // doc pr/106 sec 10: exclusion-free charge cloud for the DL vertex net -- OFF.
     CHECK_KNOB_BOOL(cfg, "dl_vtx_cloud_no_exclusion", false);
+    // vertex_method: the original (production) vertexing chain unless a
+    // DV2-MAX method (dv2_snap / dv2_split / dv2_split_move) is asked for.
+    REQUIRE_MESSAGE(cfg.isMember("vertex_method"), "missing knob: vertex_method");
+    CHECK(cfg["vertex_method"].asString() == "original");
     // doc pr/107: dQ/dx fit keeps every trajectory point (prototype parity) -- OFF.
     CHECK_KNOB_BOOL(cfg, "dqdx_fit_keep_all_points", false);
     // doc pdvd/45: exclusion cells compared in the t0-corrected drift frame -- OFF.

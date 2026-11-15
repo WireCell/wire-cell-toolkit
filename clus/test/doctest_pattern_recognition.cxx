@@ -3,6 +3,7 @@
 #include "WireCellClus/PRGraph.h"
 #include "WireCellClus/PRVertex.h"
 #include "WireCellClus/PRSegment.h"
+#include "WireCellClus/PRTrajectoryView.h"   // sorted_out_edges (dv2 placement cases)
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade.h"
 #include "WireCellClus/NeutrinoTaggerInfo.h"
@@ -23,6 +24,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <algorithm>
+#include <optional>
 
 /*
 Usage:
@@ -878,3 +881,344 @@ TEST_CASE("pattern_recognition shower_clustering_with_nv main_pi determinism [B]
 }
 
 } // TEST_SUITE replay [B]
+
+// ─── TEST_SUITE: vertex_method dv2_* placements [B] ─────────────────────────
+//
+// PatternAlgorithms::dv2_place_point (the placement of the DV2-MAX point P in
+// determine_overall_main_vertex_DL) and dv2_place_main_vertex (the move of
+// dv2_split_move), on the fixture [B] PR graph after find_proto_vertex.  P is
+// chosen from the graph itself (a segment-interior fit point, or a point near
+// a vertex), so no model is needed.  Each case builds its own graph.
+
+namespace {
+
+    WireCell::Point dv2_pos(const VertexPtr& v) { return v->fit().valid() ? v->fit().point : v->wcpt().point; }
+
+    std::vector<VertexPtr> dv2_candidates(const Graph& g)
+    {
+        std::vector<VertexPtr> out;
+        for (const auto& nd : ordered_nodes(g)) {
+            if (g[nd].vertex) out.push_back(g[nd].vertex);
+        }
+        return out;
+    }
+
+    // nearest candidate vertex to P (and its distance)
+    std::pair<VertexPtr, double> dv2_nearest(const std::vector<VertexPtr>& cands, const WireCell::Point& P)
+    {
+        VertexPtr best;
+        double dbest = 1e9 * units::cm;
+        for (const auto& v : cands) {
+            const double d = (dv2_pos(v) - P).magnitude();
+            if (d < dbest) { dbest = d; best = v; }
+        }
+        return {best, dbest};
+    }
+
+    bool dv2_in_graph(const Graph& g, const SegmentPtr& sg)
+    {
+        for (auto e : ordered_edges(g)) {
+            if (g[e].segment == sg) return true;
+        }
+        return false;
+    }
+
+    // A segment-interior fit point whose nearest graph vertex is in
+    // [dmin, dmax), and that no other segment-interior fit point shares.
+    struct Dv2Pick { SegmentPtr seg; size_t index{0}; WireCell::Point P; double d_near{0}; };
+    std::optional<Dv2Pick> dv2_pick_fit_point(const Graph& g, double dmin, double dmax)
+    {
+        const auto cands = dv2_candidates(g);
+        std::vector<std::pair<SegmentPtr, size_t>> all;
+        for (auto e : ordered_edges(g)) {
+            SegmentPtr sg = g[e].segment;
+            if (!sg || !sg->cluster() || !sg->descriptor_valid()) continue;
+            for (size_t i = 1; i + 1 < sg->fits().size(); ++i) all.emplace_back(sg, i);
+        }
+        for (const auto& [sg, i] : all) {
+            const auto P = sg->fits()[i].point;
+            const double d = dv2_nearest(cands, P).second;
+            if (d < dmin || d >= dmax) continue;
+            bool unique = true;
+            for (const auto& [sg2, j] : all) {
+                if ((sg2 != sg || j != i) && (sg2->fits()[j].point - P).magnitude() < 1e-6 * units::mm) { unique = false; break; }
+            }
+            if (unique) return Dv2Pick{sg, i, P, d};
+        }
+        return std::nullopt;
+    }
+
+    PatternAlgorithms::Dv2Placement dv2_place(PrTestEnv& env, PrContext& ctx, PatternAlgorithms::VertexMethod m,
+                                              const WireCell::Point& P, IndexedVertexSet& lm_v, IndexedSegmentSet& lm_s)
+    {
+        ctx.algo.m_vertex_method = m;
+        return ctx.algo.dv2_place_point(*ctx.graph, dv2_candidates(*ctx.graph), P, lm_v, lm_s, env.pdata, env.recomb, env.dv);
+    }
+
+    PrTestEnv* dv2_env_B()
+    {
+        PrTestEnv* env = env_B_ptr();
+        if (!env) {
+            std::string m = std::string("Skipping: fixture B not found at ") + kDumpB;
+            MESSAGE(m);
+        }
+        return env;
+    }
+}
+
+TEST_SUITE("pattern_recognition dv2 placements [B]")
+{
+using VM = PatternAlgorithms::VertexMethod;
+
+TEST_CASE("pattern_recognition dv2 no candidates: no vertex")
+{
+    Graph g;
+    IndexedVertexSet lm_v;
+    IndexedSegmentSet lm_s;
+    for (VM m : {VM::dv2_snap, VM::dv2_split, VM::dv2_split_move}) {
+        PatternAlgorithms algo;
+        algo.m_vertex_method = m;
+        auto r = algo.dv2_place_point(g, {}, WireCell::Point(0, 0, 0), lm_v, lm_s, nullptr, nullptr, nullptr);
+        CHECK(r.vertex == nullptr);
+        CHECK_FALSE(r.split);
+    }
+}
+
+TEST_CASE("pattern_recognition dv2_snap: the nearest graph vertex, at any distance, graph unchanged [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    auto pick = dv2_pick_fit_point(*ctx.graph, 2 * units::cm, 1e9 * units::cm);
+    REQUIRE(pick.has_value());
+    const auto nv = boost::num_vertices(*ctx.graph), ne = boost::num_edges(*ctx.graph);
+    IndexedVertexSet lm_v;
+    IndexedSegmentSet lm_s;
+    // P on a segment interior: snap never splits
+    for (const auto& P : {pick->P, pick->P + WireCell::Point(0, 0, 100 * units::cm)}) {
+        const auto [v_exp, d_exp] = dv2_nearest(dv2_candidates(*ctx.graph), P);
+        auto r = dv2_place(*env, ctx, VM::dv2_snap, P, lm_v, lm_s);
+        CHECK_FALSE(r.split);
+        CHECK(r.vertex == v_exp);
+        CHECK(r.nearest == v_exp);
+        CHECK(r.dis == doctest::Approx(d_exp));
+        CHECK(r.d_near == doctest::Approx(d_exp));
+    }
+    CHECK(boost::num_vertices(*ctx.graph) == nv);
+    CHECK(boost::num_edges(*ctx.graph) == ne);
+    CHECK(lm_v.empty());
+    CHECK(lm_s.empty());
+    MESSAGE("dv2_snap: graph ", nv, " vertices / ", ne, " segments; P ", pick->d_near / units::cm, " cm from the nearest vertex");
+}
+
+TEST_CASE("pattern_recognition dv2_split: splits the segment at P's nearest interior fit point [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    auto pick = dv2_pick_fit_point(*ctx.graph, 2 * units::cm, 1e9 * units::cm);
+    REQUIRE(pick.has_value());
+    const auto nv = boost::num_vertices(*ctx.graph), ne = boost::num_edges(*ctx.graph);
+    const size_t nw = pick->seg->wcpts().size();
+    const auto [v_near, d_near] = dv2_nearest(dv2_candidates(*ctx.graph), pick->P);
+    IndexedVertexSet lm_v;
+    IndexedSegmentSet lm_s;
+
+    auto r = dv2_place(*env, ctx, VM::dv2_split, pick->P, lm_v, lm_s);
+    REQUIRE(r.split);
+    REQUIRE(r.vertex);
+    CHECK(r.vertex != v_near);
+    CHECK(r.nearest == v_near);
+    CHECK(r.d_near == doctest::Approx(d_near));
+    // the new vertex sits exactly on the fit point, and is protected from vertex merges
+    CHECK(r.dis == 0.0);
+    CHECK((dv2_pos(r.vertex) - pick->P).magnitude() == 0.0);
+    CHECK(r.vertex->flags_any(VertexFlags::kProtectedBreak));
+    // one segment became two halves meeting at the new vertex
+    CHECK(boost::num_vertices(*ctx.graph) == nv + 1);
+    CHECK(boost::num_edges(*ctx.graph) == ne + 1);
+    CHECK_FALSE(dv2_in_graph(*ctx.graph, pick->seg));
+    REQUIRE(r.vertex->descriptor_valid());
+    CHECK(boost::out_degree(r.vertex->get_descriptor(), *ctx.graph) == 2);
+    size_t nw_halves = 0;
+    for (auto e : sorted_out_edges(r.vertex->get_descriptor(), *ctx.graph)) {
+        SegmentPtr half = (*ctx.graph)[e].segment;
+        REQUIRE(half);
+        auto [a, b] = find_vertices(*ctx.graph, half);
+        CHECK((a == r.vertex || b == r.vertex));
+        nw_halves += half->wcpts().size();
+    }
+    CHECK(nw_halves == nw + 1);   // the break point is in both halves
+    // not a long-muon segment: the long-muon sets stay as they were
+    CHECK(lm_v.empty());
+    CHECK(lm_s.empty());
+}
+
+TEST_CASE("pattern_recognition dv2_split: a split long-muon segment is replaced by its halves [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    auto pick = dv2_pick_fit_point(*ctx.graph, 2 * units::cm, 1e9 * units::cm);
+    REQUIRE(pick.has_value());
+    // another segment and vertex in the long-muon sets must stay there
+    SegmentPtr other;
+    for (auto e : ordered_edges(*ctx.graph)) {
+        if ((*ctx.graph)[e].segment && (*ctx.graph)[e].segment != pick->seg) { other = (*ctx.graph)[e].segment; break; }
+    }
+    VertexPtr other_v = dv2_candidates(*ctx.graph).front();
+    IndexedVertexSet lm_v{other_v};
+    IndexedSegmentSet lm_s{pick->seg};
+    if (other) lm_s.insert(other);
+
+    auto r = dv2_place(*env, ctx, VM::dv2_split, pick->P, lm_v, lm_s);
+    REQUIRE(r.split);
+    CHECK(lm_s.count(pick->seg) == 0);
+    for (auto e : sorted_out_edges(r.vertex->get_descriptor(), *ctx.graph)) {
+        CHECK(lm_s.count((*ctx.graph)[e].segment) == 1);
+    }
+    if (other) CHECK(lm_s.count(other) == 1);
+    CHECK(lm_s.size() == (other ? 3u : 2u));
+    CHECK(lm_v.count(r.vertex) == 1);
+    CHECK(lm_v.count(other_v) == 1);
+    CHECK(lm_v.size() == 2);
+}
+
+TEST_CASE("pattern_recognition dv2_split_move: reuses a graph vertex within 1.5 cm, where dv2_split splits [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    std::optional<Dv2Pick> pick;
+    {
+        auto ctx = make_context(*env);
+        run_through(*env, ctx, Step::AfterFindProtoVertex);
+        pick = dv2_pick_fit_point(*ctx.graph, 0.05 * units::cm, 1.4 * units::cm);
+    }
+    REQUIRE(pick.has_value());
+    const WireCell::Point P = pick->P;
+    {   // dv2_split_move: the nearest vertex is within 1.5 cm -> reused, no split
+        auto ctx = make_context(*env);
+        run_through(*env, ctx, Step::AfterFindProtoVertex);
+        const auto nv = boost::num_vertices(*ctx.graph), ne = boost::num_edges(*ctx.graph);
+        const auto [v_near, d_near] = dv2_nearest(dv2_candidates(*ctx.graph), P);
+        IndexedVertexSet lm_v;
+        IndexedSegmentSet lm_s;
+        auto r = dv2_place(*env, ctx, VM::dv2_split_move, P, lm_v, lm_s);
+        CHECK_FALSE(r.split);
+        CHECK(r.vertex == v_near);
+        CHECK(r.dis == doctest::Approx(d_near));
+        CHECK(r.dis < PatternAlgorithms::kDv2MoveReuseDistCm * units::cm);
+        CHECK(boost::num_vertices(*ctx.graph) == nv);
+        CHECK(boost::num_edges(*ctx.graph) == ne);
+    }
+    {   // dv2_split on the same P: the fit point (0 cm) beats the vertex -> split
+        auto ctx = make_context(*env);
+        run_through(*env, ctx, Step::AfterFindProtoVertex);
+        IndexedVertexSet lm_v;
+        IndexedSegmentSet lm_s;
+        auto r = dv2_place(*env, ctx, VM::dv2_split, P, lm_v, lm_s);
+        CHECK(r.split);
+        CHECK(r.dis == 0.0);
+    }
+    MESSAGE("dv2_split_move reuse: P ", pick->d_near / units::cm, " cm from the nearest vertex");
+}
+
+TEST_CASE("pattern_recognition dv2_split_move: beyond 1.5 cm it splits like dv2_split [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    auto pick = dv2_pick_fit_point(*ctx.graph, 2 * units::cm, 1e9 * units::cm);
+    REQUIRE(pick.has_value());
+    const auto nv = boost::num_vertices(*ctx.graph);
+    IndexedVertexSet lm_v;
+    IndexedSegmentSet lm_s;
+    auto r = dv2_place(*env, ctx, VM::dv2_split_move, pick->P, lm_v, lm_s);
+    CHECK(r.split);
+    CHECK(r.dis == 0.0);
+    CHECK(boost::num_vertices(*ctx.graph) == nv + 1);
+    CHECK_FALSE(dv2_in_graph(*ctx.graph, pick->seg));
+}
+
+TEST_CASE("pattern_recognition dv2_place_main_vertex: moves the vertex onto P and refits around it [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    // a main-cluster vertex with a segment; P halfway to that segment's second fit point
+    VertexPtr V;
+    WireCell::Point P;
+    for (const auto& v : ctx.algo.find_cluster_vertices(*ctx.graph, *env->fixture.main_cluster)) {
+        if (!v->descriptor_valid()) continue;
+        for (auto e : sorted_out_edges(v->get_descriptor(), *ctx.graph)) {
+            SegmentPtr sg = (*ctx.graph)[e].segment;
+            if (!sg || sg->fits().size() < 3) continue;
+            const auto& f = sg->fits();
+            const auto& near = ((f.front().point - dv2_pos(v)).magnitude() < (f.back().point - dv2_pos(v)).magnitude())
+                ? f[1].point : f[f.size() - 2].point;
+            if ((near - dv2_pos(v)).magnitude() > 0.2 * units::cm) {
+                V = v;
+                P = dv2_pos(v) + 0.5 * (near - dv2_pos(v));
+                break;
+            }
+        }
+        if (V) break;
+    }
+    REQUIRE(V);
+    const double move = (P - dv2_pos(V)).magnitude();
+    std::vector<SegmentPtr> attached;
+    for (auto e : sorted_out_edges(V->get_descriptor(), *ctx.graph)) attached.push_back((*ctx.graph)[e].segment);
+
+    ctx.algo.m_vertex_method = VM::dv2_split_move;
+    ctx.algo.m_dv2_target = P;
+    ctx.algo.m_dv2_target_valid = true;
+    REQUIRE(ctx.algo.dv2_place_main_vertex(*ctx.graph, *env->fixture.main_cluster, V, *ctx.tf, env->dv));
+    CHECK((V->fit().point - P).magnitude() < 1e-4 * units::cm);
+    CHECK(V->flag_fix());
+    for (const auto& sg : attached) {
+        REQUIRE(sg);
+        REQUIRE(!sg->fits().empty());
+        const double d_end = std::min((sg->fits().front().point - P).magnitude(), (sg->fits().back().point - P).magnitude());
+        const double d_end_cm = d_end / units::cm;
+        CAPTURE(d_end_cm);
+        CHECK(d_end < 1e-2 * units::cm);   // the refit trajectories start at the moved vertex
+    }
+    MESSAGE("dv2_place_main_vertex: moved ", move / units::cm, " cm, ", attached.size(), " segment(s)");
+}
+
+TEST_CASE("pattern_recognition dv2_place_main_vertex: declines without touching the vertex [B]")
+{
+    PrTestEnv* env = dv2_env_B();
+    if (!env) return;
+    auto ctx = make_context(*env);
+    run_through(*env, ctx, Step::AfterFindProtoVertex);
+    VertexPtr V;
+    for (const auto& v : ctx.algo.find_cluster_vertices(*ctx.graph, *env->fixture.main_cluster)) {
+        if (v->descriptor_valid() && boost::out_degree(v->get_descriptor(), *ctx.graph) > 0) { V = v; break; }
+    }
+    REQUIRE(V);
+    const auto before = V->fit().point;
+    const auto here = dv2_pos(V);
+    auto run = [&](VM m, bool valid, const WireCell::Point& P) {
+        ctx.algo.m_vertex_method = m;
+        ctx.algo.m_dv2_target_valid = valid;
+        ctx.algo.m_dv2_target = P;
+        return ctx.algo.dv2_place_main_vertex(*ctx.graph, *env->fixture.main_cluster, V, *ctx.tf, env->dv);
+    };
+    const WireCell::Point near = here + WireCell::Point(0.5 * units::cm, 0, 0);
+    CHECK_FALSE(run(VM::dv2_split, true, near));        // only dv2_split_move moves
+    CHECK_FALSE(run(VM::dv2_snap, true, near));
+    CHECK_FALSE(run(VM::original, true, near));
+    CHECK_FALSE(run(VM::dv2_split_move, false, near));  // no accepted DV2-MAX point
+    CHECK_FALSE(run(VM::dv2_split_move, true, here));   // already there
+    CHECK_FALSE(run(VM::dv2_split_move, true, WireCell::Point(1e4 * units::cm, 1e4 * units::cm, 1e4 * units::cm)));  // outside the detector
+    CHECK(V->fit().point == before);
+    CHECK_FALSE(ctx.algo.dv2_place_main_vertex(*ctx.graph, *env->fixture.main_cluster, nullptr, *ctx.tf, env->dv));
+}
+
+} // TEST_SUITE dv2 placements [B]

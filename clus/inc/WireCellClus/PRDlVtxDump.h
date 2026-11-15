@@ -22,7 +22,7 @@ namespace WireCell::Clus::PR {
     struct DlVtxCall {
         // ---- which call
         std::string pass{"prod"};      ///< "prod" (production pass) | "off" (dual-chain OFF pass, snap mode: through determine_overall_main_vertex_DL) | "off-voxels" (dual-chain voxels/union mode: the OFF graph's own top-K call in dual_chain_scn_voxels; no decision fields)
-        int  status{0};                ///< 0 ok; 1 the network threw (payload empty); 2 unexpected payload size (legacy path)
+        int  status{0};                ///< 0 ok; 1 the network threw (payload empty); 2 unexpected payload size (legacy path) or, for vertex_method dv2_*, no DV2-MAX prediction
         int  top_k{0};                 ///< top_k requested from SCN_Vertex (1 = legacy argmax)
         bool rerank{false};            ///< dl_vtx_rerank in force
         // ---- the exact network input (cm, float32, build order: vertex block first)
@@ -31,7 +31,7 @@ namespace WireCell::Clus::PR {
         bool   cloud_no_exclusion{false}; ///< dl_vtx_cloud_no_exclusion: the cloud came from an exclusion-free refit of this pass's graph
         double q_scale{0}, q_offset{0};///< q = dQ * q_scale + q_offset
         // ---- the network output
-        std::vector<float> payload;    ///< raw return of THIS call's inference: legacy [x,y,z]; rerank [x,y,z,score]*K (cm)
+        std::vector<float> payload;    ///< raw return of THIS call's inference: legacy [x,y,z]; rerank [x,y,z,score]*K (cm); vertex_method dv2_*: DV2-MAX [x,y,z,P(<1 cm)] (rerank false, top_k 1)
         bool payload_from_off{false};  ///< dual-chain "voxels" mode: payload is the OFF pass's, no inference here
         int  n_off_voxels{0};          ///< dual-chain "union" mode: OFF voxels pooled with the payload AFTER it was recorded (the decision below saw payload + these)
         // ---- the decision this call fed (cm)

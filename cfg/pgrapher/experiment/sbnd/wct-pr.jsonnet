@@ -50,7 +50,12 @@ function(input='qlpctree.tar.gz',
          // need the step-1 labeler's truth_track table).  blob_truth adds
          // T_blob_truth (one row per blob).  Default off.
          truth_match=false,
-         blob_truth=false)
+         blob_truth=false,
+         // Neutrino vertexing method (clus.jsonnet pr()): 'dv2_split_move' (default),
+         // 'dv2_snap', 'dv2_split', or 'original' (the pre-DV2-MAX production chain),
+         // e.g. --tla-str vertex_method=original.  dv2_bundle: the DV2-MAX model.
+         vertex_method='dv2_split_move',
+         dv2_bundle='dv2max/sbnd/r7_cloud/bundle.json')
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
@@ -84,7 +89,8 @@ local bee = {
 // 1-step's art-side labeler_tagger writes, come from TaggerBeeVisitor here.
 local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true,
                               dl_vtx_dump=dl_vtx_dump, pr_knobs=pr_knobs, flat_tree=flat_tree,
-                              truth_match=truth_match, blob_truth=blob_truth);
+                              truth_match=truth_match, blob_truth=blob_truth,
+                              vertex_method=vertex_method, dv2_bundle=dv2_bundle);
 
 local sink = g.pnode({
     type: 'TensorFileSink',

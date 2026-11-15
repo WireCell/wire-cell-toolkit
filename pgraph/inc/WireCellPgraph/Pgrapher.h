@@ -50,6 +50,9 @@
     none, 1 is default and gives summary of time, 2 also includes ExecMon
     tracing.
 
+    Execution always fires the sink-most runnable node next so that no more
+    than one datum is held on an edge.  See Graph::execute().
+
  */
 
 #ifndef WIRECELL_PGRAPH_PGRAPHER

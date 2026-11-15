@@ -58,10 +58,15 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // tracking-pr.root as one flat CAF-style entry; default off.
     // truth_match / blob_truth (ai-helper issue 41): the reco<->truth matching
     // trees in tracking-pr.root (MC with the labeler's truth_detail); default off.
+    // vertex_method / dv2_bundle: the neutrino vertexing method, see clus.jsonnet pr()
+    // ('dv2_split_move' = default; 'dv2_snap' | 'dv2_split'; 'original' = the
+    // pre-DV2-MAX production chain).
     node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
-         flat_tree=false, truth_match=false, blob_truth=false)::
+         flat_tree=false, truth_match=false, blob_truth=false,
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/sbnd/r7_cloud/bundle.json')::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
                       truth_match=truth_match, blob_truth=blob_truth,
+                      vertex_method=vertex_method, dv2_bundle=dv2_bundle,
                       pipeline_names=$.pipeline_names(enable_tracking_root, tagger_bee, flat_tree),
                       particle_dataset=pds.particle_dataset, extra_uses=pds.all,
                       beam_window=$.beam_window),
