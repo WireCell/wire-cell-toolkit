@@ -279,6 +279,14 @@ public:
         // behaviour they gate is already production.  Either way, defaults =>
         // byte-identical to the pre-pr/30 tree.
         bool   m_fit_exclusion{false};             // P1
+        // pr_ml doc 79 (P3) -- fit-only modes for the main cluster.  "" (default)
+        // = legacy, nothing changes.  "trad": find_proto_vertex as production,
+        // then publish the fitter and skip every later stage of the candidate.
+        // "external": the graph read from m_pr_external_graph (ExternalGraph.h)
+        // replaces find_proto_vertex; one do_multi_tracking; publish; skip.
+        std::string m_pr_fit_only{};
+        std::string m_pr_external_graph{};
+        double m_pr_external_max_med_dist{6.0};   // mm: a segment / clump farther from the main cluster is skipped
         double m_graph_endpoint_tol{0.3};          // cm
         bool   m_oov_prototype_parity{false};      // F2 (all three sites)
         bool   m_first_seg_local_pca{true};        // P2

@@ -2,6 +2,7 @@
 #include "WireCellClus/NeutrinoPatternBase.h" // pattern recognition ...
 #include "WireCellClus/PatternDebugIO.h"      // debug dump/load
 #include "WireCellClus/NuBundleCensus.h"      // sbnd_xin/docs/109 selection census
+#include "WireCellClus/ExternalGraph.h"       // pr_ml doc 79: pr_fit_only = "external"
 
 #include "WireCellUtil/Persist.h"
 #include <algorithm>  // doc pr/94: stable_sort of the per-bundle candidate list
@@ -285,6 +286,16 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_fit_blob_coverage_defer = get(config, "fit_blob_coverage_defer", m_fit_blob_coverage_defer);
     // doc sbnd_xin/docs/pr/30 §11 port-fidelity knobs.
     m_fit_exclusion            = get(config, "fit_exclusion",            m_fit_exclusion);
+    // pr_ml doc 79 (P3): "" = legacy; "trad" | "external" = fit-only modes (main cluster)
+    m_pr_fit_only              = get(config, "pr_fit_only",              m_pr_fit_only);
+    m_pr_external_graph        = get(config, "pr_external_graph",        m_pr_external_graph);
+    m_pr_external_max_med_dist = get(config, "pr_external_max_med_dist", m_pr_external_max_med_dist);   // mm
+    if (!(m_pr_fit_only.empty() || m_pr_fit_only == "trad" || m_pr_fit_only == "external")) {
+        raise<ValueError>("TaggerCheckNeutrino: pr_fit_only must be \"\", \"trad\" or \"external\", not \"%s\"", m_pr_fit_only);
+    }
+    if (m_pr_fit_only == "external" && m_pr_external_graph.empty()) {
+        raise<ValueError>("TaggerCheckNeutrino: pr_fit_only = \"external\" needs pr_external_graph");
+    }
     m_graph_endpoint_tol       = get(config, "graph_endpoint_tol",       m_graph_endpoint_tol);       // cm
     m_oov_prototype_parity     = get(config, "oov_prototype_parity",     m_oov_prototype_parity);
     m_first_seg_local_pca      = get(config, "first_seg_local_pca",      m_first_seg_local_pca);
@@ -975,6 +986,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     // doc sbnd_xin/docs/pr/30 §11.  Round-tripped so the compiled config
     // records the operating point; each default reproduces the pre-pr/30 tree.
     cfg["fit_exclusion"]            = m_fit_exclusion;             // false = legacy (all sites pass flag_exclusion=false)
+    cfg["pr_fit_only"]              = m_pr_fit_only;               // pr_ml doc 79: "" = legacy (full PR chain)
+    cfg["pr_external_graph"]        = m_pr_external_graph;         // pr_ml doc 79: graph file for pr_fit_only = "external"
+    cfg["pr_external_max_med_dist"] = m_pr_external_max_med_dist;  // pr_ml doc 79: mm
     cfg["graph_endpoint_tol"]       = m_graph_endpoint_tol;        // cm
     cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
@@ -3672,6 +3686,57 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
             run_dual_chain_off_pass(pattern_algos, *track_fitter, main_cluster, other_clusters, cov_defer_active, dual_hint);
             if (m_perf) SPDLOG_LOGGER_DEBUG(log, "TaggerCheckNeutrino timing: [dual-off] pass TOTAL took {} ms", MS(Clock::now() - t0).count());
             t0 = Clock::now();
+        }
+
+        // pr_ml doc 79 (P3, pr_fit_only; default "" => this block never runs).
+        // The main cluster's graph is built -- "trad": find_proto_vertex exactly
+        // as below; "external": read from pr_external_graph -- and fitted, then
+        // the fitter is published as at the end of the candidate and every later
+        // stage of this candidate is skipped.
+        if (!m_pr_fit_only.empty()) {
+            if (m_pr_fit_only == "trad") {
+                cov_defer_suspend();
+                pattern_algos.find_proto_vertex(*pr_graph, *main_cluster, *track_fitter, m_dv, true, 2, true, particle_data());
+                cov_defer_restore();
+            } else {
+                const auto eg = PR::read_external_graph(m_pr_external_graph);
+                std::vector<const Facade::Cluster*> others;
+                for (const auto* c : grouping.children()) if (c != main_cluster) others.push_back(c);
+                auto st = PR::build_external_graph(pattern_algos, *pr_graph, *main_cluster, *track_fitter, m_dv, eg,
+                                                   m_pr_external_max_med_dist * units::mm, others);
+                if (st.seg_used > 0) {
+                    track_fitter->do_multi_tracking(true, true, false, m_fit_exclusion, false, main_cluster);
+                }
+                int seg_nocharge = 0, pts_nocharge = 0, pts_total = 0;
+                for (auto ed : PR::ordered_edges(*pr_graph)) {
+                    auto seg = (*pr_graph)[ed].segment;
+                    if (!seg) continue;
+                    int nbad = 0;
+                    for (const auto& f : seg->fits()) { ++pts_total; if (f.dQ < 0) ++nbad; }
+                    pts_nocharge += nbad;
+                    if (nbad) ++seg_nocharge;
+                }
+                std::vector<double> md = st.seg_med_dist;
+                std::sort(md.begin(), md.end());
+                SPDLOG_LOGGER_INFO(log, "EXTGRAPH file {} cluster {} segments read {} used {} skipped {} refused {} clumps read {} used {} "
+                                   "med_dist_mm median {:.3f} max {:.3f} fit_points {} nocharge_points {} nocharge_segments {} "
+                                   "other_nearer segments {} clumps {}",
+                                   m_pr_external_graph, main_cluster->get_cluster_id(), st.seg_read, st.seg_used, st.seg_skipped,
+                                   st.seg_refused, st.clump_read, st.clump_used,
+                                   md.empty() ? -1.0 : md[md.size() / 2] / units::mm, md.empty() ? -1.0 : md.back() / units::mm,
+                                   pts_total, pts_nocharge, seg_nocharge, st.seg_other_nearer, st.clump_other_nearer);
+                if (const auto* qc = track_fitter->get_clump_charges(main_cluster)) {
+                    for (size_t k = 0; k < qc->size(); ++k) {
+                        SPDLOG_LOGGER_INFO(log, "EXTCLUMP cluster {} clump {} charge {:.6g}", main_cluster->get_cluster_id(), k, qc->at(k));
+                    }
+                }
+            }
+            track_fitter->assemble_fitted_charge_2d();
+            if (nu_index == 0) grouping.set_track_fitting(track_fitter);
+            if (m_nu_per_bundle) grouping.set_track_fitting("nu" + std::to_string(nu_index), track_fitter);
+            SPDLOG_LOGGER_INFO(log, "TaggerCheckNeutrino: pr_fit_only = \"{}\": candidate {} main cluster {} fitted; later stages skipped",
+                               m_pr_fit_only, nu_index, main_cluster->get_cluster_id());
+            continue;
         }
 
         {

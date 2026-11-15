@@ -307,6 +307,19 @@ namespace WireCell::Clus {
             // Reported as a double for the set_parameter(name, value) plumbing.
             double keep_dqdx_response = 0;
 
+            // pr_ml doc 79 (P4) -- charge clumps in the dQ/dx fit.  When > 0
+            // and set_charge_clumps() gave clumps for the fitted cluster,
+            // dQ_dx_multi_fit gets one extra unknown per clump: a charge with
+            // the clump's 3-D points as its footprint, no path, no neighbour
+            // regulariser (doc 77's "segments plus clumps").  Clumps reach the
+            // fitter only from TaggerCheckNeutrino's pr_fit_only = "external"
+            // mode.  0 = OFF = no code path touched (legacy, byte-identical).
+            double dqdx_clump_term = 0;
+            // pr_ml doc 79 (P4, doc 77 change 2) -- the clumps also compete for
+            // 2-D cells in the trajectory fit's exclusion (update_association);
+            // acts only when the fit runs with flag_exclusion.  0 = OFF.
+            double traj_clump_claim = 0;
+
             // wcp-porting-img icarus/docs/04 -- electron-lifetime correction of
             // the FITTED charge.  0 = OFF = no code path touched (legacy,
             // byte-identical; SBND/uBooNE/PDHD/PDVD never set it).  When > 0 it
@@ -1196,6 +1209,13 @@ namespace WireCell::Clus {
         /// keep_dqdx_response was off, the cluster was never multi-fitted with
         /// a cluster filter, or its last fit returned early).
         const DqdxResponse* get_dqdx_response(const Facade::Cluster* cluster) const;
+
+        /// pr_ml doc 79 (P4): the charge clumps of a cluster for the dQ/dx fit's clump term (dqdx_clump_term > 0), each a
+        /// list of 3-D points (WCT units).  Replaces any earlier clumps of that cluster; an empty list removes them.
+        void set_charge_clumps(const Facade::Cluster* cluster, std::vector<std::vector<WireCell::Point>> clumps);
+        /// The charges the last dQ_dx_multi_fit of that cluster gave its clumps, in set_charge_clumps order (NaN for a clump
+        /// with no live cell); nullptr when the clump term did not run for it.
+        const std::vector<double>* get_clump_charges(const Facade::Cluster* cluster) const;
         void clear_dqdx_responses() { m_dqdx_responses.clear(); }
 
         /// doc pdvd/42: append a snapshot captured elsewhere (the STM tagger's
@@ -1474,6 +1494,12 @@ namespace WireCell::Clus {
         /// doc pdvd/81: per-cluster multi-fit responses, capture order (see
         /// DqdxResponse).  Empty unless Parameters::keep_dqdx_response > 0.
         std::vector<DqdxResponse> m_dqdx_responses;
+
+        // pr_ml doc 79 (P4): charge clumps per cluster (set_charge_clumps) and the
+        // charges the last dQ_dx_multi_fit gave them (one per clump; NaN for a
+        // clump that had no live cell and was left out).  Empty unless set.
+        std::map<const Facade::Cluster*, std::vector<std::vector<WireCell::Point>>> m_charge_clumps;
+        std::map<const Facade::Cluster*, std::vector<double>> m_clump_charges;
 
         // global geometry
 

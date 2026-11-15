@@ -13,6 +13,7 @@
 #include <string>
 #include <sstream>
 #include <iomanip>
+#include <limits>   // pr_ml doc 79: NaN for a clump left out
 
 
 using namespace WireCell;
@@ -262,6 +263,10 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.dqdx_fit_keep_all_points = value;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
         m_params.keep_dqdx_response = value;
+    } else if (name == "dqdx_clump_term") {             // pr_ml doc 79: > 0 = on
+        m_params.dqdx_clump_term = value;
+    } else if (name == "traj_clump_claim") {            // pr_ml doc 79: > 0 = on
+        m_params.traj_clump_claim = value;
     } else if (name == "electron_lifetime") {           // icarus/docs/04, WCT time units
         m_params.electron_lifetime = value;
         if (value > 0) {
@@ -467,6 +472,10 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dqdx_fit_keep_all_points;
     } else if (name == "keep_dqdx_response") {          // doc pdvd/81
         return m_params.keep_dqdx_response;
+    } else if (name == "dqdx_clump_term") {             // pr_ml doc 79
+        return m_params.dqdx_clump_term;
+    } else if (name == "traj_clump_claim") {            // pr_ml doc 79
+        return m_params.traj_clump_claim;
     } else if (name == "electron_lifetime") {           // icarus/docs/04
         return m_params.electron_lifetime;
     } else if (name == "electron_lifetime_allow_unmatched") {   // wcfm/docs/25
@@ -1838,6 +1847,20 @@ const TrackFitting::DqdxResponse* TrackFitting::get_dqdx_response(const Facade::
         if (r.cluster == cluster) return &r;
     }
     return nullptr;
+}
+
+// pr_ml doc 79 (P4)
+void TrackFitting::set_charge_clumps(const Facade::Cluster* cluster, std::vector<std::vector<WireCell::Point>> clumps)
+{
+    m_clump_charges.erase(cluster);
+    if (clumps.empty()) { m_charge_clumps.erase(cluster); return; }
+    m_charge_clumps[cluster] = std::move(clumps);
+}
+
+const std::vector<double>* TrackFitting::get_clump_charges(const Facade::Cluster* cluster) const
+{
+    auto it = m_clump_charges.find(cluster);
+    return it == m_clump_charges.end() ? nullptr : &it->second;
 }
 
 // doc pdvd/81
@@ -4564,6 +4587,27 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
         if (edge_bundle.segment) {
             segments.push_back(edge_bundle.segment);
             edge_bundle.segment->reset_fit_prop();
+        }
+    }
+
+    // pr_ml doc 79 (K3, traj_clump_claim; default 0 => nothing is appended): the
+    // fitted cluster's charge clumps compete for 2-D cells in update_association
+    // as segments that are not in the graph.  Appended, so segments[0] (the
+    // vertices' dummy below) is unchanged; built afresh per call from the clump
+    // points ("main" cloud only).
+    if (m_params.traj_clump_claim > 0 && flag_exclusion && m_cluster_filter && !segments.empty()) {
+        auto cit = m_charge_clumps.find(m_cluster_filter);
+        if (cit != m_charge_clumps.end()) {
+            for (const auto& pts : cit->second) {
+                if (pts.empty()) continue;
+                auto cs = PR::make_segment();
+                std::vector<PR::WCPoint> w;
+                w.reserve(pts.size());
+                for (const auto& p : pts) { PR::WCPoint q; q.point = p; w.push_back(q); }
+                cs->wcpts(w).cluster(m_cluster_filter);
+                PR::create_segment_point_cloud(cs, pts, m_dv, "main");
+                segments.push_back(cs);
+            }
         }
     }
 
@@ -8606,6 +8650,152 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     }
         
         
+    // pr_ml doc 79 (P4) -- charge-clump columns.  Off (dqdx_clump_term == 0, or no
+    // clumps set for this cluster) => nothing here runs and n_tot == n_3D_pos.
+    // A clump is one unknown whose footprint is its 3-D points (equal weights),
+    // each point's response built as an interior trajectory point's sub-sample
+    // (diffusion + filter sigmas); the cell window is the point nearest the
+    // clump's centre (it goes first, so .front() is it), and only the points on
+    // that point's APA face take part.  A clump with no live cell is left out.
+    // Columns are appended after the trajectory columns, so every existing
+    // index (and keep_dqdx_response's column masks) is unchanged.
+    int n_tot = n_3D_pos;
+    std::vector<int> clump_of_col;          // column - n_3D_pos -> clump index
+    std::vector<Eigen::Triplet<double>> CU_trip, CV_trip, CW_trip;
+    const std::vector<std::vector<WireCell::Point>>* clumps_here = nullptr;
+    if (m_params.dqdx_clump_term > 0 && m_cluster_filter) {
+        auto cit = m_charge_clumps.find(m_cluster_filter);
+        if (cit != m_charge_clumps.end() && !cit->second.empty()) clumps_here = &cit->second;
+    }
+    if (clumps_here) {
+        auto cluster = m_cluster_filter;
+        int cur_ntime_ticks = 10;
+        if (!cluster->children().empty()) {
+            auto first_blob = cluster->children()[0];
+            cur_ntime_ticks = first_blob->slice_index_max() - first_blob->slice_index_min();
+        }
+        const auto transform = m_pcts->pc_transform(cluster->get_scope_transform(cluster->get_default_scope()));
+        const double cluster_t0 = cluster->get_cluster_t0();
+        const int int_sr = static_cast<int>(std::ceil(m_params.search_range));
+        const double time_sr = m_params.search_range * cur_ntime_ticks;
+        for (size_t ic = 0; ic < clumps_here->size(); ++ic) {
+            const auto& pts = clumps_here->at(ic);
+            if (pts.empty()) continue;
+            WireCell::Point cen(0, 0, 0);
+            for (const auto& p : pts) cen += p;
+            cen = cen / double(pts.size());
+            size_t iref = 0;
+            for (size_t k = 1; k < pts.size(); ++k)
+                if ((pts[k] - cen).magnitude() < (pts[iref] - cen).magnitude()) iref = k;
+            auto ref_wpid = m_dv->contained_by(pts[iref]);
+            if (ref_wpid.apa() == -1 || ref_wpid.face() == -1) continue;
+            const int apa = ref_wpid.apa(), face = ref_wpid.face();
+            WirePlaneId wpid(kAllLayers, face, apa);
+            auto offset_it = wpid_offsets.find(wpid);
+            auto slope_it = wpid_slopes.find(wpid);
+            auto geom_it = wpid_geoms.find(wpid);
+            if (offset_it == wpid_offsets.end() || slope_it == wpid_slopes.end() || geom_it == wpid_geoms.end()) continue;
+            auto offset_t = std::get<0>(offset_it->second);
+            auto offset_u = std::get<1>(offset_it->second);
+            auto offset_v = std::get<2>(offset_it->second);
+            auto offset_w = std::get<3>(offset_it->second);
+            auto slope_x = std::get<0>(slope_it->second);
+            auto slope_yu = std::get<1>(slope_it->second).first;
+            auto slope_zu = std::get<1>(slope_it->second).second;
+            auto slope_yv = std::get<2>(slope_it->second).first;
+            auto slope_zv = std::get<2>(slope_it->second).second;
+            auto slope_yw = std::get<3>(slope_it->second).first;
+            auto slope_zw = std::get<3>(slope_it->second).second;
+            auto time_tick_width = std::get<0>(geom_it->second);
+            auto pitch_u = std::get<1>(geom_it->second);
+            auto pitch_v = std::get<2>(geom_it->second);
+            auto pitch_w = std::get<3>(geom_it->second);
+            auto anode = m_grouping->get_anode(apa);
+            auto iface = anode->faces()[face];
+            double xorig = iface->planes()[2]->wires().front()->center().x();
+            double drift_speed = m_grouping->get_drift_speed().at(apa).at(face);
+
+            std::vector<double> centers_U, centers_V, centers_W, centers_T;
+            std::vector<double> sigmas_T, sigmas_U, sigmas_V, sigmas_W;
+            std::vector<double> weights;
+            std::vector<size_t> order;
+            order.push_back(iref);
+            for (size_t k = 0; k < pts.size(); ++k) if (k != iref) order.push_back(k);
+            for (size_t k : order) {
+                const auto& reco_pos = pts[k];
+                auto w = m_dv->contained_by(reco_pos);
+                if (w.apa() != apa || w.face() != face) continue;
+                auto reco_pos_raw = transform->backward(reco_pos, cluster_t0, face, apa);
+                double drift_time = std::max(m_params.min_drift_time, std::abs(reco_pos.x() - xorig) / drift_speed);
+                double diff_sigma_L = sqrt(2 * DL * drift_time);
+                double diff_sigma_T = sqrt(2 * DT * drift_time);
+                centers_T.push_back(offset_t + slope_x * reco_pos_raw.x());
+                centers_U.push_back(offset_u + (slope_yu * reco_pos_raw.y() + slope_zu * reco_pos_raw.z()));
+                centers_V.push_back(offset_v + (slope_yv * reco_pos_raw.y() + slope_zv * reco_pos_raw.z()));
+                centers_W.push_back(offset_w + (slope_yw * reco_pos_raw.y() + slope_zw * reco_pos_raw.z()));
+                weights.push_back(1.0);
+                sigmas_T.push_back(std::hypot(diff_sigma_L, add_sigma_L) / time_tick_width);
+                sigmas_U.push_back(std::hypot(diff_sigma_T, ind_sigma_u_T) / pitch_u);
+                sigmas_V.push_back(std::hypot(diff_sigma_T, ind_sigma_v_T) / pitch_v);
+                sigmas_W.push_back(std::hypot(diff_sigma_T, col_sigma_w_T) / pitch_w);
+            }
+            if (centers_T.empty()) continue;
+            const int col = n_tot;
+            size_t nfill = 0;
+            ApaFaceKey af_key = {apa, face};
+            auto fill_plane = [&](const std::map<ApaFaceKey, WireRowMap>& widx, std::vector<double>& centers,
+                                  std::vector<double>& sigmas, double rel_uncer, double add_uncer,
+                                  std::vector<Eigen::Triplet<double>>& trip) {
+                auto pit = widx.find(af_key);
+                if (pit == widx.end()) return;
+                const auto& wire_map = pit->second;
+                int cw = static_cast<int>(std::round(centers.front()));
+                for (int dw = -int_sr; dw <= int_sr; ++dw) {
+                    auto it = wire_map.find(cw + dw);
+                    if (it == wire_map.end()) continue;
+                    for (const auto& row : it->second) {
+                        if (std::abs(row.time - centers_T.front()) > time_sr) continue;
+                        double value = cal_gaus_integral_seg(row.time, row.wire, centers_T, sigmas_T,
+                                                             centers, sigmas, weights, 0, m_params.gaus_nsigma, cur_ntime_ticks);
+                        if (value > 0 && row.charge > 0 && row.flag != 0) {
+                            double total_err = sqrt(row.charge_err*row.charge_err + (row.charge*rel_uncer)*(row.charge*rel_uncer) + add_uncer*add_uncer);
+                            trip.emplace_back(row.row, col, value / total_err);
+                            ++nfill;
+                        }
+                    }
+                }
+            };
+            const size_t nu0 = CU_trip.size(), nv0 = CV_trip.size(), nw0 = CW_trip.size();
+            fill_plane(wire_idx_U, centers_U, sigmas_U, rel_uncer_ind, add_uncer_ind, CU_trip);
+            fill_plane(wire_idx_V, centers_V, sigmas_V, rel_uncer_ind, add_uncer_ind, CV_trip);
+            fill_plane(wire_idx_W, centers_W, sigmas_W, rel_uncer_col, add_uncer_col, CW_trip);
+            if (nfill == 0) {
+                CU_trip.resize(nu0); CV_trip.resize(nv0); CW_trip.resize(nw0);
+                continue;
+            }
+            clump_of_col.push_back(static_cast<int>(ic));
+            ++n_tot;
+        }
+        if (n_tot > n_3D_pos) {
+            // append the clump columns: R -> [R | C]
+            auto widen = [&](Eigen::SparseMatrix<double>& R, const std::vector<Eigen::Triplet<double>>& extra) {
+                std::vector<Eigen::Triplet<double>> trip;
+                trip.reserve(R.nonZeros() + extra.size());
+                for (int k = 0; k < R.outerSize(); ++k)
+                    for (Eigen::SparseMatrix<double>::InnerIterator it(R, k); it; ++it)
+                        trip.emplace_back(it.row(), it.col(), it.value());
+                trip.insert(trip.end(), extra.begin(), extra.end());
+                Eigen::SparseMatrix<double> W(R.rows(), n_tot);
+                W.setFromTriplets(trip.begin(), trip.end());
+                R = std::move(W);
+            };
+            widen(RU, CU_trip); widen(RV, CV_trip); widen(RW, CW_trip);
+            pos_3D_init.conservativeResize(n_tot);
+            for (int i = n_3D_pos; i < n_tot; ++i) pos_3D_init(i) = 5000.0*6;
+            local_dx.resize(n_tot, 0);
+        }
+    }
+
     // Build connected_vec for regularization
     std::vector<std::vector<int>> connected_vec(n_3D_pos);
     for (const auto& ed : get_segment_edges()) {
@@ -8655,6 +8845,8 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         }
     }
     
+    if (n_tot > n_3D_pos) connected_vec.resize(n_tot);   // pr_ml doc 79: clump columns have no neighbours
+
     // Build weight matrices and apply compact matrix analysis
     Eigen::SparseMatrix<double> MU(n_2D_u, n_2D_u), MV(n_2D_v, n_2D_v), MW(n_2D_w, n_2D_w);
     for (int k = 0; k < n_2D_u; k++) MU.insert(k, k) = 1;
@@ -8666,9 +8858,9 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     Eigen::SparseMatrix<double> RWT = RW.transpose();
     
     // Apply compact matrix regularization
-    auto overlap_u = calculate_compact_matrix_multi(connected_vec, MU, RUT, n_2D_u, n_3D_pos, 3.0);
-    auto overlap_v = calculate_compact_matrix_multi(connected_vec, MV, RVT, n_2D_v, n_3D_pos, 3.0);
-    auto overlap_w = calculate_compact_matrix_multi(connected_vec, MW, RWT, n_2D_w, n_3D_pos, 2.0);
+    auto overlap_u = calculate_compact_matrix_multi(connected_vec, MU, RUT, n_2D_u, n_tot, 3.0);
+    auto overlap_v = calculate_compact_matrix_multi(connected_vec, MV, RVT, n_2D_v, n_tot, 3.0);
+    auto overlap_w = calculate_compact_matrix_multi(connected_vec, MW, RWT, n_2D_w, n_tot, 2.0);
     
     // for(size_t i=0;i!=connected_vec.size();i++){ 
     //     std::cout << i << " " << connected_vec.at(i).size() << " " << overlap_u.at(i).size() << " " << overlap_v.at(i).size() << " " << overlap_w.at(i).size() << std::endl;
@@ -8732,7 +8924,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
                         "({} 3D positions); close_ind={} close_col={}",
                         n_close_terms, 3 * n_pairs, n_3D_pos, close_ind_weight, close_col_weight);
 
-    Eigen::SparseMatrix<double> FMatrix(n_3D_pos, n_3D_pos);
+    Eigen::SparseMatrix<double> FMatrix(n_tot, n_tot);   // == n_3D_pos unless pr_ml doc 79 clump columns
     FMatrix.setFromTriplets(F_triplets.begin(), F_triplets.end());
 
     // Apply regularization strength
@@ -8747,6 +8939,14 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     Eigen::VectorXd b = RUT * MU * data_u_2D + RVT * MV * data_v_2D + RWT * MW * data_w_2D;
     Eigen::SparseMatrix<double> A = RUT * MU * RU + RVT * MV * RV + RWT * MW * RW + FMatrixT * FMatrix;
 
+    if (n_tot > n_3D_pos) {
+        // pr_ml doc 79: a clump column has no regulariser; a ridge of 1e-9 x the mean
+        // diagonal keeps BiCGSTAB's matrix non-singular.
+        double dsum = 0; int dn = 0;
+        for (int i = 0; i < n_3D_pos; ++i) { dsum += A.coeff(i, i); ++dn; }
+        const double ridge = 1e-9 * (dn ? dsum / dn : 1.0);
+        for (int i = n_3D_pos; i < n_tot; ++i) A.coeffRef(i, i) += ridge;
+    }
     det_dump("dqdx_multi", A, b, pos_3D_init);
     if (det_dbg()) {
         auto hs = [](const Eigen::SparseMatrix<double>& m) {
@@ -8930,6 +9130,14 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     // icarus/docs/04: electron-lifetime correction of the fitted charge.  Off
     // (electron_lifetime == 0) => this block does nothing.  Applied after the
     // chi2 above, which compares the fit to the (uncorrected) measurement.
+    if (clumps_here) {
+        // pr_ml doc 79: the clump charges, in set_charge_clumps order (NaN: left out)
+        std::vector<double> qc(clumps_here->size(), std::numeric_limits<double>::quiet_NaN());
+        for (int i = n_3D_pos; i < n_tot; ++i) qc[clump_of_col[i - n_3D_pos]] = pos_3D(i);
+        m_clump_charges[m_cluster_filter] = std::move(qc);
+        SPDLOG_LOGGER_DEBUG(s_log, "dQ_dx_multi_fit: cluster {} clump term: {} clumps, {} with live cells", m_cluster_filter->ident(), clumps_here->size(), n_tot - n_3D_pos);
+    }
+
     if (m_params.electron_lifetime > 0) {
         for (const auto& [vertex_idx, vertex] : vertex_index_map) {
             if (vertex_idx >= n_3D_pos) continue;
