@@ -289,11 +289,36 @@ def test_i():
     R.P.seen[:] = keep
 
 
+def test_j():
+    print("--- (j) far pieces of an unresolved delta: the length test of --far-length (pr_ml doc 76, Xin's Q6)")
+    # an unresolved (collinear, 6 mm) delta radiates two photons; one converts into a 42 mm line 40 mm off the muon, the other into a
+    # 5-deposit blob 50 mm off it.  Q16 d makes both far pieces LE blips; with far_length the long one is a segment (its charge is
+    # radiation: class EM segment, instance shower), the blob stays an LE blip.
+    B = Builder()
+    B.particle(1, 13, 0, "primary", (-1600, 0, 1000), (-1400, 0, 1400), 2000.0)
+    B.particle(2, 11, 1, "muIoni", (-1550, 0, 1100), (-1547, 0, 1106), 1.0, t_start=100 / C, q_per_step=2500.0)
+    B.particle(3, 22, 2, "eBrem", (-1547, 0, 1106), (-1547, 40, 1106), 5.0, t_start=110 / C, deposits=False)
+    B.particle(4, 11, 3, "conv", (-1547, 40, 1106), (-1547, 70, 1136), 4.0, t_start=150 / C, q_per_step=2500.0)
+    B.particle(5, 22, 2, "eBrem", (-1547, 0, 1106), (-1547, -50, 1106), 1.0, t_start=110 / C, deposits=False)
+    B.particle(6, 11, 5, "compt", (-1547, -50, 1106), (-1547, -50, 1106), 0.5, t_start=160 / C, q_per_step=2500.0, blob=(5, 1.0))
+    ev = B.event(); d4, d6 = dep_of(ev, 4), dep_of(ev, 6)
+    out = {}
+    for nm, prm in (("off", None), ("on", dict(far_length=True))):
+        R = run(ev, prm)[0]; t = R.table; org = t["origins"]
+        out[nm] = dict(c4=maj(R.cls7[d4]), c6=maj(R.cls7[d6]), pt4=maj(R.piece_type[d4]), i4=maj(R.inst[d4]), i6=maj(R.inst[d6]), cobj=t["inst_cls_obj"], og=[org[o] if o >= 0 else "" for o in t["inst_origin"]], prm=R.prm, log=R.log)
+    o, n_ = out["off"], out["on"]
+    check(o["og"][o["i4"]] == "delta_far_piece" and o["og"][o["i6"]] == "delta_far_piece" and o["i4"] != o["i6"], "setup: both radiation pieces are far pieces of the unresolved delta, two instances")
+    check(o["c4"] == CLS7["blip"] and o["cobj"][o["i4"]] == OBJ["le"] and "far_length" not in o["prm"] and "n_delta_far_long" not in o["log"], "off: the 42 mm line is an LE blip (Q16 d as before), no new param or log key")
+    check(n_["c4"] == CLS7["segment"] and n_["pt4"] == 1 and n_["cobj"][n_["i4"]] == OBJ["shower"], "on: the 42 mm line is an EM segment, piece type 1, its instance a shower")
+    check(n_["c6"] == CLS7["blip"] and n_["cobj"][n_["i6"]] == OBJ["le"], "on: the 5-deposit blob stays an LE blip")
+    check(n_["log"].get("n_delta_far_long") == 1 and n_["og"][n_["i4"]] == "delta_far_piece", "on: one far piece passes, its origin is still delta_far_piece")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i, test_j):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1

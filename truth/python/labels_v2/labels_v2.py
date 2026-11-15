@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """labels_v2.py -- the truth labeler v2 for one campaign event (pr_ml docs 50a / 50b secs 2.1-2.8; built in doc 54).
 
-  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points]
+  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points] [--far-length]
       -> <out dir>/<event>.labels_v2.npz; prints "<event> ok|empty|fail <why>"
       --start-tie-order (default off = byte-identical; pr_ml doc 71): the instance table's start / end are taken after ordering
       each run of equal-time own deposits along the track (steiner_truth.tie_order).  The depo file stores float32 times, so a
@@ -11,6 +11,10 @@
       kink_angle, kink_to_end -- the hard scatters of one track particle (>= 15 deg between the 30 mm chords behind and ahead on
       its true trajectory, both chords full, the deposit seen), where a segment boundary is allowed but not required.  The
       key-point table and every other member are unchanged; meta gains params "kink_points": true and n_kinks.
+      --far-length (default off = byte-identical; pr_ml doc 76, Xin's Q6): a far free piece of an unresolved delta (Q16 d) gets the
+      usual length test: when its extent over deposits seen in >= 2 views is >= 2 steps it is a segment -- the electron's own deposits
+      class delta, its radiation class EM segment, piece type 1, its instance (still origin delta_far_piece) cls_obj delta or shower by
+      charge majority; shorter far pieces stay LE blips as before.  meta params gain "far_length": true, log n_delta_far_long.
   labels_v2.py --selftest                                 (see selftest_v2.py)
 
 Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 stub, 3 EM segment, 4 EM blip, 5 Michel,
@@ -110,7 +114,7 @@ def main():
     ev = os.path.basename(d.rstrip("/"))
     try:
         st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"),
-                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points")) if f in sys.argv} or None)
+                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points"), ("--far-length", "far_length")) if f in sys.argv} or None)
     except Exception as x:   # noqa: BLE001
         import traceback
         st, why = "fail", repr(x)[:200] + " | " + traceback.format_exc().splitlines()[-3].strip()[:200]

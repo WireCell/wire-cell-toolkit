@@ -158,6 +158,7 @@ def label_event(ev, det=None, params=None):
         # their own (LE blip clusters, pseudo roots), as its radiation is; the rest of the electron stays part of the track
         far_base = nr + int(ev.tid.max()) + 1 if n else nr + 1
         far_of = {}                                       # pseudo root id -> (candidate row, parent row)
+        far_long = {}; far_own = np.zeros(n, bool)        # --far-length (pr_ml doc 76, Xin's Q6): which far pieces pass the length test; the electron's own deposits
         for k in np.flatnonzero(~resolved).tolist():
             r_ = int(cand_rows[k]); m_ = T.mrow[r_]
             if m_ < 0:
@@ -173,12 +174,19 @@ def label_event(ev, det=None, params=None):
                 sel_ = cd[p_fr[cd] == pc_]
                 if dpar[np.isin(cd, sel_)].min() > 2 * step and q[sel_].sum() >= THR:
                     pid_ = far_base + len(far_of); far_of[pid_] = (r_, int(m_)); T.inst_dep[sel_] = pid_
+                    if prm.get("far_length"):             # the usual length test (2-view extent >= 2 steps), as for any EM piece
+                        mv_ = P.seen[sel_].sum(1) >= 2
+                        far_long[pid_] = bool(mv_.any() and diameter(P3[sel_[mv_]]) >= ltb); far_own[sel_] = T.grow[sel_] == r_
         R.far_of = far_of
+        if prm.get("far_length"):
+            R.far_long, R.far_own = far_long, far_own
     log.update(n_candidates=int(K), n_resolved=int(resolved.sum()), n_resolved_michel=int((resolved & (T.kind[cand_rows] == KIND["MICHEL"])).sum()) if K else 0)
     R.cand_rows, R.cand_resolved, R.cand_main_ext, R.cand_nseg_own = cand_rows, resolved, main_ext, nseg_own
     if not hasattr(R, "far_of"):
         R.far_of = {}
     log["n_delta_far_pieces"] = int(len(R.far_of))
+    if prm.get("far_length"):
+        log["n_delta_far_long"] = int(sum(getattr(R, "far_long", {}).values()))
     res_rows = cand_rows[resolved]
     res_shower = np.zeros(nr, bool); res_shower[res_rows[nseg_own[resolved] >= 2]] = True
     resolved_row = np.zeros(nr, bool); resolved_row[res_rows] = True
@@ -399,6 +407,9 @@ def label_event(ev, det=None, params=None):
     cls_obj[:] = rowc
     if R.far_of:
         fp = np.isin(inst1, np.fromiter(R.far_of.keys(), np.int64)); cls_obj[fp] = OBJ["le"]; piece_type[fp] = 2
+        if R.prm.get("far_length") and any(R.far_long.values()):   # pr_ml doc 76 (Q6): a far piece that passes the length test is a segment:
+            lg = np.isin(inst1, np.fromiter((k for k, v in R.far_long.items() if v), np.int64))   # the electron's own deposits delta (Q5),
+            cls_obj[lg] = np.where(R.far_own[lg], OBJ["delta"], OBJ["shower"]); piece_type[lg] = 1   # its radiation shower (Q4: detached)
     abs_dep = is_row & (absorbed_into[np.minimum(inst1, nr - 1)] >= 0)
     swl_dep = is_row & (swallowed_into[np.minimum(inst1, nr - 1)] >= 0)
     cls_obj[abs_dep | swl_dep] = OBJ["shower"]
@@ -442,6 +453,8 @@ def instance_table(ev, T, R, NI, uroots, inst):
         if r >= nr and r in R.far_of:                      # Q16 d: a far free piece of an unresolved delta, an LE blip cluster of its own
             cr, pr_ = R.far_of[r]
             cols["root_row"][i] = -1; cols["g4_id"][i] = T.tt[cr]; cols["kind"][i] = KIND["EM"]; cols["cls_obj"][i] = OBJ["le"]; cols["pdg"][i] = T.pdg[cr]
+            if R.prm.get("far_length") and R.far_long.get(r, False):   # --far-length: the instance takes its charge-majority class
+                mi = inst == i; cols["cls_obj"][i] = OBJ["delta"] if q[mi & R.far_own].sum() >= 0.5 * q[mi].sum() else OBJ["shower"]
             pr_root = T.root_of[pr_] if pr_ >= 0 else -1
             cols["parent_inst"][i] = root_inst.get(int(pr_root), -1); cols["parent_g4"][i] = T.tt[pr_]; cols["edge"][i] = EDGE["daughter"]
             cols["interaction"][i] = T.interaction(cr); fcols["ke_mev"][i] = T.ke[cr]
