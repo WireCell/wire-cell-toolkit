@@ -1004,6 +1004,18 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // dl_vtx_dump_space (ai-helper issue 44): with dl_vtx_dump, also write
+              // T_dlvtx_space -- the Bee clustering-layer points (same scope and
+              // coords as this MABC's clustering-pr layer) of every in-scope cluster
+              // within the touch distance of a recorded call's cloud, once per event,
+              // plus T_dlvtx_call.space_cluster_id / n_space.  Recording only.
+              // Default false => every key omitted => byte-identical.
+              dl_vtx_dump_space=false,
+              // The writer's touch distance (cm).  null = the effective DV2-MAX
+              // bundle's (dv2_bundle_space_touch_cm below), so the recorded
+              // clusters are the ones the in-chain collector hands the network;
+              // 1.0 for a bundle not listed there.  A number overrides.
+              space_touch_cm=null,
               // truth_match (ai-helper issue 41): the reco<->truth matching trees
               // (T_truth_track, T_overlap, T_match, T_pf; blob_truth adds
               // T_blob_truth) in tracking-pr.root.  MC only: the writer needs the
@@ -2420,6 +2432,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         local dv2_sha_eff = if std.objectHas(tcn_overrides, 'dv2_bundle_sha256') then tcn_overrides.dv2_bundle_sha256
                             else if std.objectHas(dv2_bundle_sha256, dv2_bundle_eff) then dv2_bundle_sha256[dv2_bundle_eff]
                             else '',
+        // ai-helper issue 47: the touch distance (cm) of each known space-point DV2-MAX bundle
+        // (bundle.json space.touch_cm).  The T_dlvtx_space writer takes it, so it records the clusters the
+        // in-chain collector gives the network (the collector itself reads it from the loaded bundle).
+        // Add a line with a new space-point bundle.  A cloud-only bundle (r7_cloud) has no entry.
+        local dv2_bundle_space_touch_cm = {
+            'dv2max/sbnd/aurora_space/bundle.json': 1.0,
+        },
+        local space_touch_eff = if space_touch_cm != null then space_touch_cm
+                                else if vm_eff != 'original' && std.objectHas(dv2_bundle_space_touch_cm, dv2_bundle_eff)
+                                then dv2_bundle_space_touch_cm[dv2_bundle_eff]
+                                else 1.0,
+        // ai-helper issue 47: the PR Bee clustering-layer scope -- the points the PR Bee layer shows, a
+        // space-point DV2-MAX bundle reads in the chain (TaggerCheckNeutrino dv2_space_*), and the
+        // T_dlvtx_space writer records (SbndPrMagnifyTrackingVisitor space_*).  One setting, so they cannot diverge.
+        local pr_space_scope = { pcname: '3d', coords: common_corr_coords(pos_offset_on) },
         assert std.member(['original', 'dv2_snap', 'dv2_split', 'dv2_split_move'], vm_eff) :
             "vertex_method must be 'original', 'dv2_snap', 'dv2_split' or 'dv2_split_move', got '%s'" % vm_eff,
         local dv = detector_volumes(anodes, '', pos_offset_on),
@@ -2939,8 +2966,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   // A space-point bundle (aurora_space) also takes the Bee points of the clusters touching each
                   // call's cloud, read in the scope of this PR's Bee clustering layer (the T_dlvtx_space writer's).
                   // Unused by a cloud-only bundle (r7_cloud).
-                  [if vm_eff != 'original' then 'dv2_space_pcname']: '3d',
-                  [if vm_eff != 'original' then 'dv2_space_coords']: common_corr_coords(pos_offset_on),
+                  [if vm_eff != 'original' then 'dv2_space_pcname']: pr_space_scope.pcname,
+                  [if vm_eff != 'original' then 'dv2_space_coords']: pr_space_scope.coords,
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
@@ -3011,6 +3038,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
+                    // ai-helper issue 44.  Keys omitted when off => byte-identical config.
+                    [if dl_vtx_dump_space then 'dl_vtx_dump_space']:
+                        (assert dl_vtx_dump : 'dl_vtx_dump_space needs dl_vtx_dump'; true),
+                    [if dl_vtx_dump_space then 'space_touch_cm']: space_touch_eff,
+                    [if dl_vtx_dump_space then 'space_pcname']: pr_space_scope.pcname,
+                    [if dl_vtx_dump_space then 'space_coords']: pr_space_scope.coords,
                     [if truth_match then 'truth_match']: true,   // ai-helper issue 41
                     [if truth_match && blob_truth then 'blob_truth']: true,   // ai-helper issue 41
                     runNo: runNo,
@@ -3205,8 +3238,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         name: if bee_sink == null then 'clustering' else 'clustering-pr',
                         detector: 'sbnd',
                         algorithm: 'clustering',
-                        pcname: '3d',
-                        coords: common_corr_coords(pos_offset_on),
+                        pcname: pr_space_scope.pcname,   // ai-helper issue 47: one scope, see pr_space_scope
+                        coords: pr_space_scope.coords,
                         individual: false,
                         // Same filter semantics as clus_all_apa (default 1): the dump
                         // keys on the per-cluster runtime scope-filter flag, which is
