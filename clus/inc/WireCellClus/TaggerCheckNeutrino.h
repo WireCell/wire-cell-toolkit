@@ -39,6 +39,12 @@ public:
     /// check); otherwise the reason.  configure() fails on a reason.
     static std::string dv2_bundle_sha256_error(const std::string& load_report, const std::string& expected);
 
+    /// vertex_method dv2_*: the space-point touch distance (cm) the DV2_Load
+    /// report (JSON) gives for its bundle -- its "space" section's touch_cm,
+    /// or 0 when "space" is null or absent (a cloud-only bundle).  Sets `err`
+    /// (and returns 0) when the report is not JSON or the section is bad.
+    static double dv2_space_touch_cm(const std::string& load_report, std::string& err);
+
     virtual void visit(Ensemble& ensemble) const;
 
 
@@ -502,6 +508,16 @@ public:
         std::string m_dv2_bundle{"dv2max/sbnd/r7_cloud/bundle.json"};   // DV2-MAX bundle manifest (resolved via WIRECELL_PATH)
         std::string m_dv2_py_module{"DV2_Vertex"};   // Python module (on PYTHONPATH) holding DV2_Vertex()
         std::string m_dv2_bundle_sha256;             // expected sha256 of the bundle manifest; "" = not checked
+        // A bundle that takes space points (format dv2max-bundle-v2): touch
+        // distance from its DV2_Load report (0 = cloud-only bundle), and the
+        // Bee clustering layer's scope the points are read in (the same pc
+        // name, coordinates and scope filter as the PR MABC's clustering-pr
+        // Bee layer and the T_dlvtx_space writer).  See
+        // PatternAlgorithms::dv2_collect_space.
+        double m_dv2_space_touch_cm{0.0};
+        std::string m_dv2_space_pcname{"3d"};
+        std::vector<std::string> m_dv2_space_coords{"x_t0cor", "y", "z"};
+        int m_dv2_space_filter{1};
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
         // stage sequence up to the vertex refinement block) suggests the

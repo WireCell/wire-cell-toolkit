@@ -251,10 +251,13 @@ TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on an
     for (int i = 0; i < 50; ++i) every_path();       // warm-up: import caches, interned strings
     const auto rc_mod = Py_REFCNT(mod), rc_fv = Py_REFCNT(fv), rc_fl = Py_REFCNT(fl);
     // Python's allocated blocks over successive batches.  A leak of even one
-    // object per pass adds >= n blocks in EVERY batch; Python's own caches can
-    // add a few hundred blocks once (seen: +344 on the first exception-heavy
-    // batch, then flat), so the test fails only if no batch stays flat.
-    const int n = 200;                               // 13 calls per pass
+    // small object per pass adds >= n blocks in EVERY batch (an injected leak
+    // gave a least batch growth of +1001..+1112 at n = 1000).  Python's own
+    // allocations add noise that does not grow with n: +6..+421 blocks per
+    // batch at n = 200..2000 (Polaris, Python 3.14), which made the old limit
+    // (n = 200, < 50) fail in about 1 run of 4.  So: large batches, and the
+    // test fails only if no batch stays below n / 2.
+    const int n = 1000;                              // 13 calls per pass
     std::vector<long> growth;
     for (int b = 0; b < 4; ++b) {
         const long before = python_blocks();
@@ -267,7 +270,7 @@ TEST_CASE("DV2_Vertex / DV2_Load: no Python reference leaks, on success or on an
     CAPTURE(growth[1]);
     CAPTURE(growth[2]);
     CAPTURE(growth[3]);
-    CHECK(least < n / 4);
+    CHECK(least < n / 2);
     // the module and the functions the wrapper looks up hold no extra reference
     CHECK(Py_REFCNT(mod) == rc_mod);
     CHECK(Py_REFCNT(fv) == rc_fv);

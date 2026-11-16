@@ -1,7 +1,8 @@
 '''
 DV2-MAX neutrino vertex for one DL-vertex call (called by WCPPyUtil::DV2_Vertex through the embedded interpreter).
 
-DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32") -> bytes
+DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32",
+           space_x=None, space_y=None, space_z=None, space_q=None, space_cluster_id=None) -> bytes
   weights        absolute path of the model bundle manifest (e.g. <wire-cell-data>/dv2max/sbnd/r7_cloud/bundle.json)
   x, y, z, q     bytes of `dtype` arrays: the call's point cloud (cm, raw reco frame; q = dQ * q_scale + q_offset,
                  i.e. the floats the DL-vertex dump writes); the first n_vertex_rows points are the PR-graph
@@ -9,6 +10,13 @@ DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="f
   n_vertex_rows  int
   trad           bytes of 3 `dtype` values: the traditional main vertex (cm, raw reco frame), NaN if none
   q_scale, q_offset  float
+  space_*        only for a bundle with space points (format dv2max-bundle-v2, e.g. aurora_space; DV2_Load reports
+                 its "space" section): bytes of the call's space points = the Bee clustering-layer points of every
+                 in-scope imaging cluster with a point within space.touch_cm of a cloud point, clusters in
+                 increasing cluster id, each cluster's points in Bee order (the T_dlvtx_space rule).  space_x/y/z/q:
+                 `dtype` arrays (cm, raw reco frame; q = the Bee charge); space_cluster_id: int32 cluster ids.  All
+                 five or none; empty bytes = no touching cluster.  A v2 bundle called without them, or a v1 bundle
+                 called with them, raises.
 Returns bytes of 4 `dtype` values [x, y, z, score]: the DV2-MAX top-1 vertex in the RAW reco frame and its calibrated
 P(< 1 cm) in [0, 1]; empty bytes when no prediction is made (fewer than 5 points or no candidate).  The caller then
 keeps the traditional vertex.  Any other error raises, which fails the job; DV2_STRICT=0 instead reports it on stderr
@@ -18,7 +26,8 @@ DV2_Load(weights) -> bytes
   Imports the model code and loads the bundle (the caller's configure step), so a broken environment (missing package,
   bad bundle, sha256 mismatch) fails at startup instead of at the first event.  Raises on any error, whatever
   DV2_STRICT says.  Returns JSON bytes: the load-time breakdown, torch_threads, and bundle_sha256 (the sha256 of
-  the manifest, which TaggerCheckNeutrino checks against dv2_bundle_sha256).
+  the manifest, which TaggerCheckNeutrino checks against dv2_bundle_sha256), and space (the bundle's "space"
+  section: touch_cm, match_cm, q_ratio, link_cm; null for a cloud-only bundle -- the caller then passes no space_*).
 
 Environment: DV2_THREADS (torch / LightGBM threads, default 1, interop threads 1; torch's setting is per PROCESS;
 0 = leave torch's thread settings alone), DV2_HOOK_LOG=<path>
@@ -94,6 +103,7 @@ def DV2_Load(weights):
     v = _vertexer(weights)
     rep = {k: val for k, val in _FIRST.items() if k != "reported"}
     rep["bundle_sha256"] = v.manifest_sha256
+    rep["space"] = v.space
     return json.dumps(rep).encode()
 
 
@@ -108,18 +118,25 @@ def _hook(rec):
             f.write(json.dumps(rec) + "\n")
 
 
-def input_digest(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
+def input_digest(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32", space=None):
     """sha1 (hex) of one call's exact arguments: the x, y, z, q and trad bytes in that order, then the ASCII text
-    '<n_vertex_rows>:<repr(float(q_scale))>:<repr(float(q_offset))>:<dtype>'.  A call and its replay with the same
-    bytes (e.g. dv2max_vertexer/validate_r7.py) give the same digest."""
+    '<n_vertex_rows>:<repr(float(q_scale))>:<repr(float(q_offset))>:<dtype>'; with space points (space = the
+    space_x, space_y, space_z, space_q, space_cluster_id bytes) then b':space:' and those five in that order.
+    A call and its replay with the same bytes (e.g. dv2max_vertexer/validate_r7.py) give the same digest; a
+    cloud-only call's digest is unchanged by the space option."""
     h = hashlib.sha1()
     for b in (x, y, z, q, trad):
         h.update(b)
     h.update(f"{int(n_vertex_rows)}:{float(q_scale)!r}:{float(q_offset)!r}:{dtype}".encode())
+    if space is not None:
+        h.update(b":space:")
+        for b in space:
+            h.update(b)
     return h.hexdigest()
 
 
-def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32"):
+def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtype="float32",
+               space_x=None, space_y=None, space_z=None, space_q=None, space_cluster_id=None):
     global _LAST
     t0 = time.perf_counter()
     dt = np.dtype(dtype)
@@ -129,15 +146,30 @@ def DV2_Vertex(weights, x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, dtyp
     Q = np.frombuffer(q, dtype=dt)
     T = np.frombuffer(trad, dtype=dt)
     nv = int(n_vertex_rows)
+    sp_in = (space_x, space_y, space_z, space_q, space_cluster_id)
+    n_given = sum(b is not None for b in sp_in)
+    sp_bytes = sp_in if n_given == 5 else None
     rec = {"n": int(len(Q)), "n_vertex_rows": nv,
-           "input_sha1": input_digest(x, y, z, q, nv, trad, q_scale, q_offset, dtype)}
+           "input_sha1": input_digest(x, y, z, q, nv, trad, q_scale, q_offset, dtype, sp_bytes)}
     try:
         if not (len(X) == len(Y) == len(Z) == len(Q)) or len(T) != 3 or not 0 <= nv <= len(Q):
             raise ValueError(f"bad input sizes x {len(X)} y {len(Y)} z {len(Z)} q {len(Q)} trad {len(T)} "
                              f"n_vertex_rows {nv}")
+        if n_given not in (0, 5):
+            raise ValueError(f"space points: pass all five space_* arguments or none ({n_given} given)")
+        space = None
+        if sp_bytes is not None:
+            space = tuple(np.frombuffer(b, dtype=dt) for b in sp_bytes[:4]) + (np.frombuffer(sp_bytes[4], np.int32),)
+            if not len(space[0]) == len(space[1]) == len(space[2]) == len(space[3]) == len(space[4]):
+                raise ValueError("bad space sizes " + " ".join(str(len(a)) for a in space))
+            rec["n_space"] = int(len(space[3]))
         v = _vertexer(weights)
+        if (v.space is None) != (space is None):
+            raise ValueError("this bundle takes space points (format dv2max-bundle-v2), the call passed none"
+                             if space is None else "this bundle takes no space points, the call passed some")
         from dv2max_vertexer.vertexer import event_from_call, unshift_x
-        ev = event_from_call(X, Y, Z, Q, nv, T, float(q_scale), float(q_offset), v.x_shift_cm, v.link_cm)
+        ev = event_from_call(X, Y, Z, Q, nv, T, float(q_scale), float(q_offset), v.x_shift_cm, v.link_cm,
+                             space=space, space_cfg=v.space)
         r = v.run(ev)
         if r is None:
             out = b""

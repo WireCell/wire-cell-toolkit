@@ -1,10 +1,13 @@
-"""DV2-MAX r7_cloud inference for ONE DL-vertex call (one neutrino candidate's cloud), CPU, torch backend.
+"""DV2-MAX inference for ONE DL-vertex call (one neutrino candidate's cloud), CPU, torch backend.
 
-Pipeline (= the offline r7_cloud run for a test event of the deployed family; see README.md):
+Pipeline (= the offline run for a test event of the deployed family; see README.md):
   1. event_from_call   the call's cloud -> Event exactly as r7/prep_r7_cache.py builds a cache row: q decoded to
                        dQ = (q - q_offset) / q_scale clipped at 0, 3 cm connected components as cluster ids, the
                        first n_vertex_rows points as PR candidates, the traditional vertex as tag_nu, every reco
-                       input moved x_shift_cm toward the cathode (x -= sign(x) * x_shift_cm)
+                       input moved x_shift_cm toward the cathode (x -= sign(x) * x_shift_cm).
+                       Bundles of format v2 with a "space" section (aurora_space) also take the call's SPACE POINTS
+                       (the Bee points of the imaging clusters touching the cloud) as r7/prep_r7_space_cache.py
+                       add_space does (add_space below): space points first, then the cloud with dQ x q_ratio
   2. features          features.compute_features, then the cache's storage precision (point-level features float16,
                        the others float32), because the models and the ranker were fed cached features
   3. pass 1            whole-event ensemble (views x shifts) -> pooled pass-1 record (modes, heat, votes)
@@ -29,7 +32,10 @@ from .event import Event
 from .features import FEATURE_SPEC, compute_features
 from .model import DV2Net
 
-FORMAT = "dv2max-bundle-v1"
+FORMAT = "dv2max-bundle-v1"          # cloud only (r7_cloud)
+FORMAT_SPACE = "dv2max-bundle-v2"    # v1 + a "space" section: the model also takes the call's space points
+FORMATS = (FORMAT, FORMAT_SPACE)
+SPACE_KEYS = ("touch_cm", "match_cm", "q_ratio", "link_cm")
 F16_MAX = float(np.finfo(np.float16).max)
 
 
@@ -65,10 +71,12 @@ def cluster_ids(xyz, link_cm):
     return remap[lab].astype(np.int32)
 
 
-def event_from_call(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, x_shift_cm=0.31, link_cm=3.0, key="call"):
+def event_from_call(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, x_shift_cm=0.31, link_cm=3.0, key="call",
+                    space=None, space_cfg=None):
     """Truth-free Event of one DL-vertex call, as r7/prep_r7_cache.build_event (reco inputs x-shifted).
     x, y, z, q: float32 arrays of the cloud (q encoded, dQ * q_scale + q_offset); trad: (3,) traditional vertex
-    (NaN if none)."""
+    (NaN if none).  space_cfg (a v2 bundle's "space" section) with space = (sx, sy, sz, sq, cluster_id): the call's
+    space points are added as add_space does; space_cfg None: cloud only (v1 bundles)."""
     xyz = np.stack([np.asarray(x, np.float32), np.asarray(y, np.float32), np.asarray(z, np.float32)], 1)
     qq = np.asarray(q, np.float32).astype(np.float64)
     dq = np.clip((qq - float(q_offset)) / float(q_scale), 0, None).astype(np.float32)
@@ -76,9 +84,50 @@ def event_from_call(x, y, z, q, n_vertex_rows, trad, q_scale, q_offset, x_shift_
     xyz_s = xshift(xyz, x_shift_cm)
     t = np.asarray(trad, np.float32).reshape(3)
     tag = xshift(t, x_shift_cm).reshape(3) if np.all(np.isfinite(t)) else np.full(3, np.nan, np.float32)
-    return Event(key=key, sample="", index=0, rse=np.zeros(3, np.int64), fold=-1, points_xyz=xyz_s, points_q=dq,
-                 points_cluster_id=cluster_ids(xyz_s, link_cm), cand_xyz=xyz_s[:nv].copy(), cand_q=dq[:nv].copy(),
-                 tag_nu=tag, wc_reco=[], wc_status="missing", truth=None)
+    ev = Event(key=key, sample="", index=0, rse=np.zeros(3, np.int64), fold=-1, points_xyz=xyz_s, points_q=dq,
+               points_cluster_id=cluster_ids(xyz_s, link_cm), cand_xyz=xyz_s[:nv].copy(), cand_q=dq[:nv].copy(),
+               tag_nu=tag, wc_reco=[], wc_status="missing", truth=None)
+    if space_cfg is not None:
+        if space is None:
+            raise ValueError("this bundle takes space points, none were passed")
+        ev = add_space(ev, *space, x_shift_cm=x_shift_cm, q_ratio=float(space_cfg["q_ratio"]),
+                       match_cm=float(space_cfg["match_cm"]), link_cm=float(space_cfg["link_cm"]))
+    return ev
+
+
+def add_space(ev, sx, sy, sz, sq, cluster_id, x_shift_cm, q_ratio, match_cm=1.0, link_cm=3.0):
+    """The call's space points added to its cloud Event, exactly as the training cache was built
+    (sbnd-vertexer r7/prep_r7_space_cache.add_space; aurora/prep_aurora_cache.add_space with the bundle's x shift):
+      space points  x-shifted like the cloud, raw imaging q (float32), imaging cluster ids renumbered by cluster size
+                    (largest = 0, ties in increasing cluster id)
+      cloud points  q = dQ x q_ratio; cluster id = the id of the nearest space point within match_cm, else the
+                    link_cm connected components of the unmatched cloud points numbered after the space clusters
+      points        space points first, then the cloud (cand_xyz / tag_nu unchanged)
+    A call with no space points keeps the cloud-only Event, dQ NOT scaled by q_ratio (the training rule).
+    sx, sy, sz, sq: float32 arrays (cm, raw reco frame, as the call collects them: clusters in increasing id, each
+    cluster's points in Bee order); cluster_id: their integer cluster ids."""
+    from scipy.spatial import cKDTree
+    sq = np.asarray(sq, np.float32)
+    if len(sq) == 0:
+        return ev
+    S = xshift(np.stack([np.asarray(sx, np.float32), np.asarray(sy, np.float32), np.asarray(sz, np.float32)], 1),
+               x_shift_cm)
+    cid = np.asarray(cluster_id)
+    u, inv, cnt = np.unique(cid, return_inverse=True, return_counts=True)
+    order = np.argsort(-cnt, kind="stable")
+    rank = np.empty_like(order)
+    rank[order] = np.arange(len(order))
+    cs = rank[inv].astype(np.int32)
+    C = ev.points_xyz
+    d, nn = cKDTree(S).query(C)
+    cc = np.where(d <= match_cm, cs[nn], -1).astype(np.int32)
+    un = cc < 0
+    if un.any():
+        cc[un] = cluster_ids(C[un], link_cm) + len(u)
+    ev.points_xyz = np.concatenate([S, C]).astype(np.float32)
+    ev.points_q = np.concatenate([sq, (ev.points_q * q_ratio).astype(np.float32)])
+    ev.points_cluster_id = np.concatenate([cs, cc])
+    return ev
 
 
 def cached_features(ev):
@@ -154,8 +203,19 @@ class Vertexer:
         data = self.path.read_bytes()
         self.manifest_sha256 = hashlib.sha256(data).hexdigest()   # pins the bundle: the manifest lists every file's sha256
         self.man = json.loads(data)
-        if self.man.get("format") != FORMAT:
-            raise ValueError(f"{self.path}: format {self.man.get('format')!r}, expected {FORMAT!r}")
+        if self.man.get("format") not in FORMATS:
+            raise ValueError(f"{self.path}: format {self.man.get('format')!r}, expected one of {FORMATS}")
+        # v2: the model also takes the call's space points (event_from_call / add_space); v1 has none
+        self.space = None
+        if self.man["format"] == FORMAT_SPACE:
+            sp = self.man.get("space")
+            if not isinstance(sp, dict) or any(k not in sp for k in SPACE_KEYS):
+                raise ValueError(f"{self.path}: format {FORMAT_SPACE} needs a 'space' section with {SPACE_KEYS}")
+            if not float(sp["touch_cm"]) > 0:
+                raise ValueError(f"{self.path}: space.touch_cm must be > 0")
+            self.space = {k: float(sp[k]) for k in SPACE_KEYS}
+        elif "space" in self.man:
+            raise ValueError(f"{self.path}: a 'space' section needs format {FORMAT_SPACE}")
         d = self.path.parent
         files = self.man["files"]
 

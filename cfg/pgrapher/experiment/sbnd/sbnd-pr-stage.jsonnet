@@ -63,7 +63,7 @@ local pds = (import 'pgrapher/experiment/sbnd/particle_dataset.jsonnet')();
     // pre-DV2-MAX production chain).
     node(clus_maker, anodes, bee_sink, enable_tracking_root=true, tagger_bee=false, dl_vtx_dump=false, pr_knobs={},
          flat_tree=false, truth_match=false, blob_truth=false,
-         vertex_method='dv2_split_move', dv2_bundle='dv2max/sbnd/r7_cloud/bundle.json')::
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/sbnd/aurora_space/bundle.json')::
         clus_maker.pr(anodes, dump=false, bee_sink=bee_sink, dl_vtx_dump=dl_vtx_dump, tcn_overrides=pr_knobs,
                       truth_match=truth_match, blob_truth=blob_truth,
                       vertex_method=vertex_method, dv2_bundle=dv2_bundle,

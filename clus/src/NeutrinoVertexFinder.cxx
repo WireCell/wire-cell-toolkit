@@ -5,6 +5,8 @@
 #include "WireCellClus/PRSegmentFunctions.h"
 #include "WireCellClus/FiducialUtils.h"
 #include "WireCellClus/MyFCN.h"
+#include "WireCellClus/BeeClusterPoints.h"   // vertex_method dv2_*: the space points of a space-point bundle
+#include "WireCellClus/Facade_Grouping.h"
 
 #include "WireCellAux/Logger.h"
 #include "WireCellUtil/Units.h"
@@ -4931,9 +4933,32 @@ bool PatternAlgorithms::determine_overall_main_vertex_DL(
                          static_cast<float>(pt.z() / units::cm)};
             }
             try {
-                dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
-                                                static_cast<int>(cand_vertices.size()), trad3,
-                                                dQdx_scale, dQdx_offset, "float32");
+                if (m_dv2_space_touch_cm > 0) {
+                    // A space-point bundle: the Bee points of the clusters
+                    // touching this cloud, from the grouping the clusters
+                    // live in (the PR does not change cluster membership, so
+                    // these are the points the DL-vertex dump writes to
+                    // T_dlvtx_space for this call).
+                    const Facade::Grouping* grp = main_cluster ? main_cluster->grouping() : nullptr;
+                    for (size_t i = 0; !grp && i < other_clusters.size(); ++i) {
+                        if (other_clusters[i]) grp = other_clusters[i]->grouping();
+                    }
+                    if (!grp) throw std::runtime_error("DV2-MAX space points: the call's clusters have no grouping");
+                    const auto t_sp = Clock::now();
+                    Dv2Space sp = dv2_collect_space(*grp, vec_xyzq[0], vec_xyzq[1], vec_xyzq[2]);
+                    SPDLOG_LOGGER_DEBUG(s_log, "determine_overall_main_vertex_DL: DV2 space points {} from {} of {} in-scope clusters ({:.1f} ms)",
+                                        sp.q.size(), sp.n_clusters, sp.n_in_scope, MS(Clock::now() - t_sp).count());
+                    const std::vector<std::vector<float>> space{std::move(sp.x), std::move(sp.y), std::move(sp.z),
+                                                                std::move(sp.q)};
+                    dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
+                                                    static_cast<int>(cand_vertices.size()), trad3,
+                                                    dQdx_scale, dQdx_offset, "float32", space, sp.cluster_id);
+                }
+                else {
+                    dnn_vtx = WCPPyUtil::DV2_Vertex(m_dv2_py_module, "DV2_Vertex", dl_weights, vec_xyzq,
+                                                    static_cast<int>(cand_vertices.size()), trad3,
+                                                    dQdx_scale, dQdx_offset, "float32");
+                }
             }
             catch (const std::exception&) {
                 dv2_call_failed = true;
@@ -5693,6 +5718,46 @@ PatternAlgorithms::Dv2Payload PatternAlgorithms::dv2_parse_payload(const std::ve
     out.score = dnn_vtx[3];
     out.status = (std::isfinite(out.P.x()) && std::isfinite(out.P.y()) && std::isfinite(out.P.z()))
         ? Dv2Payload::Status::ok : Dv2Payload::Status::nonfinite;
+    return out;
+}
+
+PatternAlgorithms::Dv2Space PatternAlgorithms::dv2_collect_space(const Facade::Grouping& grouping,
+                                                                 const std::vector<float>& cloud_x,
+                                                                 const std::vector<float>& cloud_y,
+                                                                 const std::vector<float>& cloud_z) const
+{
+    // Same steps, scope and float conversions as SbndPrMagnifyTrackingVisitor's
+    // T_dlvtx_space writer (dl_vtx_dump_space), for one call.
+    Dv2Space out;
+    const WireCell::PointCloud::Tree::Scope scope{m_dv2_space_pcname, m_dv2_space_coords};
+    std::vector<const Facade::Cluster*> clusters;   // in scope, increasing cluster id
+    for (const auto* cl : grouping.children()) {
+        if (cl && bee_cluster_in_scope(*cl, scope, m_dv2_space_filter)) clusters.push_back(cl);
+    }
+    std::sort(clusters.begin(), clusters.end(), [](const Facade::Cluster* a, const Facade::Cluster* b) {
+        return a->get_cluster_id() < b->get_cluster_id();
+    });
+    out.n_in_scope = clusters.size();
+    std::vector<std::vector<float>> xyz(clusters.size());   // per cluster, cm, xyz triplets
+    for (size_t i = 0; i < clusters.size(); ++i) {
+        auto& v = xyz[i];
+        bee_cluster_points(*clusters[i], scope, false, [&v](size_t, const WireCell::Point& pt, double) {
+            v.push_back(pt.x() / units::cm); v.push_back(pt.y() / units::cm); v.push_back(pt.z() / units::cm);
+        });
+    }
+    const auto touched = bee_touching_clusters(xyz, cloud_x, cloud_y, cloud_z, m_dv2_space_touch_cm);
+    out.n_clusters = touched.size();
+    for (const auto k : touched) {
+        const auto* cl = clusters[k];
+        const int id = cl->get_cluster_id();
+        bee_cluster_points(*cl, scope, true, [&out, id](size_t, const WireCell::Point& pt, double q) {
+            out.x.push_back(pt.x() / units::cm);
+            out.y.push_back(pt.y() / units::cm);
+            out.z.push_back(pt.z() / units::cm);
+            out.q.push_back(q);
+            out.cluster_id.push_back(id);
+        });
+    }
     return out;
 }
 
