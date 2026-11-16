@@ -4,6 +4,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <ctime>
 #include <boost/algorithm/string.hpp>
 #include "WireCellPgraph/TorchnvTools.h"
@@ -124,45 +125,89 @@ int Graph::execute_upstream(Node* node)
     return count;
 }
 
-// this bool indicates exception, and is probably ignored
+// Always fire the sink-most runnable node so no more than one datum sits
+// on any edge, discovering the runnable node incrementally instead of
+// rescanning the whole topological order after every firing.
+//
+// Each node's topological index is its fixed "rank" (sink-most = highest).
+// A node's runnability can change ONLY when a neighbor fires: a child
+// consuming empties a parent's output edge (clearing the parent's "don't
+// run while output pending" guard), and a parent producing fills a child's
+// input.  So after each successful firing we re-offer just that node plus
+// its parents and children to a rank-ordered ready set, and pop the
+// highest rank.  Rank is a total order, so this fires the same node
+// sequence as a reverse scan of the topological order restarted after each
+// firing (the original algorithm), but in O((V+E) log V) instead of O(V^2).
+//
+// The returned bool indicates exception, and is probably ignored.
 bool Graph::execute()
 {
     auto nodes = sort_kahn();
-    l->debug("executing with {} nodes", nodes.size());
+    const size_t nnodes = nodes.size();
+    l->debug("executing with {} nodes", nnodes);
 
-    while (true) {
-        int count = 0;
-        bool did_something = false;
+    std::unordered_map<Node*, size_t> rank;
+    rank.reserve(nnodes);
+    for (size_t ind = 0; ind < nnodes; ++ind) {
+        rank[nodes[ind]] = ind;
+    }
 
-        for (auto nit = nodes.rbegin(); nit != nodes.rend(); ++nit, ++count) {
-            Node* node = *nit;
-            NVTX_SCOPED_RANGE((node->instance_name()).c_str());
-            auto core = std::clock();
-            auto wall = std::chrono::high_resolution_clock::now();
+    std::set<size_t> ready;             // ranks of queued candidate nodes
+    std::vector<char> queued(nnodes, 0);  // dedup: at most one entry per node
 
-            bool ok = call_node(node);
+    auto enqueue = [&](Node* n) {
+        auto it = rank.find(n);
+        if (it == rank.end()) return;   // not in the sorted DAG (e.g. in a cycle)
+        const size_t r = it->second;
+        if (queued[r]) return;
+        queued[r] = 1;
+        ready.insert(r);
+    };
 
-            m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
-
-            auto delta = std::chrono::high_resolution_clock::now() - wall;
-            const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
-            m_nodes_timer[node].wall += wall_ms / 1000.0;
-
-            if (ok) {
-                if (m_enable_em) {
-                  m_em(String::format("called %d: %s", count, node->ident()));
-                }
-                SPDLOG_LOGGER_TRACE(l, "ran node {}: {}", count, node->ident());
-                did_something = true;
-                break;  // start again from bottom of graph
-            }
-        }
-
-        if (!did_something) {
-            return true;  // it's okay to do nothing.
+    // Seed with sources (no input ports).  Every other runnability change
+    // is triggered by a neighbor firing, so seeding sources is sufficient.
+    for (size_t ind = 0; ind < nnodes; ++ind) {
+        if (nodes[ind]->input_ports().empty()) {
+            enqueue(nodes[ind]);
         }
     }
-    return true;  // shouldn't reach
+
+    while (!ready.empty()) {
+        auto rit = std::prev(ready.end());  // highest rank == sink-most
+        const size_t r = *rit;
+        ready.erase(rit);
+        queued[r] = 0;
+        Node* node = nodes[r];
+
+        NVTX_SCOPED_RANGE((node->instance_name()).c_str());
+        auto core = std::clock();
+        auto wall = std::chrono::high_resolution_clock::now();
+
+        bool ok = call_node(node);
+
+        m_nodes_timer[node].core += (std::clock() - core) / (double) CLOCKS_PER_SEC;
+        auto delta = std::chrono::high_resolution_clock::now() - wall;
+        const double wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(delta).count();
+        m_nodes_timer[node].wall += wall_ms / 1000.0;
+
+        if (!ok) {
+            // Was not actually runnable; it will be re-offered when a
+            // neighbor's firing next changes its input/output state.
+            continue;
+        }
+
+        if (m_enable_em) {
+            m_em(String::format("called: %s", node->ident()));
+        }
+        SPDLOG_LOGGER_TRACE(l, "ran node: {}", node->ident());
+
+        // Only this node and its immediate neighbors can have become runnable.
+        enqueue(node);
+        for (auto h : m_edges_forward[node]) enqueue(h);
+        for (auto t : m_edges_backward[node]) enqueue(t);
+    }
+
+    return true;
 }
 
 bool Graph::call_node(Node* node)

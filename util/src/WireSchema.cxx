@@ -373,6 +373,35 @@ static void fix_planes(StoreDB& store, plane_fixers_t& fixers)
     }
 }
 
+// Build the list of fixers needed to advance from "have" to "target".
+static plane_fixers_t fixers_for(Correction have, Correction target)
+{
+    plane_fixers_t fixers;
+    while (have < target) {
+        if (have == Correction::load)
+            fixers.push_back(plane_fixer_order);
+        if (have == Correction::order)
+            fixers.push_back(plane_fixer_direction);
+        if (have == Correction::direction)
+            fixers.push_back(plane_fixer_pitch);
+        ++have;
+    }
+    return fixers;
+}
+
+void WireCell::WireSchema::correct(StoreDB& store, Correction target, Correction have)
+{
+    auto fixers = fixers_for(have, target);
+    fix_planes(store, fixers);
+}
+
+Store WireCell::WireSchema::correct(const Store& raw, Correction target, Correction have)
+{
+    auto store = std::make_shared<StoreDB>(*raw.db());
+    WireCell::WireSchema::correct(*store, target, have);
+    return Store(store);
+}
+
 
 
 Store WireCell::WireSchema::load(const char* filename, Correction correction)
@@ -420,17 +449,7 @@ Store WireCell::WireSchema::load(const char* filename, Correction correction)
     };
 
     // Pile on fixers to reach correction level
-    plane_fixers_t fixers;
-    while (have_level < correction) {
-        if (have_level == Correction::load)
-            fixers.push_back(plane_fixer_order);
-        if (have_level == Correction::order)
-            fixers.push_back(plane_fixer_direction);
-        if (have_level == Correction::direction)
-            fixers.push_back(plane_fixer_pitch);
-        ++have_level;
-    };
-
+    auto fixers = fixers_for(have_level, correction);
     fix_planes(*store, fixers);
 
     return Store(store);

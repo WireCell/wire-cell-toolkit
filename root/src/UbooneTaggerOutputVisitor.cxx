@@ -1,3 +1,4 @@
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/UbooneTaggerOutputVisitor.h"
 
 #include "TFile.h"
@@ -32,11 +33,6 @@ namespace {
     /// No '%' in the name => the name is returned unchanged, so a
     /// one-event-per-process job writes exactly the file it always wrote.
     /// Same idiom as QLMatching's calib dump.
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
 
     /// sbnd_xin/docs/128-129: the particle-flow display id of a segment,
     /// cluster_id*1000 + (id() if set, else graph_index) -- the Bee PF node
@@ -130,7 +126,7 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
     // Open existing ROOT file in UPDATE mode to add trees.  Same template as
     // the tracking visitor that RECREATE'd it earlier in the pipeline, so both
     // land on this event's file.
-    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);
@@ -270,7 +266,9 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
                 PR::IndexedVertexSet sv;
                 PR::IndexedSegmentSet ss;
                 shower->fill_sets(sv, ss, /*flag_exclude_start_segment=*/false);
-                for (const auto& seg : ss) seg_to_shower[seg] = shower;
+                // First shower wins; a shared segment is settled by its T_kine row below
+                // (PR 544 review, item 8).
+                for (const auto& seg : ss) seg_to_shower.emplace(seg, shower);
             }
             for (auto ed : PR::ordered_edges(*graph)) {
                 auto seg = (*graph)[ed].segment;
@@ -286,6 +284,13 @@ void Root::UbooneTaggerOutputVisitor::visit(Clus::Facade::Ensemble& ensemble) co
                 sg_in_enu = (lit != link_by_gi.end()) ? 1 : 0;
                 sg_kine_index = sg_in_enu ? lit->second.first : -1;
                 sg_kine_n_rows = sg_in_enu ? lit->second.second : 0;
+                // shower_id = the shower of the segment's T_kine row, as kine_index.
+                if (sit != seg_to_shower.end() && sg_kine_index >= 0
+                    && static_cast<size_t>(sg_kine_index) < ki.kine_particle_id.size()
+                    && static_cast<size_t>(sg_kine_index) < ki.kine_particle_is_shower.size()
+                    && ki.kine_particle_is_shower[sg_kine_index]) {
+                    sg_shower_id = ki.kine_particle_id[sg_kine_index];
+                }
                 auto [start_vtx, end_vtx] = PR::find_vertices(*graph, seg);
                 sg_start_vertex_id = vtx_display_id(start_vtx);
                 sg_end_vertex_id = vtx_display_id(end_vtx);

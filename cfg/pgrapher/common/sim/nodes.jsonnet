@@ -8,16 +8,19 @@ local depos = import "pgrapher/common/sim/depos.jsonnet";
 
 function(params, tools)
 {
-    // Create a drifter Pnode.
+    // Create a drifter Pnode.  Its xregions come from tools.drift_planes if
+    // set, else from the faces of params.det.volumes.
+    local drift_planes = std.get(tools, "drift_planes", null, inc_hidden=true),
     drifter: g.pnode({
         // local xregions = wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes])),
         // Filter out any null values in xregions
         local xregions = std.filter(function(x) x!= null, wc.unique_list(std.flattenArrays([v.faces for v in params.det.volumes]))),
 
         type: "Drifter",
-        data: params.lar {
+        data: params.lar + (if drift_planes == null
+                            then { xregions: xregions }
+                            else { drift_planes: wc.tn(drift_planes) }) {
             rng: wc.tn(tools.random),
-            xregions: xregions,
             time_offset: params.sim.depo_toffset,
 
             drift_speed: params.lar.drift_speed,
@@ -28,7 +31,7 @@ function(params, tools)
             lifetime: params.lar.lifetime,
 
         },
-    }, nin=1, nout=1, uses=[tools.random]),
+    }, nin=1, nout=1, uses=[tools.random] + (if drift_planes == null then [] else [drift_planes])),
 
     // Implement "fixed" depo mode like LArG4 uses
     make_bagger :: function(name="bagger") g.pnode({

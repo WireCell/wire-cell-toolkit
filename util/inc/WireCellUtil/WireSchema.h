@@ -238,6 +238,25 @@ namespace WireCell {
         /// Load file into store performing correction
         Store load(const char* filename, Correction correction = Correction::pitch);
 
+        /// Apply cumulative corrections to an in-memory store, in place.
+        ///
+        /// This runs the exact same per-plane "fixers" that load() applies, so
+        /// a store built programmatically (eg from LArSoft geometry) can be
+        /// made compliant with the wire-schema conventions "by construction".
+        ///
+        /// The store is assumed to currently be at correction level "have"
+        /// (default: Correction::load, ie raw but well-formed hierarchy).
+        /// Fixers are piled on to advance the store from "have" up to "target".
+        /// If target <= have, this is a no-op.
+        void correct(StoreDB& store,
+                     Correction target = Correction::pitch,
+                     Correction have = Correction::load);
+
+        /// Return a corrected copy of the given store.  See correct(StoreDB&).
+        Store correct(const Store& raw,
+                      Correction target = Correction::pitch,
+                      Correction have = Correction::load);
+
         /// Dump store to file
         void dump(const char* filename, const Store& store);
 
