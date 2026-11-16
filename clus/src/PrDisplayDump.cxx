@@ -11,6 +11,7 @@
 // Divergences from those two are deliberate and marked DELTA below.
 
 #include "WireCellClus/PrDisplayDump.h"
+#include "WireCellClus/PerEventName.h"
 #include "WireCellUtil/String.h"
 
 #include "WireCellClus/Facade_Grouping.h"
@@ -256,8 +257,8 @@ void Clus::PrDisplayDump::visit(Facade::Ensemble& ensemble) const
     // so never take this branch).  Without it a process streaming many events
     // leaves only the last event's dump.
     std::string outname = m_output_filename;
-    if (outname.find('%') != std::string::npos) {
-        outname = String::format(outname, ensemble.ident());
+    if (per_event_templated(outname)) {
+        outname = per_event_name(outname, ensemble);
         // The metadata's eventNo comes from configure() and is constant for the
         // process; a hand scan reading this file must see the event it is
         // actually looking at.

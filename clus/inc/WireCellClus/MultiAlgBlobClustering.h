@@ -639,7 +639,8 @@ namespace WireCell::Clus {
         // output set.  Default: the truth tables of larwirecell's
         // wclsTruthInformationAttacher.  An input without them => nothing to do,
         // i.e. byte-identical output for every existing job.
-        std::vector<std::string> m_aux_datatypes{"truth_nu", "truth_pf"};
+        // ai-helper issue 41: + truth_track (labeler truth_detail)
+        std::vector<std::string> m_aux_datatypes{"truth_nu", "truth_pf", "truth_track"};
 
         // Own (non-shared) Bee zip.  A printf conversion in the configured
         // "bee_zip" means one zip per event: the open zip is closed and the
@@ -653,6 +654,10 @@ namespace WireCell::Clus {
             write_obj() becomes a no-op.  Default "mabc.zip" => unchanged. */
         bool m_bee_disabled{false};
         int m_bee_zip_open_evt{-1};
+        // The run/subrun of the open per-event zip: an event number alone does
+        // not identify an event in a multi-subrun group (PR 544 review, item 1).
+        int m_bee_zip_open_run{-1};
+        int m_bee_zip_open_sub{-1};
         /// Open the own-sink zip for the current event, if that is still needed.
         void ensure_own_sink();
         /// Set m_eventNo from the tensor ident, and run/subrun from m_rse_map.
