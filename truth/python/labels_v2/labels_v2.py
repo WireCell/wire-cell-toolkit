@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """labels_v2.py -- the truth labeler v2 for one campaign event (pr_ml docs 50a / 50b secs 2.1-2.8; built in doc 54).
 
-  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points] [--far-length]
+  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points] [--far-length] [--c6]
       -> <out dir>/<event>.labels_v2.npz; prints "<event> ok|empty|fail <why>"
       --start-tie-order (default off = byte-identical; pr_ml doc 71): the instance table's start / end are taken after ordering
       each run of equal-time own deposits along the track (steiner_truth.tie_order).  The depo file stores float32 times, so a
@@ -15,6 +15,11 @@
       usual length test: when its extent over deposits seen in >= 2 views is >= 2 steps it is a segment -- the electron's own deposits
       class delta, its radiation class EM segment, piece type 1, its instance (still origin delta_far_piece) cls_obj delta or shower by
       charge majority; shorter far pieces stay LE blips as before.  meta params gain "far_length": true, log n_delta_far_long.
+      --c6 (default off = byte-identical; pr_ml doc 82, Xin 2026-11-16: the adopted E-1 target C6): implies --far-length and changes
+      the per-point class pt_cls7 only (instances, cls_obj, pieces, overlap bits, key points as without it): (a) radiation (own
+      particle another e / gamma) of a Michel / delta class farther than 15 mm from the same instance's Michel / delta electron ->
+      EM segment or blip by piece type; (b) an EM segment deposit of a delta electron -> delta; absorbed / swallowed EM blips -> EM
+      segment.  meta params gain "c6": true and "far_length": true; log n_c6_detached, n_c6_trunk, n_c6_absorbed.
   labels_v2.py --selftest                                 (see selftest_v2.py)
 
 Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 stub, 3 EM segment, 4 EM blip, 5 Michel,
@@ -114,7 +119,7 @@ def main():
     ev = os.path.basename(d.rstrip("/"))
     try:
         st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"),
-                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points"), ("--far-length", "far_length")) if f in sys.argv} or None)
+                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points"), ("--far-length", "far_length"), ("--c6", "c6")) if f in sys.argv} or None)
     except Exception as x:   # noqa: BLE001
         import traceback
         st, why = "fail", repr(x)[:200] + " | " + traceback.format_exc().splitlines()[-3].strip()[:200]

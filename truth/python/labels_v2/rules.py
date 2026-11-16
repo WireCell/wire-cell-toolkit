@@ -114,6 +114,8 @@ def label_event(ev, det=None, params=None):
                wait_ns=objects.WAIT_NS, michel_capture_ke_min_mev=objects.MICHEL_CAPTURE_KE_MIN, extent="2view", two_pass=True)
     if params:
         prm.update(params)
+        if prm.get("c6"):                 # --c6 implies --far-length (pr_ml doc 82: Xin's Q6, the length test for far pieces)
+            prm["far_length"] = True
     n, q, P3 = ev.n, ev.q, ev.P3
     T = objects.build(ev, THR)
     P = Projection(ev)
@@ -419,6 +421,8 @@ def label_event(ev, det=None, params=None):
     sh = cls_obj == OBJ["shower"]
     cls7[sh] = np.where(piece_type[sh] == 1, CLS7["segment"], CLS7["blip"])
     cls7[cls_obj == OBJ["le"]] = CLS7["blip"]
+    if R.prm.get("c6"):          # --c6 (pr_ml doc 82, Xin 2026-11-16): the E-1 target C6 on the per-deposit class only
+        c6_classes(T, R, cls7, inst, piece_type, abs_dep | swl_dep, P3, log)
     # overlap bits
     overlap = np.zeros(n, np.int16)
     overlap[~free1 & test_all] |= OV_NOTFREE
@@ -433,6 +437,35 @@ def label_event(ev, det=None, params=None):
     R.table = instance_table(ev, T, R, NI, uroots, inst)
     log.update(n_instances=int(NI), n_em_objects=int(M), n_deposits=int(n), n_free=int(free1.sum()))
     return R
+
+
+C6_ATTACH_MM = 15.0
+
+
+def c6_classes(T, R, cls7, inst, piece_type, absorbed, P3, log):
+    """--c6 (pr_ml doc 82): C6 = C5 without its rule (d), absorbed / swallowed blips as EM segments; Q6 by --far-length (implied).
+    In place on cls7, the predicates of the doc 76 / 82 views (d76_rules._c5, d82_rules C6) on deposits.  A deposit's own particle is
+    its own G4 row's: track kind (or not e / gamma) 1, Michel electron 2, delta electron 3, other e / gamma 0; -1 no row.
+      (a) class Michel / delta, own particle 0, farther than 15 mm from every deposit of the same final instance whose class is Michel /
+          delta and own particle 2 / 3 -> EM segment if piece type 1 else EM blip (no such own deposit: all of it is detached);
+      (b) class EM segment, own particle 3 -> delta;
+      absorbed / swallowed (overlap bits 8 / 16) and class EM blip -> EM segment.
+    Instances, cls_obj, pieces, overlap bits and key points are left as they are."""
+    g = T.grow; gr = np.maximum(g, 0)
+    own = np.where(g >= 0, np.where(T.trk[gr] | ~T.emp[gr], 1, np.where(T.michel[gr], 2, np.where(T.delta[gr], 3, 0))), -1)
+    c0 = cls7.copy(); md = np.isin(c0, (CLS7["michel"], CLS7["delta"]))
+    rad = np.flatnonzero(md & (own == 0)); el = md & np.isin(own, (2, 3)); det = np.ones(len(rad), bool)
+    for i in np.unique(inst[rad]).tolist():
+        k = inst[rad] == i
+        if i < 0:
+            det[k] = False; continue
+        e_ = np.flatnonzero(el & (inst == i))
+        if len(e_):
+            det[k] = cKDTree(P3[e_]).query(P3[rad[k]], distance_upper_bound=C6_ATTACH_MM)[0] > C6_ATTACH_MM
+    d_ = rad[det]; cls7[d_] = np.where(piece_type[d_] == 1, CLS7["segment"], CLS7["blip"])
+    b_ = (c0 == CLS7["segment"]) & (own == 3); cls7[b_] = CLS7["delta"]
+    a_ = absorbed & (cls7 == CLS7["blip"]); cls7[a_] = CLS7["segment"]
+    log.update(n_c6_detached=int(len(d_)), n_c6_trunk=int(b_.sum()), n_c6_absorbed=int(a_.sum()))
 
 
 def instance_table(ev, T, R, NI, uroots, inst):

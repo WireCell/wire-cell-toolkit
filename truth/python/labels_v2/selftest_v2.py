@@ -314,11 +314,56 @@ def test_j():
     check(n_["log"].get("n_delta_far_long") == 1 and n_["og"][n_["i4"]] == "delta_far_piece", "on: one far piece passes, its origin is still delta_far_piece")
 
 
+
+def test_k():
+    print("--- (k) --c6: the E-1 target C6 on the class only (pr_ml doc 82, Xin 2026-11-16)")
+    # event 1: a muon with a resolved 80 mm delta (tid 3) that radiates two Compton blobs -- one 40 mm past the delta's end
+    # (detached: rule (a) -> EM blip), one 5 mm off its middle (attached: stays delta); and a delta (tid 11) whose own deposits form
+    # two separated 30 mm pieces, so labels_v2 promotes it to a shower (rule (b): its own segments -> delta).
+    B = Builder()
+    B.particle(1, 13, 0, "primary", (-1600, 0, 1000), (-1400, 0, 1400), 2000.0)
+    d = np.array([0.3, np.sin(np.radians(60)), np.cos(np.radians(60))]); d /= np.linalg.norm(d)
+    s3 = np.array([-1500, 0, 1200]); e3 = s3 + 80 * d; m3 = s3 + 40 * d
+    B.particle(3, 11, 1, "muIoni", s3, e3, 20.0, t_start=200 / C, q_per_step=2500.0)
+    B.particle(7, 22, 3, "eBrem", e3, e3 + (0, 0, 40), 3.0, t_start=300 / C, deposits=False)
+    B.particle(8, 11, 7, "compt", e3 + (0, 0, 40), e3 + (0, 0, 40), 0.5, t_start=320 / C, q_per_step=3000.0, blob=(10, 1.0))
+    B.particle(9, 22, 3, "eBrem", m3, m3 + (0, 0, 5), 1.0, t_start=250 / C, deposits=False)
+    B.particle(10, 11, 9, "compt", m3 + (0, 0, 5), m3 + (0, 0, 5), 0.5, t_start=260 / C, q_per_step=3000.0, blob=(10, 1.0))
+    s11 = np.array([-1450, 0, 1300]); u = np.array([0.0, 1.0, 0.0])
+    B.particle(11, 11, 1, "muIoni", s11, s11 + 30 * u, 15.0, t_start=400 / C, q_per_step=2500.0)
+    n = 60; P = (s11 + 70 * u) + np.outer(np.linspace(0, 30, n), u)
+    B.dep.append((11, P, np.full(n, 420 / C), np.full(n, 2500.0), np.full(n, 2500.0 / 2.4e4)))
+    # event 2: test (c)'s shower with an 8 mm proton swallowed on its segment (class EM blip, overlap bit 16) -> EM segment
+    B2 = Builder()
+    B2.particle(1, 22, 0, "primary", (-1500, 500, 1900), (-1500, 500, 2000), 300.0, deposits=False)
+    B2.particle(2, 11, 1, "conv", (-1500, 500, 2000), (-1450, 500, 2100), 250.0, t_start=100 / C, q_per_step=3000.0)
+    B2.particle(4, 2212, 0, "primary", (-1475, 500, 2050), (-1471, 500, 2058), 30.0, q_per_step=6000.0)
+    out = {}
+    for j, ev in enumerate((B.event(), B2.event())):
+        for nm, prm in (("off", None), ("on", dict(c6=True))):
+            R = run(ev, prm)[0]; out[(j, nm)] = (ev, R)
+    (ev, o), (_, n_) = out[(0, "off")], out[(0, "on")]
+    c = lambda R, t: maj(R.cls7[dep_of(ev, t)])
+    check(o.table["inst_cls_obj"][maj(o.inst[dep_of(ev, 3)])] == OBJ["delta"] and c(o, 3) == c(o, 8) == c(o, 10) == CLS7["delta"], "setup: the 80 mm delta is a delta, both its radiation blobs class delta")
+    check(o.table["inst_cls_obj"][maj(o.inst[dep_of(ev, 11)])] == OBJ["shower"] and c(o, 11) == CLS7["segment"], "setup: the two-piece delta is promoted to a shower, its own deposits EM segment")
+    check("c6" not in o.prm and not any("c6" in k for k in o.log), "off: no c6 param, no c6 log key")
+    check(c(n_, 8) == CLS7["blip"] and maj(n_.piece_type[dep_of(ev, 8)]) == 2, "on (a): the blob 40 mm past the delta is detached -> EM blip")
+    check(c(n_, 10) == CLS7["delta"] and c(n_, 3) == CLS7["delta"], "on (a): the blob 5 mm off the delta stays delta, so does the delta electron")
+    check(c(n_, 11) == CLS7["delta"], "on (b): the promoted delta's own segment deposits -> delta")
+    check(n_.prm.get("c6") is True and n_.prm.get("far_length") is True and n_.log.get("n_c6_detached", 0) > 0 and n_.log.get("n_c6_trunk", 0) > 0, "on: params c6 and far_length (implied), log counts")
+    same = all(np.array_equal(getattr(o, k), getattr(n_, k)) for k in ("inst", "cls_obj", "piece_type", "piece_id", "overlap", "stretch"))
+    tab = all(np.array_equal(np.asarray(o.table[k]), np.asarray(n_.table[k])) for k in o.table if k != "origins")
+    check(same and tab, "on: instances, cls_obj, pieces, overlap bits, stretches and the instance table as off")
+    (ev2, o2), (_, n2) = out[(1, "off")], out[(1, "on")]; d4 = dep_of(ev2, 4)
+    check(maj(o2.cls7[d4]) == CLS7["blip"] and (o2.overlap[d4] & rules.OV_SWALLOWED).all(), "setup: the swallowed proton is an EM blip with overlap bit 16")
+    check(maj(n2.cls7[d4]) == CLS7["segment"] and maj(n2.cls7[dep_of(ev2, 2)]) == CLS7["segment"] and n2.log.get("n_c6_absorbed", 0) > 0, "on: the swallowed proton -> EM segment; the conversion electron stays EM segment")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i, test_j):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i, test_j, test_k):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1
