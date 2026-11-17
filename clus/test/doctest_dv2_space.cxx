@@ -32,12 +32,12 @@ TEST_CASE("dv2 space: the load report's space section gives the touch distance")
 TEST_CASE("dv2 space: a bad report or space section is an error")
 {
     std::string err;
-    for (const std::string rep : {std::string("not json"), std::string("[1, 2]"),
-                                  std::string(R"({"space": {"match_cm": 1.0}})"),
-                                  std::string(R"({"space": {"touch_cm": "1"}})"),
-                                  std::string(R"({"space": {"touch_cm": 0}})"),
-                                  std::string(R"({"space": {"touch_cm": -1}})"),
-                                  std::string(R"({"space": 3})")}) {
+    for (const std::string& rep : {std::string("not json"), std::string("[1, 2]"),
+                                   std::string(R"({"space": {"match_cm": 1.0}})"),
+                                   std::string(R"({"space": {"touch_cm": "1"}})"),
+                                   std::string(R"({"space": {"touch_cm": 0}})"),
+                                   std::string(R"({"space": {"touch_cm": -1}})"),
+                                   std::string(R"({"space": 3})")}) {
         CAPTURE(rep);
         CHECK(TaggerCheckNeutrino::dv2_space_touch_cm(rep, err) == 0.0);
         CHECK_FALSE(err.empty());
