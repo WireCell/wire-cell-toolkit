@@ -12,6 +12,10 @@
   (e) a neutron's photon with a 4 mm Compton blob: a G3 LE blip cluster (class blip, own instance, origin neutron, no kp)
   (f) bad channels: W channels under part of a muon masked -> not seen in W there, still seen in U / V, still free
   (g) every deposit past one plane's wires (pr_ml doc 58 sec 11.1): no entry in that plane (None), seen in the other two, labelled
+  (l) --c7 (pr_ml doc 86; a second event with image points off the deposits: a stray point does not cut a track, a free end sits
+      where the points stop): a proton ending at a vertex with a pion leaving it and an 8 mm proton lying on the pion's first 8 mm (a
+      hidden stub: folded into its host, no place); an isolated 10 mm proton (a visible stub: kept, a place at its start); a muon
+      whose deposits miss 100 mm in the middle (two visible pieces, a place on each side of the gap)
 Run: python3 selftest_v2.py [wires file]; exit 0 when every check passes, prints FAIL lines otherwise."""
 import os, sys
 import numpy as np
@@ -58,7 +62,8 @@ class Builder:
                 P = start + np.outer(s / max(L, 1e-9), end - start)
                 self.dep.append((tid, P, t_start + s / C, np.full(n, q_per_step), np.full(n, q_per_step / 2.4e4)))
 
-    def event(self, bad=None, every=3):
+    def event(self, bad=None, every=3, extra=None):
+        """extra: [(xyz (n, 3), tid)], image points added beside the sampled deposits (points that lie off their deposits)"""
         pf = np.zeros((len(self.rows), len(TT.PF_COLUMNS))); c = TT.pf_col
         for i, r in enumerate(self.rows):
             pf[i, c("nu_row")] = -1; pf[i, c("trackid")] = r["tid"]; pf[i, c("parent_trackid")] = r["mother"]; pf[i, c("mother_trackid")] = r["mother"]
@@ -75,6 +80,9 @@ class Builder:
         truth = dict(truth_pf=pf, sed_ids=np.column_stack([tids, tids]).astype(np.int32), sed_energy=e.astype(np.float32), gen_labels=["generator"], truth_nu=np.zeros((0, len(TT.NU_COLUMNS))), meta={})
         sel = np.arange(0, n, every)
         pts = dict(X=P3[sel].copy(), tid=tids[sel], orig_tid=tids[sel])
+        for xe, te in (extra or []):
+            xe = np.asarray(xe, float).reshape(-1, 3); te = np.full(len(xe), te, tids.dtype)
+            pts = dict(X=np.vstack([pts["X"], xe]), tid=np.r_[pts["tid"], te], orig_tid=np.r_[pts["orig_tid"], te])
         ev = evio.Event.synthetic("sbnd", WIRES, D, I, P3, T0, truth, pts, INPUTS, TJ, bad=bad)
         return ev
 
@@ -359,11 +367,68 @@ def test_k():
     check(maj(n2.cls7[d4]) == CLS7["segment"] and maj(n2.cls7[dep_of(ev2, 2)]) == CLS7["segment"] and n2.log.get("n_c6_absorbed", 0) > 0, "on: the swallowed proton -> EM segment; the conversion electron stays EM segment")
 
 
+def test_l():
+    print("--- (l) --c7: visible pieces and key-point places (pr_ml doc 86, Xin 2026-11-17)")
+    B = Builder(); Vx = np.array([-1500.0, 0.0, 1200.0]); d2 = np.array([1.0, 1.0, 1.0]) / np.sqrt(3.0)
+    B.particle(1, 2212, 0, "primary", (-1600, 0, 1000), Vx, 800.0)
+    B.particle(2, 211, 1, "hadElastic", Vx, Vx + 173.0 * d2, 300.0, t_start=300 / C)
+    B.particle(3, 2212, 1, "hadElastic", Vx, Vx + 8.0 * d2, 20.0, t_start=300 / C, q_per_step=6000.0)       # on the pion's first 8 mm
+    B.particle(4, 2212, 0, "primary", (-1450, -200, 1100), (-1450, -200, 1110), 25.0, q_per_step=6000.0)    # alone
+    B.particle(5, 13, 0, "primary", (-1580, 300, 1000), (-1580, 300, 1400), 2000.0, deposits=False)
+    z = np.r_[np.arange(1000.0, 1150.0, 0.5), np.arange(1250.0, 1400.0, 0.5)]; P = np.column_stack([np.full(len(z), -1580.0), np.full(len(z), 300.0), z])
+    B.dep.append((5, P, (z - 1000.0) / C, np.full(len(z), 3000.0), np.full(len(z), 3000.0 / 2.4e4)))
+    ev = B.event()
+    try:
+        from labels_v2 import c7
+    except Exception as x:   # noqa: BLE001
+        check(False, f"labels_v2.c7 is missing ({x!r:.60})"); return
+    o = run(ev, None); R6, pt6, kps6, _ = run(ev, dict(c6=True)); R, pt, kps, _ = run(ev, dict(c7=True)); c6cls = pt6["cls7"].copy()
+    check("c7" not in o[0].prm and not any(k.startswith("n_c7") for k in o[0].log), "off: no c7 param, no c7 log key")
+    check(R.prm.get("c7") is True and R.prm.get("c6") is True and R.prm.get("far_length") is True, "on: params c7, c6 and far_length (implied)")
+    i3, i4 = inst_of(R, 3), inst_of(R, 4); t = R.table
+    check(i3 >= 0 and t["inst_cls_obj"][i3] == OBJ["stub"] and t["inst_run_mm"][i3] < 5.0 and i4 >= 0 and t["inst_cls_obj"][i4] == OBJ["stub"] and t["inst_run_mm"][i4] >= 5.0,
+          f"setup: the proton on the pion is a stub with no free run ({t['inst_run_mm'][i3] if i3 >= 0 else -1:.1f} mm), the isolated one a stub with a free run ({t['inst_run_mm'][i4] if i4 >= 0 else -1:.1f} mm)")
+    check(kps["kp_kind"].tolist().count(KP["stub_start"]) == 2, "setup: today's key points hold a start for both stubs")
+    A, log = c7.build(ev, R, pt, kps, "sbnd"); cls = pt["cls7"]; tid = ev.pts["orig_tid"]; pc = A["pt_c7_piece"]; fl = A["pt_c7_flag"]
+    p3 = tid == 3; p4 = tid == 4
+    check((c6cls[p3] == CLS7["stub"]).all() and (cls[p3] != CLS7["stub"]).all() and (np.isin(cls[p3], (CLS7["track"], CLS7["blip"]))).all(), "the hidden stub's points: class stub under --c6, track (its host) or EM blip under --c7")
+    host = pc[p3][(fl[p3] & c7.FL_FSTUB) > 0]
+    check(len(host) > 0 and np.isin(A["pc_inst"][host], (inst_of(R, 1), inst_of(R, 2))).all() and (A["pc_type"][host] == OBJ["track"]).all(), "its covered points sit in the piece of the proton or the pion, with the folded-stub flag")
+    check(len(np.unique(host)) == 1, f"the hidden stub is folded whole into ONE host piece (got {len(np.unique(host))})")
+    k4 = np.unique(pc[p4])
+    check((cls[p4] == CLS7["stub"]).all() and len(k4) == 1 and k4[0] >= 0 and A["pc_type"][k4[0]] == OBJ["stub"] and bool(A["pc_graph"][k4[0]]), "the isolated stub keeps its class and is one piece in the graph")
+    g = A["pc_graph"]; tk = (A["pc_type"] == OBJ["track"]) & g
+    check(int(tk.sum()) == 4 and int(((A["pc_inst"] == inst_of(R, 5)) & tk).sum()) == 2, f"four track pieces in the graph, two of them the muon's (got {int(tk.sum())}, {int(((A['pc_inst'] == inst_of(R, 5)) & tk).sum())})")
+    check(int(g.sum()) == 5, f"five pieces in the graph: proton, pion, the visible stub, two muon pieces (got {int(g.sum())})")
+    PL = A["pl_xyz"].astype(float); n_at = lambda p, r=12.0: int((np.linalg.norm(PL - np.asarray(p, float), axis=1) <= r).sum())
+    check(len(PL) == 8, f"eight places: the vertex, the proton's start, the pion's end, the stub's start, the muon's two ends and the two sides of its gap (got {len(PL)})")
+    check(n_at(Vx) == 1 and n_at((-1600, 0, 1000)) == 1 and n_at(Vx + 173.0 * d2) == 1 and n_at((-1450, -200, 1100)) == 1, "one place at the vertex, at the proton's start, at the pion's end and at the visible stub's start")
+    check(n_at((-1580, 300, 1150)) == 1 and n_at((-1580, 300, 1250)) == 1 and n_at((-1580, 300, 1000)) == 1 and n_at((-1580, 300, 1400)) == 1, "a place on each side of the muon's gap and at its two ends")
+    check(int(((A["pl_kinds"] >> 2) & 1).sum()) == 1, "exactly one place holds a stub start: the hidden stub gives none")
+    iv = int(np.argmin(np.linalg.norm(PL - Vx, axis=1))); mem = A["pl_member_piece"][A["pl_member_place"] == iv]
+    check(sorted(A["pc_inst"][mem].tolist()) == sorted([inst_of(R, 1), inst_of(R, 2)]), "the vertex place has two member pieces: the proton and the pion")
+    check(len(A["seg_a"]) == 5 and (A["seg_piece"] >= 0).all(), f"five segments in the implied graph (got {len(A['seg_a'])})")
+    check(sorted(A) == sorted(c7.NEW_MEMBERS) and log.get("n_c7_stub_folded") == 1 and log.get("n_c7_stub_kept") == 1, "the new members are the listed ones; the log counts one folded and one kept stub")
+    same = all(np.array_equal(getattr(R6, k), getattr(R, k)) for k in ("inst", "cls_obj", "cls7", "piece_type", "piece_id", "overlap", "stretch"))
+    check(same and all(np.array_equal(np.asarray(R6.table[k]), np.asarray(R.table[k])) for k in R6.table if k != "origins") and all(np.array_equal(kps6[k], kps[k]) for k in kps6),
+          "on: the per-deposit labels, the instance table and today's key points are as with --c6")
+    # a second event: image points that lie off the deposits (one stray point 60 mm beside a muon; four points 8 to 14 mm past its last deposit)
+    B = Builder(); B.particle(1, 13, 0, "primary", (-1500, 0, 1000), (-1500, 0, 1300), 2000.0)
+    ev = B.event(extra=[(np.array([[-1500.0, 60.0, 1150.0]]), 1), (np.array([[-1500.0, 0.0, 1300.0 + d] for d in (8.0, 10.0, 12.0, 14.0)]), 1)])
+    R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); tk = (A["pc_type"] == OBJ["track"]) & A["pc_graph"]
+    check(int(tk.sum()) == 1, f"a stray point of the muon 60 mm beside its line does not cut it: one track piece (got {int(tk.sum())})")
+    if int(tk.sum()) >= 1:
+        ends = np.vstack([np.r_[A["pc_e0"][k], A["pc_e1"][k]].reshape(2, 3) for k in np.flatnonzero(tk)]).astype(float); far = ends[np.argmax(ends[:, 2])]; near = ends[np.argmin(ends[:, 2])]
+        check(1308.0 <= far[2] <= 1314.5 and abs(near[2] - 1000.0) <= 4.0, f"an end sits where the piece's points stop: 8 to 14 mm past the last deposit at one end, at the first deposit at the other (got z {far[2]:.1f}, {near[2]:.1f})")
+        PL = A["pl_xyz"].astype(float)
+        check(len(PL) == 2 and float(np.linalg.norm(PL - far, axis=1).min()) < 0.5, f"two places, the free end's place at that tip (got {len(PL)})")
+
+
 def main():
     global WIRES
     if len(sys.argv) > 1 and not sys.argv[1].startswith("--"):
         WIRES = sys.argv[1]
-    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i, test_j, test_k):
+    for t in (test_a, test_b, test_c, test_d, test_e, test_f, test_g, test_h, test_i, test_j, test_k, test_l):
         t()
     print("selftest_v2:", "PASS" if not FAILS else f"{len(FAILS)} FAIL")
     return 0 if not FAILS else 1

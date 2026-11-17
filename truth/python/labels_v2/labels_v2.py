@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """labels_v2.py -- the truth labeler v2 for one campaign event (pr_ml docs 50a / 50b secs 2.1-2.8; built in doc 54).
 
-  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points] [--far-length] [--c6]
+  labels_v2.py <event dir> <out dir> [--root R] [--wires-dir D] [--stagea-root S] [--slim F] [--det DET] [--tmpdir T] [--start-tie-order] [--kink-points] [--far-length] [--c6] [--c7]
       -> <out dir>/<event>.labels_v2.npz; prints "<event> ok|empty|fail <why>"
       --start-tie-order (default off = byte-identical; pr_ml doc 71): the instance table's start / end are taken after ordering
       each run of equal-time own deposits along the track (steiner_truth.tie_order).  The depo file stores float32 times, so a
@@ -20,6 +20,13 @@
       particle another e / gamma) of a Michel / delta class farther than 15 mm from the same instance's Michel / delta electron ->
       EM segment or blip by piece type; (b) an EM segment deposit of a delta electron -> delta; absorbed / swallowed EM blips -> EM
       segment.  meta params gain "c6": true and "far_length": true; log n_c6_detached, n_c6_trunk, n_c6_absorbed.
+      --c7 (default off = byte-identical; pr_ml doc 86, Xin 2026-11-17: label what is visible): implies --c6.  pt_cls7 becomes the
+      C7 class (hidden stubs, unresolved and buried tracks, long hidden track ends and short track pieces take the class of the
+      charge that covers them, or EM blip); new members pt_c7_piece (the visible piece, -1 none), pt_c7_flag (1 folded stub,
+      2 folded track, 4 hidden track now shower, 8 now EM blip, 16 zone, 32 hidden stretch of a through-going track),
+      pt_c7_place_dist (mm to the nearest place, -1 none), the piece table pc_* (type in cls_obj numbering, inst, link = G4 id,
+      graph, len, e0, e1, place0, place1), the place table pl_* (xyz, kinds bitmask, tag bitmask, member pairs) and the implied
+      graph seg_* (see c7.py).  Every other member as with --c6; meta params gain "c7": true, the log n_c7_* counts.
   labels_v2.py --selftest                                 (see selftest_v2.py)
 
 Per point (pt_*, in the pctree / slim / term order): cls7 (0 ghost, 1 track, 2 stub, 3 EM segment, 4 EM blip, 5 Michel,
@@ -77,6 +84,10 @@ def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det
         t2 = time.time()
         pt = points.link(ev, R)
         kps, kpt = keypoints.build(ev, R, R.table)
+        c7d = None
+        if R.prm.get("c7"):               # --c7 (pr_ml doc 86): visible pieces and key-point places; pt["cls7"] becomes the C7 class
+            from labels_v2 import c7
+            c7d, c7log = c7.build(ev, R, pt, kps, det); R.log.update(c7log)
         t3 = time.time()
         if slim:
             z = np.load(slim)
@@ -99,6 +110,8 @@ def label(d, outdir, root=None, wires_dir=None, stagea_root=None, slim=None, det
         A = writer.assemble(ev, R, pt, kps, kpt, meta)
         if kk is not None:
             A.update(kk)
+        if c7d is not None:
+            A.update({k: (writer.narrow(v) if np.asarray(v).dtype.kind in "iu" else np.asarray(v)) for k, v in c7d.items()})
         A["run"] = np.frombuffer(json.dumps(run, sort_keys=True).encode(), np.uint8)
         os.makedirs(outdir, exist_ok=True)
         writer.write_npz(f"{outdir}/{ev.ev}.labels_v2.npz", A)
@@ -119,7 +132,7 @@ def main():
     ev = os.path.basename(d.rstrip("/"))
     try:
         st, why = label(d, outdir, g("--root"), g("--wires-dir"), g("--stagea-root"), g("--slim"), g("--det"), g("--tmpdir"),
-                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points"), ("--far-length", "far_length"), ("--c6", "c6")) if f in sys.argv} or None)
+                        {k: True for f, k in (("--start-tie-order", "start_tie_order"), ("--kink-points", "kink_points"), ("--far-length", "far_length"), ("--c6", "c6"), ("--c7", "c7")) if f in sys.argv} or None)
     except Exception as x:   # noqa: BLE001
         import traceback
         st, why = "fail", repr(x)[:200] + " | " + traceback.format_exc().splitlines()[-3].strip()[:200]

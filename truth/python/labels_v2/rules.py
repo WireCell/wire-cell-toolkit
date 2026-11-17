@@ -114,6 +114,8 @@ def label_event(ev, det=None, params=None):
                wait_ns=objects.WAIT_NS, michel_capture_ke_min_mev=objects.MICHEL_CAPTURE_KE_MIN, extent="2view", two_pass=True)
     if params:
         prm.update(params)
+        if prm.get("c7"):                 # --c7 implies --c6 (pr_ml doc 86: C7 starts from the class C6)
+            prm["c6"] = True
         if prm.get("c6"):                 # --c6 implies --far-length (pr_ml doc 82: Xin's Q6, the length test for far pieces)
             prm["far_length"] = True
     n, q, P3 = ev.n, ev.q, ev.P3
@@ -199,6 +201,7 @@ def label_event(ev, det=None, params=None):
     CS1, cause1 = P.clean_share(inst1, test_all)
     free1 = P.free(CS1) & test_all
     R.free, R.CS = free1, CS1
+    R.cause1 = cause1                                     # per deposit and view: an instance present in its main pixel's ring (read by c7 only)
 
     # ------------------------------------------------------------------ 2.5: pieces of every EM instance
     is_row = inst1 < nr
