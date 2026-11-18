@@ -19,7 +19,12 @@ Per counted point (class above ghost, an instance, not far, a matched deposit):
       30 mm with no point of the instance ends a piece, as in the view; a frame change of an out-of-time track at the cathode is
       such a gap); in a run the points are ordered by the path length over the particle's own deposits in time order; every run
       is one visible piece
-  M1  a track piece with a seen length under 2 steps is no piece: covered points to the host (flag 2), free points EM blip (flag 8)
+  M1  a track piece with a seen length under 2 steps is no piece: covered points to the host (flag 2), free points EM blip (flag 8).
+      D4 (Xin 2026-11-18, pr_ml docs 89 / 86, "C7L8 with free-point span" = C7L9): a run of an unresolved-kept track is also tested by
+      the VISIBLE SPAN of its FREE points (not covered by another particle, overlap bit 1 clear; the extent along their first principal
+      axis): it is a piece when it has at least 2 free points and the larger of the two lengths is 2 steps or more.  A run kept by its
+      free span has pc_len = that span and its ends from its free points (the medians of its free points within end_w of the two
+      extremes along the axis; e0 the extreme whose free points come first along the path); all its points are in the piece
   E1  a delta, Michel or shower instance with fewer than 5 free points, or whose free points span less than 2 steps, keeps its
       class but is outside the graph and gives no place
   Z1  flag 16: a point of a track piece within 15 mm of another track piece's centre line (the instance is not scored there)
@@ -144,6 +149,7 @@ def build(ev, R, pt, kps, det):
     o_r, st_r = R.o_r, R.st_r
     to_shower = []; short = []                            # (rows, instance, rule)
     TIP = {}                                              # per graph track piece: where its points stop at either end
+    unres_set = set(unres_kept)                           # D4 (C7L9): tested by the visible span of the free points as well
     arc = np.full(ev.n, np.nan)                           # path length of every own deposit of a track instance
     for i in tracks:
         r = int(root[i])
@@ -191,6 +197,14 @@ def build(ev, R, pt, kps, det):
             lo_, up_ = float(sa[0]), float(sa[-1]); length = up_ - lo_
             e0 = np.median(Xr[du[sa <= lo_ + V["end_w"]]], axis=0) if len(du) else X[rr[0]].copy()
             e1 = np.median(Xr[du[sa >= up_ - V["end_w"]]], axis=0) if len(du) else X[rr[-1]].copy()
+            fr_ = free[rr]
+            if i in unres_set and len(rr) >= V["min_pts"] and length < V["L_trk_steps"] * step and int(fr_.sum()) >= 2:   # D4 (C7L9): free span
+                Q_ = X[rr][fr_]; sf_ = ss[fr_]; c_ = Q_ - Q_.mean(0); t_ = c_ @ np.linalg.svd(c_, full_matrices=False)[2][0]; span = float(t_.max() - t_.min())
+                if span >= V["L_trk_steps"] * step:
+                    a_lo = t_ <= t_.min() + V["end_w"]; a_hi = t_ >= t_.max() - V["end_w"]
+                    if sf_[a_lo].mean() > sf_[a_hi].mean():
+                        a_lo, a_hi = a_hi, a_lo
+                    e0 = np.median(Q_[a_lo], axis=0); e1 = np.median(Q_[a_hi], axis=0); length = span
             if len(rr) < V["min_pts"] or length < V["L_trk_steps"] * step:
                 short.append((rr, i)); continue
             if len(du):                                   # K1: the place of an end is where the piece's points stop

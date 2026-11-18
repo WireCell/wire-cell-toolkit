@@ -509,7 +509,32 @@ def test_l():
         km = [q for q in range(len(A["pc_type"])) if A["pc_inst"][q] == inst_of(R, 1) and A["pc_type"][q] == OBJ["track"] and A["pc_graph"][q]]
         cut = [q for q in km for u in up.tolist() if u in A["seg_a"][A["seg_piece"] == q] or u in A["seg_b"][A["seg_piece"] == q]]
         check(len(km) == 1 and not cut, f"D5: the muon (not the photon's parent) is one piece and its chain does not pass through the photon's start place (got {len(km)} pieces, cut {cut})")
-
+    # D4 (Xin 2026-11-18, pr_ml docs 89 / 86: C7L9, "C7L8 with free-point span"): an unresolved track is kept as a graph piece when its
+    # FREE points (not covered by another particle) span 2 steps or more.  A 14 mm proton 4 mm beside a muon (never resolved), its first
+    # 3.5 mm not in the image, a collinear 6 mm delta on its line beyond its end; (kept) the muon has two gaps facing the proton, so two of
+    # its points are free and span 13.8 mm; (covered) no gaps, every point covered: it folds as before.
+    def d4(gaps):
+        B = Builder(); z = np.arange(1000.0, 1400.0, 0.5); keep = np.ones(len(z), bool)
+        for g0, g1 in gaps:
+            keep &= ~((z >= g0) & (z < g1))
+        z = z[keep]; P = np.column_stack([np.full(len(z), -1600.0), np.zeros(len(z)), z])
+        B.particle(1, 13, 0, "primary", (-1600, 0, 1000), (-1600, 0, 1400), 2000.0, deposits=False)
+        B.dep.append((1, P, (z - 1000.0) / C, np.full(len(z), 3000.0), np.full(len(z), 3000.0 / 2.4e4)))
+        B.particle(2, 2212, 0, "primary", (-1600, 4, 1100), (-1600, 4, 1114), 60.0); B.particle(3, 11, 2, "eIoni", (-1600, 4, 1114), (-1600, 4, 1120), 3.0, t_start=0.05)
+        ev = B.event(drop=[((-1600.0, 4.0, 1101.5), 3.5)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd")
+        ip = inst_of(R, 2); tk = (A["pc_type"] == OBJ["track"]) & A["pc_graph"]; k2 = [q for q in range(len(A["pc_type"])) if tk[q] and A["pc_inst"][q] == ip]
+        m2 = np.asarray(pt["inst"]) == ip; Xp = np.asarray(ev.pts["X"], float)[m2]; fr = (np.asarray(pt["overlap"])[m2] & 1) == 0
+        sp = lambda Q: float(np.ptp((Q - Q.mean(0)) @ np.linalg.svd(Q - Q.mean(0), full_matrices=False)[2][0])) if len(Q) >= 2 else 0.0
+        return R, A, ip, k2, sp(Xp[fr]), int(fr.sum())
+    R, A, ip, k2, fsp, nfr = d4([(1101.0, 1111.0), (1115.0, 1125.0)])
+    check(ip >= 0 and (R.table["inst_flags"][ip] & rules.FL_UNRESOLVED) and R.table["inst_cls_obj"][ip] == OBJ["track"] and nfr >= 2 and fsp >= 12.0,
+          f"setup D4 (kept): the proton is an unresolved track whose free points span 2 steps or more (got {nfr} free, span {fsp:.1f} mm)")
+    check(len(k2) == 1 and float(A["pc_len"][k2[0]]) >= 12.0 and ((A["pt_c7_flag"][np.asarray(A["pt_c7_piece"]) == k2[0]] & c7.FL_UNRKEEP) > 0).all(),
+          f"D4 (kept): an unresolved track whose free points span 2 steps or more keeps a graph track piece, its length the free span (got {len(k2)} pieces"
+          + (f", length {float(A['pc_len'][k2[0]]):.1f} mm)" if len(k2) == 1 else ")"))
+    R, A, ip, k2, fsp, nfr = d4([])
+    check(ip >= 0 and (R.table["inst_flags"][ip] & rules.FL_UNRESOLVED) and nfr == 0, f"setup D4 (covered): the proton is an unresolved track with no free point (got {nfr} free)")
+    check(len(k2) == 0, f"D4 (covered): a wholly covered unresolved track under 2 steps of deposits still folds (got {len(k2)} graph track pieces)")
 
 def main():
     global WIRES
