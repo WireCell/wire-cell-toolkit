@@ -64,7 +64,9 @@ bool DepoSetFilter::operator()(const input_pointer& in, output_pointer& out)
     const int nout = output_depos.size();
     log->debug("call={} depos: input={} output={} dropped={}",
                m_count, nin, nout, nout-nin);
-    out = std::make_shared<WireCell::Aux::SimpleDepoSet>(m_count, output_depos);
+    // Keep the input's ident: a set's ident names its event, and a filter
+    // need not see every event (or see them in order).
+    out = std::make_shared<WireCell::Aux::SimpleDepoSet>(in->ident(), output_depos);
     ++m_count;
     return true;
 }

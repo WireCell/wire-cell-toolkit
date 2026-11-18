@@ -20,6 +20,9 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <functional>
+#include <mutex>
+#include <unordered_map>
 
 #if HAVE_FFTWTHREADS_LIB
 #include <fftw3.h>
@@ -35,6 +38,30 @@ namespace po = boost::program_options;
 using namespace boost::algorithm;
 using namespace boost::property_tree;
 
+namespace {
+    // Process-wide state shared by every WireCell::Main.
+    //
+    // A host framework may embed several Main instances (e.g. one per
+    // Phlex algorithm) whose components meet in the same process-wide
+    // factories.  init_preconfig() and init_configure() of all Mains are
+    // serialized by one mutex, and each configured component remembers
+    // which Main configured it and a hash of the configuration applied.
+    std::mutex g_init_mutex;
+
+    struct Configured {
+        const Main* owner{nullptr};  // nullptr: its Main was destroyed
+        size_t hash{0};
+    };
+    std::unordered_map<std::string, Configured> g_configured;  // by "type:name"
+
+    size_t config_hash(const Configuration& cfg)
+    {
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+        return std::hash<std::string>{}(Json::writeString(wb, cfg));
+    }
+}
+
 Main::Main()
 {
 #if HAVE_FFTWTHREADS_LIB
@@ -43,7 +70,16 @@ Main::Main()
 #endif
 }
 
-Main::~Main() { finalize(); }
+Main::~Main()
+{
+    finalize();
+    std::lock_guard<std::mutex> lock(g_init_mutex);
+    for (auto& [key, rec] : g_configured) {
+        if (rec.owner == this) {
+            rec.owner = nullptr;
+        }
+    }
+}
 
 int Main::cmdline(int argc, char* argv[])
 {
@@ -249,9 +285,23 @@ void Main::add_path(const std::string& dirname) { m_load_path.push_back(dirname)
 
 void Main::initialize()
 {
-    // Here we got thought the boot-up sequence steps.
-    // std::cerr << "initialize wire-cell\n";
+    init_preconfig();
+    init_configure();
+}
 
+void Main::init_preconfig()
+{
+    std::lock_guard<std::mutex> lock(g_init_mutex);
+    init_logging();
+    init_load_config();
+    init_main_config();
+    init_plugins();
+    init_instantiate();
+    init_names();
+}
+
+void Main::init_logging()
+{
     // Maybe make this cmdline configurable.  For now, set all
     // backends the same.
     Log::set_pattern("[%H:%M:%S.%03e] %L [%^%=8n%$] %v");
@@ -259,8 +309,10 @@ void Main::initialize()
     // Log::set_level("debug", "main");
     Log::set_pattern("[%H:%M:%S.%03e] %L [  main  ] %v", "main");
     log->debug("logging to \"main\"");
+}
 
-    // Load configuration files
+void Main::init_load_config()
+{
     for (auto filename : m_cfgfiles) {
         log->debug("loading config file {}: extvars={} extcode={} tlavars={} tlacode={} load_paths={}",
                    filename, m_extvars.size(), m_extcode.size(),
@@ -275,7 +327,10 @@ void Main::initialize()
         log->debug("config file {} merged into cfgmgr", filename);
     }
     log->debug("all config files loaded ({} total)", m_cfgfiles.size());
+}
 
+void Main::init_main_config()
+{
     // Find if we have our own special configuration entry
     int ind = m_cfgmgr.index("wire-cell");
     Configuration main_cfg = m_cfgmgr.pop(ind);
@@ -293,7 +348,10 @@ void Main::initialize()
         log->critical("no apps given");
         THROW(ValueError() << errmsg{"no apps given"});
     }
+}
 
+void Main::init_plugins()
+{
     // Load any plugin shared libraries requested by user.
     PluginManager& pm = PluginManager::instance();
     for (const auto& plugin : m_plugins) {
@@ -305,10 +363,10 @@ void Main::initialize()
         }
         pm.add(pname, lname);
     }
+}
 
-    // Apply any component configuration sequence.
-
-    // Instantiation
+void Main::init_instantiate()
+{
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
@@ -326,7 +384,10 @@ void Main::initialize()
         log->debug("constructing app: \"{}\"", c);
         Factory::lookup_tn<IApplication>(c);
     }
+}
 
+void Main::init_names()
+{
     // Give any named components their name.
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
@@ -344,34 +405,63 @@ void Main::initialize()
     // We do this after setting names as INamed may have created a logger.
     apply_log_config();
     Log::fill_levels();
+}
 
-    // Finally, ask any configurables for their default, merge with
-    // user config and give back.
+void Main::init_configure()
+{
+    std::lock_guard<std::mutex> lock(g_init_mutex);
+
+    // Ask any configurables for their default, merge with user config
+    // and give back.
+    //
+    // A component (type:name) may appear in the configuration of more
+    // than one Main in the process, and there is only one instance of
+    // it.  The first Main to configure it owns it.  Another live Main
+    // does not configure it again (it may already be in use): with the
+    // same configuration it is skipped, with a different one this
+    // throws.  Once its owner is destroyed, a later Main may configure
+    // it anew and becomes its owner.
     for (const auto& c : m_cfgmgr.all()) {
         if (c.isNull()) {
             continue;  // allow and ignore any totally empty configurations
         }
         string type = get<string>(c, "type");
         string name = get<string>(c, "name");
-        log->debug("configuring component: \"{}\":\"{}\"", type, name);
         auto cfgobj = Factory::find_maybe<IConfigurable>(type, name);  // doesn't throw.
         if (!cfgobj) {
             continue;
         }
 
         // Get component's hard-coded default config, update it with
-        // anything the user may have provided and apply it.
+        // anything the user may have provided.
         Configuration cfg = cfgobj->default_configuration();
         if (cfg.isNull()) {
-            // Component has no defaults — skip the merge and pass user config directly.
-            cfgobj->configure(c["data"]);  // throws
+            // Component has no defaults — use the user config directly.
+            cfg = c["data"];
         }
         else {
             Configuration user_data = c["data"];  // update() needs a non-const ref
             update(cfg, user_data);
-            cfgobj->configure(cfg);  // throws
         }
-        log->debug("configured component:  \"{}\":\"{}\"", type, name);
+
+        const std::string key = type + ":" + name;
+        const size_t hash = config_hash(cfg);
+        auto it = g_configured.find(key);
+        if (it != g_configured.end() and it->second.owner and it->second.owner != this) {
+            if (it->second.hash == hash) {
+                log->debug("component \"{}\" already configured identically by another Main, skipping", key);
+                continue;
+            }
+            log->critical("component \"{}\" was configured by another Main with a different configuration", key);
+            THROW(ValueError() << errmsg{"component " + key +
+                                         " is shared with another WireCell::Main that configured it differently;"
+                                         " give it a distinct name"});
+        }
+
+        log->debug("configuring component: \"{}\"", key);
+        cfgobj->configure(cfg);  // throws
+        g_configured[key] = Configured{this, hash};
+        log->debug("configured component:  \"{}\"", key);
     }
 
     // All components are now configured.  Drop the bulk "data" sub-trees
@@ -427,6 +517,15 @@ void Main::finalize()
         auto doomed = Factory::find_maybe<ITerminal>(type, name);  // doesn't throw.
         if (!doomed) {
             continue;
+        }
+        {
+            // A component shared with another Main is finalized by the
+            // Main that configured it.
+            std::lock_guard<std::mutex> lock(g_init_mutex);
+            auto it = g_configured.find(type + ":" + name);
+            if (it != g_configured.end() and it->second.owner and it->second.owner != this) {
+                continue;
+            }
         }
         log->debug("finalizing component: \"{}\":\"{}\"", type, name);
 

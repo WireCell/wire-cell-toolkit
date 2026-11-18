@@ -48,6 +48,7 @@
 
 #include "WireCellIface/IAnodePlane.h"
 
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellUtil/Point.h"
 #include "WireCellUtil/NamedFactory.h"
@@ -95,6 +96,11 @@ void Gen::DepoTransform::configure(const WireCell::Configuration& cfg)
     m_start_time = get<double>(cfg, "start_time", m_start_time);
     m_drift_speed = get<double>(cfg, "drift_speed", m_drift_speed);
     m_frame_count = get<int>(cfg, "first_frame_number", m_frame_count);
+    m_frame_ident = get<std::string>(cfg, "frame_ident", m_frame_ident);
+    if (m_frame_ident != "count" && m_frame_ident != "deposet") {
+        raise<ValueError>("DepoTransform: frame_ident must be \"count\" or \"deposet\", got \"%s\"",
+                          m_frame_ident);
+    }
 
     m_process_planes = {0,1,2};
 
@@ -148,6 +154,12 @@ WireCell::Configuration Gen::DepoTransform::default_configuration() const
 
     /// Allow for a custom starting frame number
     put(cfg, "first_frame_number", m_frame_count);
+
+    /// The output frame's ident: "count" numbers frames from
+    /// first_frame_number; "deposet" takes the input depo set's ident, so
+    /// a frame keeps naming its event when this transform does not see
+    /// every event (e.g. behind a DeposOrBust).
+    put(cfg, "frame_ident", m_frame_ident);
 
     /// Name of component providing the anode plane.
     put(cfg, "anode", "");
@@ -243,7 +255,8 @@ bool Gen::DepoTransform::operator()(const input_pointer& in, output_pointer& out
         }
     }
 
-    auto frame = make_shared<SimpleFrame>(m_frame_count, m_start_time, traces, m_tick);
+    const int frame_ident = m_frame_ident == "deposet" ? in->ident() : m_frame_count;
+    auto frame = make_shared<SimpleFrame>(frame_ident, m_start_time, traces, m_tick);
     log->debug("output: call={}, ndepos_used={}, {}", m_count, ndepos_used, Aux::taginfo(frame));
 
     ++m_frame_count;

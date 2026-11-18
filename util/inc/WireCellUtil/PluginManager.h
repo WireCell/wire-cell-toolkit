@@ -4,6 +4,7 @@
 #include "WireCellUtil/Logging.h"
 
 #include <map>
+#include <mutex>
 #include <string>
 
 namespace WireCell {
@@ -50,6 +51,10 @@ namespace WireCell {
 
        private:
         std::map<std::string, Plugin*> m_plugins;
+        // Guards m_plugins: add/get/find may be called from several
+        // threads (e.g. Factory lookups from configure() in more than one
+        // WireCell::Main).  Recursive because add() calls get().
+        mutable std::recursive_mutex m_mutex;
     };
 
 }  // namespace WireCell
