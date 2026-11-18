@@ -84,6 +84,14 @@ namespace WireCell::Clus::Facade {
         }
         const std::map<std::string, ITensor::pointer>& aux_tensors() const { return m_aux; }
 
+        /// The metadata of the input tensor set this ensemble was made from,
+        /// as MultiAlgBlobClustering received it (e.g. larwirecell's
+        /// wclsTruthInformationAttacher "runNo"/"subRunNo"/"eventNo" and
+        /// "input_file", ai-helper issue 39).  Read-only for visitors; null
+        /// Configuration when the producer published none.
+        void set_input_metadata(const Configuration& md) { m_input_metadata = md; }
+        const Configuration& input_metadata() const { return m_input_metadata; }
+
         /// The Bee event index under which MultiAlgBlobClustering writes THIS
         /// event into its (possibly shared) Bee sink, published before the
         /// pipeline visitors run.  A visitor that writes Bee objects into the
@@ -123,6 +131,7 @@ namespace WireCell::Clus::Facade {
         int m_subRunNo{0};
         int m_eventNo{0};
         std::map<std::string, ITensor::pointer> m_aux;
+        Configuration m_input_metadata;
         int m_bee_index{-1};
     };
 }

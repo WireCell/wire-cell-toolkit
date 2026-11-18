@@ -34,6 +34,17 @@ public:
 
     virtual Configuration default_configuration() const ;
 
+    /// vertex_method dv2_*: "" if the DV2_Load report (JSON) names a bundle
+    /// manifest whose sha256 is `expected`, or if `expected` is empty (no
+    /// check); otherwise the reason.  configure() fails on a reason.
+    static std::string dv2_bundle_sha256_error(const std::string& load_report, const std::string& expected);
+
+    /// vertex_method dv2_*: the space-point touch distance (cm) the DV2_Load
+    /// report (JSON) gives for its bundle -- its "space" section's touch_cm,
+    /// or 0 when "space" is null or absent (a cloud-only bundle).  Sets `err`
+    /// (and returns 0) when the report is not JSON or the section is bad.
+    static double dv2_space_touch_cm(const std::string& load_report, std::string& err);
+
     virtual void visit(Ensemble& ensemble) const;
 
 
@@ -484,6 +495,29 @@ public:
         // doc 77 round 1 (2026-08-24): dl_vtx_swap_guard removed -- live A/B
         // -36/1014 (pr/89 round 5).  See sbnd_xin/docs/77_knob-ledger.tsv.
         bool   m_dl_vtx_cloud_no_exclusion{false};   // doc pr/106 sec 10: exclusion-free charge for the DL net input
+        // Neutrino vertexing method (see PatternAlgorithms::VertexMethod):
+        //   "original" (default)  the production chain (SCN net + re-rank, dual
+        //                         chain, kink/junction snaps, improve_vertex,
+        //                         graph audit, conn3 stitch), byte-identical
+        //   "dv2_snap" | "dv2_split" | "dv2_split_move"
+        //                         the DV2-MAX point (model bundle dv2_bundle),
+        //                         then only that placement; dl_weights and the
+        //                         original chain's vertex knobs are not used
+        std::string m_vertex_method{"original"};
+        bool        m_vertex_is_dv2{false};
+        std::string m_dv2_bundle{"dv2max/sbnd/r7_cloud/bundle.json"};   // DV2-MAX bundle manifest (resolved via WIRECELL_PATH)
+        std::string m_dv2_py_module{"DV2_Vertex"};   // Python module (on PYTHONPATH) holding DV2_Vertex()
+        std::string m_dv2_bundle_sha256;             // expected sha256 of the bundle manifest; "" = not checked
+        // A bundle that takes space points (format dv2max-bundle-v2): touch
+        // distance from its DV2_Load report (0 = cloud-only bundle), and the
+        // Bee clustering layer's scope the points are read in (the same pc
+        // name, coordinates and scope filter as the PR MABC's clustering-pr
+        // Bee layer and the T_dlvtx_space writer).  See
+        // PatternAlgorithms::dv2_collect_space.
+        double m_dv2_space_touch_cm{0.0};
+        std::string m_dv2_space_pcname{"3d"};
+        std::vector<std::string> m_dv2_space_coords{"x_t0cor", "y", "z"};
+        int m_dv2_space_filter{1};
         // doc sbnd_xin/docs/pr/112 sec 11 -- the DUAL CHAIN.  A second, exclusion-
         // free PR pass (run_dual_chain_off_pass, a DUPLICATE of the production
         // stage sequence up to the vertex refinement block) suggests the

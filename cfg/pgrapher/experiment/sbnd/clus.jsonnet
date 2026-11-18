@@ -870,6 +870,11 @@ local clus_all_apa(anodes, dump, output_dir, runNo, subRunNo, eventNo, all_apa_b
 // zip) create that directory themselves (PR 535 review).  The conversion is boost::format, so
 // use %1% (not %d) when the id appears more than once in one name.  Empty by
 // default => the names are literal and production is byte-identical.
+// The ID is the set ident = the art event number, which collides when one
+// process holds several subruns whose event numbers restart (gen2 BNB: 20
+// subruns x events 1..10 per lar job): the tokens {run}, {subrun}, {event}
+// and {ident} (Clus::per_event_name) name the directory by the resolved RSE,
+// e.g. evt_subdir='pr_evt{run}_{subrun}_{event}'.
 //
 // event_from_ident (default false) / rse_map (default {}): the multi-event
 // counterpart of rse_from_ident that KEEPS the real run and subrun.  When a
@@ -999,6 +1004,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // MC truth vertex shifted into the cloud frame by the TrueFwd SCE map.
               // Recording only.  Default false => every key omitted => byte-identical.
               dl_vtx_dump=false,
+              // dl_vtx_dump_space (ai-helper issue 44): with dl_vtx_dump, also write
+              // T_dlvtx_space -- the Bee clustering-layer points (same scope and
+              // coords as this MABC's clustering-pr layer) of every in-scope cluster
+              // within the touch distance of a recorded call's cloud, once per event,
+              // plus T_dlvtx_call.space_cluster_id / n_space.  Recording only.
+              // Default false => every key omitted => byte-identical.
+              dl_vtx_dump_space=false,
+              // The writer's touch distance (cm).  null = the effective DV2-MAX
+              // bundle's (dv2_bundle_space_touch_cm below), so the recorded
+              // clusters are the ones the in-chain collector hands the network;
+              // 1.0 for a bundle not listed there.  A number overrides.
+              space_touch_cm=null,
+              // truth_match (ai-helper issue 41): the reco<->truth matching trees
+              // (T_truth_track, T_overlap, T_match, T_pf; blob_truth adds
+              // T_blob_truth) in tracking-pr.root.  MC only: the writer needs the
+              // labeler's truth_track table.  Default false => key omitted =>
+              // byte-identical.
+              truth_match=false,
+              blob_truth=false,
               // tcn_overrides (ai-helper issue 35): TaggerCheckNeutrino keys merged LAST,
               // over the tcn_knobs bag AND the named keys pr() sets itself, for
               // experiments from a top-level job (e.g. {dl_vtx_dual_chain: false}).
@@ -1006,6 +1030,25 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
               // but does not configure the writer's sce_field / dl_vtx_dump (the
               // dl_vtx_dump argument does both); T_dlvtx_call.truth_sce_applied says which.
               tcn_overrides={},
+              // Neutrino vertexing method (TaggerCheckNeutrino vertex_method):
+              //   'original'        the production chain (SCN net + re-rank, dual
+              //                     chain, kink/junction snaps, improve_vertex,
+              //                     graph audit, conn3 stitch)
+              //   'dv2_snap'        DV2-MAX point -> nearest PR-graph vertex
+              //   'dv2_split'       DV2-MAX point -> nearest PR-graph vertex or
+              //                     trajectory-fit point (a fit point splits its segment)
+              //   'dv2_split_move'  as dv2_split (reusing a graph vertex within
+              //                     1.5 cm), then the vertex is moved onto the point
+              // The dv2_* methods run only the DV2-MAX model (dv2_bundle) and that
+              // placement; none of the original vertex steps.  SBND default:
+              // 'dv2_split_move'.  'original' => both keys omitted => the compiled
+              // config is byte-identical to the pre-DV2-MAX production config.
+              // (The C++ default stays 'original', so other detectors are
+              // unchanged.)  A vertex_method / dv2_bundle in tcn_overrides wins (as
+              // it does in the C++ config); the name check and the Trun provenance
+              // read that effective value.
+              vertex_method='dv2_split_move',
+              dv2_bundle='dv2max/sbnd/aurora_space/bundle.json',
               // save_in_scope (doc 87): add the per-cluster T_cluster tree to
               // tracking-pr.root -- the in-scope set (switch_scope's scope_filter,
               // the SAME predicate the Bee clustering layer is gated on) plus the
@@ -2374,6 +2417,38 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
         // (the arg default, i.e. "no beam window") must not silently drop every
         // cluster's tagger evaluation.
         local beam_gate = beam_window_only && beam_window[1] > beam_window[0],
+        // The vertexing method TaggerCheckNeutrino really gets: tcn_overrides is
+        // merged last into its config, so an override wins over the argument.
+        local vm_eff = if std.objectHas(tcn_overrides, 'vertex_method') then tcn_overrides.vertex_method else vertex_method,
+        local dv2_bundle_eff = if std.objectHas(tcn_overrides, 'dv2_bundle') then tcn_overrides.dv2_bundle else dv2_bundle,
+        // sha256 of each known DV2-MAX bundle manifest (bundle.json carries the sha256 of every other bundle file,
+        // checked when the model loads).  TaggerCheckNeutrino fails at configure if the manifest it loads has
+        // another sha256, and Trun/dl_weights records it.  A bundle not listed here runs unchecked and without a
+        // hash in Trun: add a line for a new bundle (sha256sum bundle.json).  dv2_bundle_sha256 in tcn_overrides wins.
+        local dv2_bundle_sha256 = {
+            'dv2max/sbnd/r7_cloud/bundle.json': 'bfb095ca286b20077c142e3e6bdd363ce6a83fbc548bfe76f4bb53d50ae12a6b',
+            'dv2max/sbnd/aurora_space/bundle.json': '51588842984919b5d8146f007287a5e7841be6bbc709263b10cdb39046ff8a74',
+        },
+        local dv2_sha_eff = if std.objectHas(tcn_overrides, 'dv2_bundle_sha256') then tcn_overrides.dv2_bundle_sha256
+                            else if std.objectHas(dv2_bundle_sha256, dv2_bundle_eff) then dv2_bundle_sha256[dv2_bundle_eff]
+                            else '',
+        // ai-helper issue 47: the touch distance (cm) of each known space-point DV2-MAX bundle
+        // (bundle.json space.touch_cm).  The T_dlvtx_space writer takes it, so it records the clusters the
+        // in-chain collector gives the network (the collector itself reads it from the loaded bundle).
+        // Add a line with a new space-point bundle.  A cloud-only bundle (r7_cloud) has no entry.
+        local dv2_bundle_space_touch_cm = {
+            'dv2max/sbnd/aurora_space/bundle.json': 1.0,
+        },
+        local space_touch_eff = if space_touch_cm != null then space_touch_cm
+                                else if vm_eff != 'original' && std.objectHas(dv2_bundle_space_touch_cm, dv2_bundle_eff)
+                                then dv2_bundle_space_touch_cm[dv2_bundle_eff]
+                                else 1.0,
+        // ai-helper issue 47: the PR Bee clustering-layer scope -- the points the PR Bee layer shows, a
+        // space-point DV2-MAX bundle reads in the chain (TaggerCheckNeutrino dv2_space_*), and the
+        // T_dlvtx_space writer records (SbndPrMagnifyTrackingVisitor space_*).  One setting, so they cannot diverge.
+        local pr_space_scope = { pcname: '3d', coords: common_corr_coords(pos_offset_on) },
+        assert std.member(['original', 'dv2_snap', 'dv2_split', 'dv2_split_move'], vm_eff) :
+            "vertex_method must be 'original', 'dv2_snap', 'dv2_split' or 'dv2_split_move', got '%s'" % vm_eff,
         local dv = detector_volumes(anodes, '', pos_offset_on),
         local pcts = pctransforms(dv),
         // DetectorVolumes implements IFiducial -- used by MakeFiducialUtils / the
@@ -2885,6 +2960,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                   [if mip_dqdx != null then 'mip_dqdx']: mip_dqdx,
                   [if neutrino_type_bitmask then 'neutrino_type_bitmask']: true,
                   [if nue_sp_consistent_fv then 'nue_sp_consistent_fv']: true,
+                  [if vm_eff != 'original' then 'vertex_method']: vm_eff,   // checked by the pr() object assert
+                  [if vm_eff != 'original' then 'dv2_bundle']: dv2_bundle_eff,
+                  [if vm_eff != 'original' && dv2_sha_eff != '' then 'dv2_bundle_sha256']: dv2_sha_eff,
+                  // A space-point bundle (aurora_space) also takes the Bee points of the clusters touching each
+                  // call's cloud, read in the scope of this PR's Bee clustering layer (the T_dlvtx_space writer's).
+                  // Unused by a cloud-only bundle (r7_cloud).
+                  [if vm_eff != 'original' then 'dv2_space_pcname']: pr_space_scope.pcname,
+                  [if vm_eff != 'original' then 'dv2_space_coords']: pr_space_scope.coords,
               } + tcn_overrides),   // ai-helper issue 35: LAST, so an override wins over every named key above
             // NuMu / nue BDT scorers (UbooneNumuBDTScorer / UbooneNueBDTScorer,
             // geometry-free TaggerInfo consumers).  The weights are the
@@ -2955,6 +3038,14 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     output_filename: tracking_pr_root,
                     [if dl_vtx_dump then 'sce_field']: wc.tn(sce_field_fwd),   // ai-helper issue 35
                     [if dl_vtx_dump then 'dl_vtx_dump']: true,   // ai-helper issue 35: the two trees on every event
+                    // ai-helper issue 44.  Keys omitted when off => byte-identical config.
+                    [if dl_vtx_dump_space then 'dl_vtx_dump_space']:
+                        (assert dl_vtx_dump : 'dl_vtx_dump_space needs dl_vtx_dump'; true),
+                    [if dl_vtx_dump_space then 'space_touch_cm']: space_touch_eff,
+                    [if dl_vtx_dump_space then 'space_pcname']: pr_space_scope.pcname,
+                    [if dl_vtx_dump_space then 'space_coords']: pr_space_scope.coords,
+                    [if truth_match then 'truth_match']: true,   // ai-helper issue 41
+                    [if truth_match && blob_truth then 'blob_truth']: true,   // ai-helper issue 41
                     runNo: runNo,
                     subRunNo: subRunNo,
                     eventNo: eventNo,
@@ -2978,7 +3069,12 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         bdt_weights_dir: bdt_weights_dir,
                         numu_xgboost_xml: numu_xgboost_xml,
                         nue_xgboost_xml: nue_xgboost_xml,
-                        dl_weights: dl_weights,
+                        // the vertex model that ran: the SCN weights (original),
+                        // else '<vertex_method>:<dv2_bundle>@sha256:<manifest sha256>'
+                        // (the hash is checked at configure; omitted for an unlisted bundle)
+                        dl_weights: if vm_eff == 'original' then dl_weights
+                                    else vm_eff + ':' + dv2_bundle_eff
+                                         + (if dv2_sha_eff != '' then '@sha256:' + dv2_sha_eff else ''),
                         trackfitting_config: trackfitting_config_file,
                     } + provenance_extra,
                 },
@@ -3064,6 +3160,21 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                     coords: common_corr_coords(pos_offset_on, use_sce),
                 },
             },
+            // ai-helper issue 39: every tree of the per-event tracking-pr.root as one
+            // entry of a flat, CAF-style tree (recTreeWireCell), for merging into the
+            // flat CAF.  Must run LAST (after tracking_visitor and tagger_output, the
+            // writers of that file).  Only active when named in pipeline_names, so
+            // every compiled config is byte-identical otherwise.
+            flat_tree: {
+                type: 'RootFlatTreeVisitor',
+                name: 'pr',
+                data: {
+                    output_filename: tracking_pr_root,
+                    tree_name: 'recTreeWireCell',
+                    prefix: 'wc',
+                    drop_row_trees: false,
+                },
+            },
         },
         local cm_pipeline = [cm_by_name[n] for n in pipeline_names],
         // The taggers' configs only name the recombination/particle-dataset
@@ -3127,8 +3238,8 @@ function(output_dir='.', runNo=0, subRunNo=0, eventNo=0, rse_from_ident=false, r
                         name: if bee_sink == null then 'clustering' else 'clustering-pr',
                         detector: 'sbnd',
                         algorithm: 'clustering',
-                        pcname: '3d',
-                        coords: common_corr_coords(pos_offset_on),
+                        pcname: pr_space_scope.pcname,   // ai-helper issue 47: one scope, see pr_space_scope
+                        coords: pr_space_scope.coords,
                         individual: false,
                         // Same filter semantics as clus_all_apa (default 1): the dump
                         // keys on the per-cluster runtime scope-filter flag, which is

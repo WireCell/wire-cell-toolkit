@@ -3,6 +3,7 @@
 // Structure and tree schema deliberately track the uBooNE original; the
 // two-TPC channel scheme is copied from SbndMagnifyTrackingVisitor.
 
+#include "WireCellClus/PerEventName.h"
 #include "WireCellRoot/SbndPrMagnifyTrackingVisitor.h"
 #include "WireCellRoot/UbooneMagnifyTrackingVisitor.h"  // WCPointTree
 
@@ -17,6 +18,7 @@
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/String.h"
+#include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Units.h"
 #include "WireCellClus/TrackFitting.h"
 #include "WireCellClus/Facade_Grouping.h"
@@ -26,6 +28,7 @@
 #include "WireCellClus/PRSegment.h"
 #include "WireCellClus/PRShower.h"   // PR::ClusterPtrCmp / ClusterPtrSet
 #include "WireCellClus/NuBundleCensus.h"   // sbnd_xin/docs/109
+#include "WireCellClus/BeeClusterPoints.h"  // ai-helper issue 44
 #include "WireCellUtil/BuildConfig.h"      // WIRECELL_VERSION (sbnd_xin/docs/109)
 
 #include <boost/graph/graph_traits.hpp>
@@ -62,11 +65,6 @@ namespace {
     /// No '%' in the name => the name is returned unchanged, so a
     /// one-event-per-process job writes exactly the file it always wrote.
     /// Same idiom as QLMatching's calib dump.
-    std::string event_filename(const std::string& tmpl, int ident)
-    {
-        if (tmpl.find('%') == std::string::npos) return tmpl;
-        return WireCell::String::format(tmpl, ident);
-    }
 }
 
 
@@ -113,6 +111,26 @@ void Root::SbndPrMagnifyTrackingVisitor::configure(const WireCell::Configuration
         m_sce = Factory::find_tn<ISCEField>(cfg["sce_field"].asString());
     }
     m_dl_vtx_dump = get<bool>(cfg, "dl_vtx_dump", m_dl_vtx_dump);   // ai-helper issue 35
+    // ai-helper issue 44: DEFAULT FALSE keeps tracking-pr.root byte-identical.
+    m_dl_vtx_dump_space = get<bool>(cfg, "dl_vtx_dump_space", m_dl_vtx_dump_space);
+    m_space_touch_cm = get<double>(cfg, "space_touch_cm", m_space_touch_cm);
+    m_space_pcname = get<std::string>(cfg, "space_pcname", m_space_pcname);
+    m_space_filter = get<int>(cfg, "space_filter", m_space_filter);
+    if (cfg["space_coords"].isArray()) {
+        m_space_coords.clear();
+        for (const auto& jc : cfg["space_coords"]) m_space_coords.push_back(jc.asString());
+    }
+    if (m_dl_vtx_dump_space && !m_dl_vtx_dump) {
+        raise<ValueError>("SbndPrMagnifyTrackingVisitor: dl_vtx_dump_space needs dl_vtx_dump");
+    }
+    if (m_dl_vtx_dump_space && m_space_coords.size() != 3) {
+        raise<ValueError>("SbndPrMagnifyTrackingVisitor: space_coords must name 3 arrays");
+    }
+    m_truth_match = get<bool>(cfg, "truth_match", m_truth_match);   // ai-helper issue 41
+    m_blob_truth = get<bool>(cfg, "blob_truth", m_blob_truth);
+    m_truth_match_topk = get<int>(cfg, "truth_match_topk", m_truth_match_topk);
+    m_pure_blob_min = get<double>(cfg, "pure_blob_min", m_pure_blob_min);
+    m_pf_tree_name = get<std::string>(cfg, "pf_tree_name", m_pf_tree_name);
     // sbnd_xin/docs/109: DEFAULT FALSE / empty keep tracking-pr.root byte-identical.
     m_nu_provenance = get<bool>(cfg, "nu_provenance", m_nu_provenance);
     m_fix_cluster_flags = get<bool>(cfg, "fix_cluster_flags", m_fix_cluster_flags);
@@ -144,6 +162,17 @@ WireCell::Configuration Root::SbndPrMagnifyTrackingVisitor::default_configuratio
     cfg["grouping"] = "live";
     cfg["save_in_scope"] = m_save_in_scope;
     cfg["dl_vtx_dump"] = m_dl_vtx_dump;   // ai-helper issue 35: false = T_dlvtx_* only when a call was recorded
+    cfg["dl_vtx_dump_space"] = m_dl_vtx_dump_space;   // ai-helper issue 44: false = no T_dlvtx_space, no space_* branches
+    cfg["space_touch_cm"] = m_space_touch_cm;
+    cfg["space_pcname"] = m_space_pcname;
+    cfg["space_coords"] = Json::arrayValue;
+    for (const auto& sc : m_space_coords) cfg["space_coords"].append(sc);
+    cfg["space_filter"] = m_space_filter;
+    cfg["truth_match"] = m_truth_match;   // ai-helper issue 41: false = no T_truth_track/T_overlap/T_match/T_pf
+    cfg["blob_truth"] = m_blob_truth;     // ai-helper issue 41: true = also T_blob_truth (one row per blob)
+    cfg["truth_match_topk"] = m_truth_match_topk;
+    cfg["pure_blob_min"] = m_pure_blob_min;
+    cfg["pf_tree_name"] = m_pf_tree_name;
     cfg["flash_by_gid"] = m_flash_by_gid;
     cfg["nu_provenance"] = m_nu_provenance;          // sbnd_xin/docs/109; false = no T_bundle/T_flash, no Trun census branches
     cfg["fix_cluster_flags"] = m_fix_cluster_flags;  // sbnd_xin/docs/109; false = legacy T_cluster flag columns
@@ -208,10 +237,14 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     {
         const auto rse = event_rse(ensemble, m_runNo, m_subRunNo, m_eventNo);
         m_evt_runNo = rse.run; m_evt_subRunNo = rse.subrun; m_evt_eventNo = rse.event;
+        // ai-helper issue 39: the art input file of this event, stamped by
+        // larwirecell's wclsTruthInformationAttacher into the step-1 set metadata.
+        const auto& imd = ensemble.input_metadata();
+        m_evt_input_file = (imd.isObject() && imd["input_file"].isString()) ? imd["input_file"].asString() : "";
     }
 
     // Open ROOT file
-    const std::string outname = event_filename(m_output_filename, ensemble.ident());
+    const std::string outname = Clus::per_event_name(m_output_filename, ensemble);   // same fallback as the flat tree (PR 544 item 10)
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(outname);
@@ -233,6 +266,9 @@ void Root::SbndPrMagnifyTrackingVisitor::visit(Clus::Facade::Ensemble& ensemble)
     }
     write_truth(output_tf, ensemble);
     write_dlvtx(output_tf, grouping, ensemble);
+    if (m_truth_match) {
+        write_truth_match(output_tf, grouping, ensemble);
+    }
 
     // Empty T_proj tree kept for reader compatibility.
     TTree* tree_proj = new TTree("T_proj", "T_proj");
@@ -269,7 +305,9 @@ namespace {
         }
         static const std::set<std::string> int_cols = {
             "nu_idx", "pdg", "ccnc", "mode", "int_type", "flavor",
-            "nu_row", "trackid", "parent_trackid", "mother_trackid", "process"};
+            "nu_row", "trackid", "parent_trackid", "mother_trackid", "process",
+            // ai-helper issue 41 (truth_track)
+            "bee_trackid", "ancestor_trackid", "prong_trackid", "mother_pdg", "n_blobs_dom"};
         TTree* tree = new TTree(tname, tname);
         tree->SetDirectory(output_tf);
         tree->Branch("runNo", &runNo, "runNo/I");
@@ -290,6 +328,13 @@ namespace {
             tree->Fill();
         }
     }
+}
+
+void Root::SbndPrMagnifyTrackingVisitor::write_truth_table_public(TFile* output_tf, const char* tname,
+                                                                  const ITensor::pointer& ten,
+                                                                  int runNo, int subRunNo, int eventNo) const
+{
+    write_truth_table(output_tf, tname, ten, runNo, subRunNo, eventNo, log);
 }
 
 void Root::SbndPrMagnifyTrackingVisitor::write_truth(TFile* output_tf, const Clus::Facade::Ensemble& ensemble) const
@@ -391,6 +436,45 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
     double final_x = 0, final_y = 0, final_z = 0;
     double truth_x = 0, truth_y = 0, truth_z = 0, truth_reco_x = 0, truth_reco_y = 0, truth_reco_z = 0;
     std::vector<float> payload;
+
+    // ai-helper issue 44: Sne's r7_space selection.  The candidate clusters are
+    // the in-scope clusters the PR MABC's Bee clustering layer writes (same
+    // scope, same filter), and this writer runs as an MABC visitor on the same
+    // final grouping, before MABC fills that layer -- so the points below are the
+    // Bee points.  Each call takes every cluster with a point within
+    // space_touch_cm of its cloud; the event stores the union once.
+    std::vector<const Facade::Cluster*> space_clusters;   // ascending cluster id
+    std::vector<std::vector<float>> space_xyz;            // per cluster, cm, xyz triplets
+    std::vector<std::vector<std::vector<size_t>>> call_touch(fitters.size());  // [nu][call] -> indices into space_clusters
+    std::set<size_t> space_union;
+    const PointCloud::Tree::Scope space_scope{m_space_pcname, m_space_coords};
+    if (m_dl_vtx_dump_space && ncalls) {
+        for (const auto* cl : grouping.children()) {
+            if (cl && bee_cluster_in_scope(*cl, space_scope, m_space_filter)) space_clusters.push_back(cl);
+        }
+        std::sort(space_clusters.begin(), space_clusters.end(),
+                  [](const Facade::Cluster* a, const Facade::Cluster* b) { return a->get_cluster_id() < b->get_cluster_id(); });
+        space_xyz.resize(space_clusters.size());
+        for (size_t i = 0; i < space_clusters.size(); ++i) {
+            auto& v = space_xyz[i];
+            bee_cluster_points(*space_clusters[i], space_scope, false, [&v](size_t, const Point& pt, double) {
+                v.push_back(pt.x() / units::cm); v.push_back(pt.y() / units::cm); v.push_back(pt.z() / units::cm);
+            });
+        }
+        for (size_t ni = 0; ni < fitters.size(); ++ni) {
+            if (!fitters[ni]) continue;
+            const auto& calls = fitters[ni]->get_dlvtx_calls();
+            call_touch[ni].resize(calls.size());
+            for (size_t ci = 0; ci < calls.size(); ++ci) {
+                const auto& c = calls[ci];
+                call_touch[ni][ci] = bee_touching_clusters(space_xyz, c.x, c.y, c.z, m_space_touch_cm);
+                space_union.insert(call_touch[ni][ci].begin(), call_touch[ni][ci].end());
+            }
+        }
+    }
+    std::vector<int> space_cluster_id;
+    int n_space = 0;
+
     TTree* tc = new TTree("T_dlvtx_call", "T_dlvtx_call");
     tc->SetDirectory(output_tf);
     tc->Branch("runNo", &runNo, "runNo/I");
@@ -456,6 +540,10 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
     tc->Branch("truth_all_reco_x", &t_rx);
     tc->Branch("truth_all_reco_y", &t_ry);
     tc->Branch("truth_all_reco_z", &t_rz);
+    if (m_dl_vtx_dump_space) {   // ai-helper issue 44
+        tc->Branch("space_cluster_id", &space_cluster_id);
+        tc->Branch("n_space", &n_space, "n_space/I");
+    }
 
     int ipoint = 0, is_vertex = 0;
     float px = 0, py = 0, pz = 0, pq = 0;
@@ -503,6 +591,13 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
             truth_valid = has_truth ? 1 : 0;
             truth_x = tx; truth_y = ty; truth_z = tz;
             truth_reco_x = trx; truth_reco_y = try_; truth_reco_z = trz;
+            space_cluster_id.clear(); n_space = 0;
+            if (m_dl_vtx_dump_space && ni < call_touch.size() && ci < call_touch[ni].size()) {
+                for (const auto k : call_touch[ni][ci]) {
+                    space_cluster_id.push_back(space_clusters[k]->get_cluster_id());
+                    n_space += static_cast<int>(space_xyz[k].size() / 3);
+                }
+            }
             tc->Fill();
             for (size_t i = 0; i < c.x.size(); ++i) {
                 ipoint = static_cast<int>(i);
@@ -511,6 +606,32 @@ void Root::SbndPrMagnifyTrackingVisitor::write_dlvtx(TFile* output_tf, Clus::Fac
                 tp->Fill();
             }
         }
+    }
+
+    if (m_dl_vtx_dump_space) {   // ai-helper issue 44
+        int s_cluster_id = 0, s_blob_index = 0;
+        float sx = 0, sy = 0, sz = 0, sq = 0;
+        TTree* ts = new TTree("T_dlvtx_space", "T_dlvtx_space");
+        ts->SetDirectory(output_tf);
+        ts->Branch("runNo", &runNo, "runNo/I");
+        ts->Branch("subRunNo", &subRunNo, "subRunNo/I");
+        ts->Branch("eventNo", &eventNo, "eventNo/I");
+        ts->Branch("cluster_id", &s_cluster_id, "cluster_id/I");
+        ts->Branch("blob_index", &s_blob_index, "blob_index/I");
+        ts->Branch("x", &sx, "x/F");
+        ts->Branch("y", &sy, "y/F");
+        ts->Branch("z", &sz, "z/F");
+        ts->Branch("q", &sq, "q/F");
+        for (const auto k : space_union) {   // ascending cluster id
+            const auto* cl = space_clusters[k];
+            s_cluster_id = cl->get_cluster_id();
+            bee_cluster_points(*cl, space_scope, true, [&](size_t bi, const Point& pt, double q) {
+                s_blob_index = static_cast<int>(bi);
+                sx = pt.x() / units::cm; sy = pt.y() / units::cm; sz = pt.z() / units::cm; sq = q;
+                ts->Fill();
+            });
+        }
+        log->debug("SbndPrMagnifyTrackingVisitor: T_dlvtx_space {} clusters, {} rows", space_union.size(), ts->GetEntries());
     }
     log->debug("SbndPrMagnifyTrackingVisitor: T_dlvtx_call {} rows, T_dlvtx_cloud {} rows", tc->GetEntries(), tp->GetEntries());
 }
@@ -646,6 +767,12 @@ void Root::SbndPrMagnifyTrackingVisitor::write_trun(TFile* output_tf, Clus::Faca
         }
         prov_keys.push_back(key);
         prov_vals.push_back(kv.second);
+    }
+    // ai-helper issue 39: the art input file (only when the input carried it, so
+    // older inputs keep the previous schema).
+    std::string input_file = m_evt_input_file;
+    if (!input_file.empty() && !tree->GetBranch("input_file")) {
+        tree->Branch("input_file", &input_file);
     }
     if (!m_provenance.empty()) {
         tree->Branch("wct_version", &wct_version);
@@ -877,7 +1004,11 @@ static void write_empty_proj_data(TFile* output_tf)
 {
     std::vector<int> v_cluster_id;
     std::vector<std::vector<int>> v_channel, v_time_slice;
-    std::vector<std::vector<double>> v_charge, v_charge_err, v_charge_pred;
+    // ai-helper issue 39: int, as write_proj_data books them -- this empty row
+    // exists to give every event the same schema, and it gave the three charge
+    // branches the type vector<vector<double>> where a non-empty event has
+    // vector<vector<int>> (one tree, two types, depending on the event).
+    std::vector<std::vector<int>> v_charge, v_charge_err, v_charge_pred;
     TTree* tree = new TTree("T_proj_data", "T_proj_data");
     tree->SetDirectory(output_tf);
     tree->Branch("cluster_id", &v_cluster_id);

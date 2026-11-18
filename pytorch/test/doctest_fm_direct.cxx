@@ -14,6 +14,11 @@
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/PluginManager.h"
 #include "WireCellUtil/Units.h"
+// libtorch (c10/util/logging_is_not_google_glog.h, via Torch.h) defines CHECK; doctest defines its own.
+// The torch macro is not used here: drop it so doctest's CHECK is the only one (no redefinition under -Werror).
+#ifdef CHECK
+#undef CHECK
+#endif
 #include "WireCellUtil/doctest.h"
 
 #include <cstdio>

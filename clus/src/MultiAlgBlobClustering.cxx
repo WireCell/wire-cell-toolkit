@@ -1,4 +1,6 @@
 #include "WireCellClus/MultiAlgBlobClustering.h"
+#include "WireCellClus/PerEventName.h"
+#include "WireCellClus/BeeClusterPoints.h"   // ai-helper issue 44
 
 #include <functional>
 #include "WireCellClus/Facade_Summary.h"
@@ -14,6 +16,7 @@
 #include "WireCellAux/TensorDMdataset.h"
 #include "WireCellAux/TensorDMcommon.h"
 #include "WireCellAux/SimpleTensorSet.h"
+#include "WireCellAux/SimpleTensor.h"
 
 #include "WireCellUtil/NamedFactory.h"
 #include "WireCellUtil/Units.h"
@@ -227,7 +230,7 @@ void MultiAlgBlobClustering::configure(const WireCell::Configuration& cfg)
         //std::cout << "Xin: " << m_initial_index << " " << bee_zip << std::endl;
         m_bee_zip = bee_zip;
         // A '%' means one zip per event, opened lazily by ensure_own_sink().
-        m_bee_zip_templated = m_bee_zip.find('%') != std::string::npos;
+        m_bee_zip_templated = per_event_templated(m_bee_zip);
         if (!m_bee_zip_templated) {
             m_sink.reset(bee_zip, m_initial_index);  // Use the new reset with initial index
         }
@@ -643,17 +646,20 @@ void MultiAlgBlobClustering::ensure_own_sink()
 {
     if (m_bee_disabled) return;
     if (!m_bee_zip_templated) return;
-    if (m_eventNo == m_bee_zip_open_evt) return;
+    if (m_bee_zip_open_evt >= 0 && m_eventNo == m_bee_zip_open_evt
+        && m_runNo == m_bee_zip_open_run && m_subRunNo == m_bee_zip_open_sub) return;
     if (m_bee_zip_open_evt >= 0) {
         m_sink.close();
     }
-    const std::string name = String::format(m_bee_zip, m_eventNo);
+    const std::string name = per_event_name(m_bee_zip, m_eventNo, m_runNo, m_subRunNo, m_eventNo);
     // The per-event name may point into a directory (evt_subdir "pr_evt%1%/"); create it
     // here rather than require the runner to (PR 535 review).
     Persist::assuredir(name);
     m_sink.reset(name, m_initial_index);
     m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
     m_bee_zip_open_evt = m_eventNo;
+    m_bee_zip_open_run = m_runNo;
+    m_bee_zip_open_sub = m_subRunNo;
     log->debug("own Bee zip {} (event {})", name, m_eventNo);
 }
 
@@ -3257,26 +3263,12 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
     }else{
         // Get the scope
         Scope scope = {pcname, coords};
-        
-        auto filter_scope = cluster.get_scope_filter(scope);
 
-        // std::cout << "Test: " << cluster.get_cluster_id() << " " << clid << " " << scope << " " << filter_scope << std::endl;
-
-        bool use_scope = true;
-        if (filter == 1) {
-            use_scope = filter_scope;
-        }
-        else if (filter == 0) {
-            use_scope = true; // ignore filter_scope, always true
-        }
-        else if (filter == -1) {
-            use_scope = !filter_scope;
-        }
-
-        if (use_scope) {
-            // Access the points through the cluster's scoped view
-            const WireCell::PointCloud::Tree::ScopedView<double>& sv = cluster.sv<double>(scope);
-            const auto& spcs = sv.pcs();
+        // ai-helper issue 44: the gate and the point loop live in
+        // BeeClusterPoints (shared with the T_dlvtx_space writer); same
+        // filter semantics, same order, same charge formula.
+        if (bee_cluster_in_scope(cluster, scope, filter)) {
+            const size_t nblobs = cluster.sv<double>(scope).pcs().size();
 
             // Original (pre-flash-merge) per-blob cluster ids, if present (written
             // by examine_bundles' flash-time merge into "real_cluster_id"/"perblob").
@@ -3288,50 +3280,15 @@ void MultiAlgBlobClustering::fill_bee_points_from_cluster(
                 auto sp = cluster.get_pcarray<int>("real_cluster_id", "perblob");
                 orig_ids.assign(sp.begin(), sp.end());
             }
-            const bool use_orig = (orig_ids.size() == spcs.size());
+            const bool use_orig = (orig_ids.size() == nblobs);
 
-            // Dead-channel threshold: uncertainty > 1e10 flags a dead wire
-            // (matches PointTreeBuilding m_dead_threshold and Facade_Cluster::is_wire_dead).
-            const double dead_threshold = 1e10;
-
-            // For each scoped point cloud (one per blob), compute per-point wire charge.
-            // Each point gets q = mean(Q_U, Q_V, Q_W) over the non-dead planes for the
-            // specific wires that define this 3D point — matching the prototype formula.
-            // The global cluster point index is obtained via a KD-tree nearest-neighbour
-            // lookup (exact match: every scoped-view point is also in the cluster PC).
-            for (size_t spc_idx = 0; spc_idx < spcs.size(); ++spc_idx) {
-                const auto& spc = spcs[spc_idx];
-                auto x = spc.get().get(coords[0])->elements<double>();
-                auto y = spc.get().get(coords[1])->elements<double>();
-                auto z = spc.get().get(coords[2])->elements<double>();
-
+            bee_cluster_points(cluster, scope, true,
+                               [&](size_t spc_idx, const Point& pt, double point_charge) {
                 // Per-blob original cluster id (falls back to the merged clid).
                 const int real_clid = use_orig ? orig_ids[spc_idx] : clid;
-
-                const size_t size = x.size();
-                for (size_t ind = 0; ind < size; ++ind) {
-                    // Resolve global point index via spatial lookup.
-                    // charge_value() caches all per-plane charge vectors on first call,
-                    // so subsequent lookups are O(1) vector reads.
-                    const WireCell::Point pt(x[ind], y[ind], z[ind]);
-                    const size_t pt_idx = cluster.get_closest_point_index(pt);
-
-                    // Per-plane charge mean (prototype formula), excluding dead planes.
-                    double sum = 0.0;
-                    int nplanes = 0;
-                    for (int plane = 0; plane < 3; ++plane) {
-                        if (!cluster.is_wire_dead(pt_idx, plane, dead_threshold)) {
-                            sum += cluster.charge_value(pt_idx, plane);
-                            ++nplanes;
-                        }
-                    }
-                    const double point_charge = (nplanes > 0) ? sum / nplanes : 0.0;
-
-                    bpts.append(pt, point_charge, clid, real_clid);
-                    if (oft_out) oft_out->push_back(cgt_oft);
-                }
-            }
-
+                bpts.append(pt, point_charge, clid, real_clid);
+                if (oft_out) oft_out->push_back(cgt_oft);
+            });
         }
     }
 
@@ -3964,7 +3921,12 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     }
     if (md_rse) {
         // Flush the previous event FIRST, while m_runNo/... still describe it.
-        if (m_last_ident >= 0 && m_last_ident != ident) { flush(ident); }
+        // A new event is a new ident OR a new RSE: in a step-2 group run two
+        // events of different subruns can share an event number, hence an
+        // ident, and comparing idents alone merged them into one Bee event
+        // (PR 544 review, item 1).  m_runNo/... hold the previous event's RSE.
+        const bool new_rse = md_run != m_runNo || md_sub != m_subRunNo || md_evt != m_eventNo;
+        if (m_last_ident >= 0 && (m_last_ident != ident || new_rse)) { flush(ident); }
         m_runNo = md_run; m_subRunNo = md_sub; m_eventNo = md_evt;
         if (!m_use_shared_sink) {
             m_sink.set_rse(m_runNo, m_subRunNo, m_eventNo);
@@ -4024,6 +3986,8 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
     // previous event has already advanced it), for visitors that write into
     // the same sink -- one owner of the index.
     ensemble.set_bee_index((int) m_bee_event_index);
+    // ai-helper issue 39: the input set metadata (e.g. "input_file"), for visitors.
+    ensemble.set_input_metadata(m_in_metadata);
     // Publish the RSE this node resolved (config, auto-increment, ident or
     // rse_map) so the per-event writers downstream stamp THIS event rather than
     // their own configure-time constant.  Only when a multi-event mode is on:
@@ -4209,8 +4173,27 @@ bool MultiAlgBlobClustering::operator()(const input_pointer& ints, output_pointe
             else {
                 Configuration all = Json::arrayValue;
                 std::set<int> used_ids;
+                // ai-helper issue 41: the same reco particle-flow trees, one per
+                // candidate with its nu_index, handed to the output visitors
+                // (T_pf) as an empty tensor whose metadata carries them.  The
+                // Bee output below is unchanged.
+                Configuration pub = Json::arrayValue;
                 for (const auto& tfi : nu_tfs) {
+                    const auto before = all.size();
                     fill_bee_pf_tree(pf_cfg, pf_grouping, false, tfi, &used_ids, &all);
+                    for (Json::ArrayIndex k = before; k < all.size(); ++k) {
+                        Configuration one;
+                        one["nu_index"] = tfi ? tfi->get_tagger_info().nu_index : -1;
+                        one["root"] = all[k];
+                        pub.append(one);
+                    }
+                }
+                {
+                    Configuration md;
+                    md["datatype"] = "pf_tree";
+                    md["name"] = pf_cfg.name;
+                    md["candidates"] = pub;
+                    ensemble.set_aux_tensor("pf_tree:" + pf_cfg.name, std::make_shared<Aux::SimpleTensor>(md));
                 }
                 // via the shared helper, so the truth graft applies here too;
                 // a direct set_particles() would bypass it.

@@ -15,7 +15,10 @@
 // Multi-event: the tar holds every event of the step-1 lar job.  The per-event
 // outputs (tracking-pr.root) go to output_dir/<evt_subdir>/ with evt_subdir a
 // boost::format template of the set ident (the art event number), default
-// 'pr_evt%1%' -- the writers create those directories themselves.
+// 'pr_evt%1%' -- the writers create those directories themselves.  The tokens
+// {run}, {subrun}, {event} (Clus::per_event_name) name it by the resolved RSE
+// instead: 'pr_evt{run}_{subrun}_{event}' for a tar whose subruns' event
+// numbers collide (the gen2 BNB multi-reco1 units).
 // evt_subdir='' writes ./tracking-pr.root, correct only for a one-event tar.
 // RSE: every MABC takes run/subrun/event from the set metadata stamped in step 1
 // (rse_from_metadata; rse_from_ident is the fallback), exactly as in the 1-step.
@@ -35,9 +38,28 @@ function(input='qlpctree.tar.gz',
          // ai-helper issue 35: record every DL-vertex network call (exact input,
          // payload, decision, MC truth vertex) as T_dlvtx_call / T_dlvtx_cloud.
          dl_vtx_dump=false,
+         // ai-helper issue 44: with dl_vtx_dump, also T_dlvtx_space -- the Bee
+         // clustering-layer points of the clusters within 1 cm of a call's cloud
+         // (Sne's r7_space input), once per event.  Default off.
+         dl_vtx_dump_space=false,
          // ai-helper issue 35: TaggerCheckNeutrino keys merged over the production
          // operating point, for experiments, e.g. --tla-code 'pr_knobs={dl_vtx_dual_chain: false}'.
-         pr_knobs={})
+         pr_knobs={},
+         // ai-helper issue 39: also write recTreeWireCell into every
+         // pr_evt<E>/tracking-pr.root -- all its trees as ONE flat, CAF-style
+         // entry, for merging into the flat CAF.  Default off.
+         flat_tree=false,
+         // ai-helper issue 41: the reco<->truth matching trees (T_truth_track,
+         // T_overlap, T_match, T_pf) in every tracking-pr.root; MC only (they
+         // need the step-1 labeler's truth_track table).  blob_truth adds
+         // T_blob_truth (one row per blob).  Default off.
+         truth_match=false,
+         blob_truth=false,
+         // Neutrino vertexing method (clus.jsonnet pr()): 'dv2_split_move' (default),
+         // 'dv2_snap', 'dv2_split', or 'original' (the pre-DV2-MAX production chain),
+         // e.g. --tla-str vertex_method=original.  dv2_bundle: the DV2-MAX model.
+         vertex_method='dv2_split_move',
+         dv2_bundle='dv2max/sbnd/aurora_space/bundle.json')
 
 local g = import 'pgraph.jsonnet';
 local wc = import 'wirecell.jsonnet';
@@ -70,7 +92,9 @@ local bee = {
 // tagger_bee: the tagger verdict Bee sets (tagger_stm/_tgm/_fc/_lm), which the
 // 1-step's art-side labeler_tagger writes, come from TaggerBeeVisitor here.
 local pr_node = pr_stage.node(clus_maker, tools.anodes, bee, enable_tracking_root, tagger_bee=true,
-                              dl_vtx_dump=dl_vtx_dump, pr_knobs=pr_knobs);
+                              dl_vtx_dump=dl_vtx_dump, dl_vtx_dump_space=dl_vtx_dump_space, pr_knobs=pr_knobs, flat_tree=flat_tree,
+                              truth_match=truth_match, blob_truth=blob_truth,
+                              vertex_method=vertex_method, dv2_bundle=dv2_bundle);
 
 local sink = g.pnode({
     type: 'TensorFileSink',

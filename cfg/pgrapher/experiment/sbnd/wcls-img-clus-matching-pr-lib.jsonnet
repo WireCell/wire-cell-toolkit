@@ -44,7 +44,17 @@
 //                         (qlpctree.tar.gz, every event of the lar job in one file).  Step 2,
 //                         wct-pr.jsonnet, runs the SAME PR stage (sbnd-pr-stage.jsonnet) on it.
 //                         Top-level job: wcls-img-clus-matching.jsonnet.
-function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step')
+//   truth_detail          false (default): the labeler writes the pre-issue-41 truth.
+//                         true: also the per-blob truth_q / truth_q_dom / trackid2 /
+//                         truth_q2 and the truth_track table step 2's truth match
+//                         (truth_match) needs.  Needs larwirecell 73c79bc or later
+//                         (wclsTensorSetLabeler truth_detail).  ON in the production
+//                         step-1 job, wcls-img-clus-matching.jsonnet.
+function(flash_source='reco1', hit_time='rise', ff={}, xtpc_sc1_light_gate=null, xtpc_sc1_overpred_max=null, stage='1step', truth_detail=false,
+         // neutrino vertexing method (clus.jsonnet pr()), default 'dv2_split_move';
+         // the dv2_* methods need the DV2-MAX Python env (pyutil/python, torch,
+         // lightgbm) in the art job; 'original' = the pre-DV2-MAX production chain
+         vertex_method='dv2_split_move', dv2_bundle='dv2max/sbnd/aurora_space/bundle.json')
 assert stage == '1step' || stage == 'ql' : "stage must be '1step' or 'ql'";
 local g = import "pgraph.jsonnet";
 local wc = import "wirecell.jsonnet";
@@ -393,7 +403,8 @@ local enable_tracking_root =
 // which the bulk harness deletes.  Sharing renames this node's two colliding
 // sets to clustering-pr / mc-pr; see clus.jsonnet.  The pipeline (15 stages,
 // ordering load-bearing) is documented in sbnd-pr-stage.jsonnet.
-local pr_node = pr_stage.node(clus_maker, tools.anodes, bee_shared, enable_tracking_root);
+local pr_node = pr_stage.node(clus_maker, tools.anodes, bee_shared, enable_tracking_root,
+                              vertex_method=vertex_method, dv2_bundle=dv2_bundle);
         // doc sbnd_xin/120 sec 4.5: `iso_endpoint=true` used to be passed here, to
         // match the 2-step job (apc doc pr/24 sec 16).  It is NOT a pr() parameter
         // -- it is a tcn_knobs bag key -- so this call could never have compiled.
@@ -472,6 +483,14 @@ local labeler_truth = g.pnode({
         bee_sets: ['truth', 'sed'],
         pf_metadata_key: 'bee_pf_truth',
         hdf5_output: true,
+        // ai-helper issue 41: per-blob truth_q / truth_q_dom / trackid2 / truth_q2
+        // and the truth_track table (trackid -> nu_idx, Michel-merged id,
+        // ancestor, prong, readout-window charge) for step 2's truth match.
+        // MC only (the labeler skips truth on data); reco untouched.
+        // Behind the truth_detail argument (default off, PR 544 review item 4):
+        // off => key omitted => the labeler config is the pre-issue-41 one, and an
+        // older larwirecell (no truth_detail, larwirecell 73c79bc) still runs.
+        [if truth_detail then 'truth_detail']: true,
     },
 }, nin=1, nout=1, uses=labeler_uses);
 
