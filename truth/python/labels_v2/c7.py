@@ -13,6 +13,8 @@ Per counted point (class above ghost, an instance, not far, a matched deposit):
       in that stretch take class EM segment and the shower's piece, flag 4; the track ends there at a shower-boundary place.  A
       traversed stretch (stretch 1) stays track, flag 32 (Xin 2026-11-17: a through-going track is one piece)
   H3  a buried track: every point takes class EM segment and the shower's piece, flag 4
+  D2  (Xin 2026-11-17, doc 86a D2; replaces U1, H1 and H3) none of U1, H1, H3 is applied: an unresolved track, a hidden start or end
+      and a buried track stay track in their own pieces (flags 128 unresolved kept, 64 hidden start / end or buried kept)
   P1  the rest of a track: its points fall into RUNS, the single-linkage groups at G = 30 mm in the image (a gap of more than
       30 mm with no point of the instance ends a piece, as in the view; a frame change of an out-of-time track at the cathode is
       such a gap); in a run the points are ordered by the path length over the particle's own deposits in time order; every run
@@ -64,10 +66,11 @@ from steiner_truth import tie_order
 from .rules import OBJ, CLS7, STEP, FL_BURIED, FL_UNRESOLVED, OV_NOTFREE, STR_TRAVERSED, STR_HIDDEN_END
 from .points import OR_FAR
 
-FL_FSTUB, FL_FTRK, FL_HID, FL_LE, FL_ZONE, FL_THRU = 1, 2, 4, 8, 16, 32
-TG_PHYS, TG_EDGE, TG_SHB, TG_BREAK = 1, 2, 4, 8
+FL_FSTUB, FL_FTRK, FL_HID, FL_LE, FL_ZONE, FL_THRU, FL_HIDKEEP, FL_UNRKEEP = 1, 2, 4, 8, 16, 32, 64, 128
+TG_PHYS, TG_EDGE, TG_SHB, TG_BREAK, TG_VIS = 1, 2, 4, 8, 16
 PRM = dict(L_stub=5.0, L_hid_steps=8.0, hid_join_steps=4.0, G=30.0, link=12.0, R_merge=10.0, R_zone=15.0, host_r=6.0, sh_r=10.0, end_w=5.0, L_trk_steps=2.0,
-           free_n=5, free_ext_steps=2.0, vertex_true=5.0, vertex_reco=30.0, phys=10.0, pass_r=6.0, bw=10.0, min_pts=3, end_in=(10.0, 30.0))
+           free_n=5, free_ext_steps=2.0, vertex_true=5.0, vertex_reco=30.0, phys=10.0, pass_r=6.0, bw=10.0, min_pts=3, end_in=(10.0, 30.0),
+           tip_nmin=3, tip_axis=(5.0, 25.0))
 NEW_MEMBERS = ("pt_c7_piece", "pt_c7_flag", "pt_c7_place_dist", "pc_type", "pc_inst", "pc_link", "pc_graph", "pc_len", "pc_e0", "pc_e1", "pc_place0", "pc_place1",
                "pl_xyz", "pl_kinds", "pl_tag", "pl_member_place", "pl_member_piece", "seg_a", "seg_b", "seg_piece")
 
@@ -121,9 +124,10 @@ def build(ev, R, pt, kps, det):
     insts = sorted(rows_of)
     stub_keep = [i for i in insts if co[i] == OBJ["stub"] and run_mm[i] >= V["L_stub"]]
     stub_fold = [i for i in insts if co[i] == OBJ["stub"] and run_mm[i] < V["L_stub"]]
-    buried = [i for i in insts if co[i] == OBJ["track"] and (fl[i] & FL_BURIED)]
-    unres = [i for i in insts if co[i] == OBJ["track"] and (fl[i] & FL_UNRESOLVED) and not (fl[i] & FL_BURIED)]
-    tracks = [i for i in insts if co[i] == OBJ["track"] and not (fl[i] & (FL_BURIED | FL_UNRESOLVED))]
+    buried_kept = [i for i in insts if co[i] == OBJ["track"] and (fl[i] & FL_BURIED)]
+    unres_kept = [i for i in insts if co[i] == OBJ["track"] and (fl[i] & FL_UNRESOLVED) and not (fl[i] & FL_BURIED)]
+    buried, unres = [], []                                # D2 (Xin 2026-11-17, doc 86a): no H3 and no U1 -- a buried or an unresolved track is a track like any other
+    tracks = [i for i in insts if co[i] == OBJ["track"]]
     others = [i for i in insts if co[i] not in (OBJ["track"], OBJ["stub"])]
     Pk = dict(kind=[], inst=[], n=[], length=[], e0=[], e1=[], graph=[], tag0=[], tag1=[], vtx0=[], vtx1=[], cl=[])
     nan3 = np.full(3, np.nan)
@@ -161,7 +165,7 @@ def build(ev, R, pt, kps, det):
         rn = np.argsort(np.argsort(first, kind="stable"), kind="stable")[rn]          # numbered by their first path coordinate
         o = np.lexsort((s, rn)); P, s, runid = P[o], s[o], rn[o]                       # run by run, by the path in a run
         taken = np.zeros(len(P), bool); cuts = []
-        hi = np.flatnonzero(st[P] == STR_HIDDEN_END)
+        hi = np.zeros(0, np.int64)                        # D2 (Xin 2026-11-17): no H1 -- a hidden start or end stays in its track's piece
         if len(hi):
             b = np.r_[0, np.flatnonzero((np.diff(s[hi]) > V["hid_join_steps"] * step) | (np.diff(runid[hi]) != 0)) + 1, len(hi)]
             for a_, b_ in zip(b[:-1], b[1:]):
@@ -191,18 +195,27 @@ def build(ev, R, pt, kps, det):
                 short.append((rr, i)); continue
             if len(du):                                   # K1: the place of an end is where the piece's points stop
                 def tip(d, inner, m):
+                    """D1 (Xin 2026-11-17, doc 86a D1 (a), rule C of doc 86's tip diagnostic, detail C0): where the piece's dots stop
+                    along the end's line, put on the centre line of its dots.  The dots: the piece's points within G of the end; the stop:
+                    the median coordinate along the line of the last end_w of them (at least tip_nmin dots, so a lone dot past a gap is
+                    averaged with the band's end); the centre line: the median offset across the line of the piece's points tip_axis
+                    inside the end."""
                     u = d - inner; n = np.linalg.norm(u)
                     if n < 1e-6 or not m.any():
                         return d
-                    q = rr[m]; q = q[np.linalg.norm(X[q] - d, axis=1) <= V["G"]]         # a point farther than G from the end is not its tip
-                    if not len(q):
+                    u = u / n; Q = X[rr]; Q = Q[np.linalg.norm(Q - d, axis=1) <= V["G"]]
+                    if not len(Q):
                         return d
-                    t = (X[q] - d) @ (u / n); fwd = t >= 0
-                    if fwd.any():                         # beyond the last seen deposit: the farthest points, by distance (a tail may bend)
-                        rd = np.linalg.norm(X[q] - d, axis=1); far = fwd & (rd >= rd[fwd].max() - V["end_w"])
-                    else:                                 # no point beyond it: the points nearest to it along the piece
-                        far = t >= t.max() - V["end_w"]
-                    return np.median(X[q[far]], axis=0)
+                    t = (Q - d) @ u
+                    def stop(tk):
+                        sl = tk >= tk.max() - V["end_w"]
+                        if sl.sum() < V["tip_nmin"]:
+                            sl = np.zeros(len(tk), bool); sl[np.argsort(tk)[-V["tip_nmin"]:]] = True
+                        return float(np.median(tk[sl]))
+                    st_ = stop(t)                         # C0 (Xin 2026-11-17): no isolated-dot drop
+                    b_ = (t >= -V["tip_axis"][1]) & (t <= -V["tip_axis"][0])
+                    off = np.median((Q[b_] - d) - np.outer(t[b_], u), axis=0) if b_.sum() >= 3 else np.zeros(3)
+                    return d + off + st_ * u
                 i0 = du[(sa >= lo_ + V["end_in"][0]) & (sa <= lo_ + V["end_in"][1])]; i1 = du[(sa <= up_ - V["end_in"][0]) & (sa >= up_ - V["end_in"][1])]
                 t0 = tip(e0, np.median(Xr[i0], axis=0) if len(i0) else e1, ss <= lo_ + V["end_w"])
                 t1 = tip(e1, np.median(Xr[i1], axis=0) if len(i1) else e0, ss >= up_ - V["end_w"])
@@ -325,6 +338,12 @@ def build(ev, R, pt, kps, det):
     for hp in sorted(ins):
         rr = np.array(ins[hp], np.int64); piece[rr] = hp; Pk["n"][hp] += len(rr)
     flag[(piece >= 0) & (cls == CLS7["track"]) & (st == STR_TRAVERSED)] |= FL_THRU
+    flag[(piece >= 0) & (cls == CLS7["track"]) & (st == STR_HIDDEN_END)] |= FL_HIDKEEP          # D2: a hidden start / end kept as track
+    pki = np.array(Pk["inst"], np.int64)
+    for i in buried_kept:
+        r_ = rows_of[i]; flag[r_[(piece[r_] >= 0) & (cls[r_] == CLS7["track"])]] |= FL_HIDKEEP
+    for i in unres_kept:                                  # D2: an unresolved track in its own piece
+        r_ = rows_of[i]; own_ = piece[r_] >= 0; own_[own_] = pki[piece[r_][own_]] == i; flag[r_[own_]] |= FL_UNRKEEP
     # ---- candidates
     npc = len(Pk["kind"]); cx, ck, ct, cp, ce, cv, cex = [], [], [], [], [], [], []       # position, kind, tag, piece, end, true vertex, exact position
     for k in range(npc):
@@ -353,6 +372,33 @@ def build(ev, R, pt, kps, det):
         else:
             vt = T.S0[r].astype(np.float64) if r < nr else nan3
         cx.append(KX[j]); ck.append(kd); ct.append(0); cp.append(k); ce.append(0); cv.append(vt); cex.append(True)
+    # D3 (Xin 2026-11-17, doc 86a D3 (a)): a piece in the graph that is not a track and has no candidate gets one at its first visible
+    # own deposit: of its points of its own instance (no point moved in), told apart in a wire view, with a matched deposit, the deposit
+    # with the smallest Geant4 time; the median of its points.  Tag 16, and 2 when the instance's earliest deposit is not inside.
+    KD3 = {OBJ["stub"]: 2, OBJ["shower"]: 3, OBJ["michel"]: 4, OBJ["delta"]: 5}; has_c = set(cp); n_d3 = n_d3_edge = n_d3_none = 0; d3 = []
+    ri = np.asarray(R.inst).astype(np.int64); dsrt = np.argsort(ri, kind="stable"); ok_ = ri[dsrt] >= 0          # the deposits of every instance, by index
+    ui_, fi_, ni_ = np.unique(ri[dsrt][ok_], return_index=True, return_counts=True); dsrt = dsrt[ok_]; deps_of = {int(u): (int(a_), int(a_ + c_)) for u, a_, c_ in zip(ui_, fi_, ni_)}
+    YZ = [(fg[0]["ymin"], fg[0]["ymax"], fg[0]["zmin"], fg[0]["zmax"]) for faces in ev.geo.values() for fg in faces.values()]
+    def start_outside(i):                                 # the root particle starts outside the y-z extent of every wire-plane face (it came in)
+        r = int(root[i])
+        if r >= nr:
+            return False
+        y, z = float(T.S0[r][1]), float(T.S0[r][2])
+        return not any(a_ <= y <= b_ and c_ <= z <= d_ for a_, b_, c_, d_ in YZ)
+    moved = (flag & (FL_FSTUB | FL_FTRK | FL_HID)) > 0
+    for k in range(npc):
+        if not Pk["graph"][k] or Pk["kind"][k] not in KD3 or k in has_c:
+            continue
+        i = int(Pk["inst"][k]); rows = np.flatnonzero((piece == k) & (inst == i) & free & (dep >= 0) & ~moved)
+        if not len(rows):
+            n_d3_none += 1; continue
+        dd = dep[rows]; a_, b_ = deps_of.get(i, (0, 0)); od = dsrt[a_:b_]                      # the instance's deposits in time, ties along the path (tie_order)
+        od = od[np.argsort(ev.T0[od], kind="stable")]; od = od[tie_order(ev.T0[od], P3[od])] if len(od) > 1 else od
+        hit = np.flatnonzero(np.isin(od, dd))
+        d0 = int(od[hit[0]]) if len(hit) else int(dd[np.lexsort((dd, ev.T0[dd]))[0]]); pos = np.median(X[rows[dd == d0]], axis=0)
+        e_ = int(od[0]) if len(od) else -1; tg = TG_VIS | (TG_EDGE if (e_ < 0 or not ev.inside[e_] or start_outside(i)) else 0)
+        n_d3 += 1; n_d3_edge += int((tg & TG_EDGE) > 0); d3.append(len(cx))
+        cx.append(pos); ck.append(KD3[Pk["kind"][k]]); ct.append(tg); cp.append(k); ce.append(0); cv.append(P3[d0].astype(np.float64)); cex.append(False)
     nc = len(cx); cx = np.array(cx, np.float64).reshape(-1, 3); ck = np.array(ck, np.int64); ct = np.array(ct, np.int64); cp = np.array(cp, np.int64); ce = np.array(ce, np.int64)
     cv = np.array(cv, np.float64).reshape(-1, 3); cex = np.array(cex, bool)
     # ---- places: single linkage at R_merge, one place per true vertex, a shower's start with the boundary it took
@@ -386,6 +432,27 @@ def build(ev, R, pt, kps, det):
         pl_kinds[u] = int(np.bitwise_or.reduce(1 << ck[m])); pl_tag[u] = int(np.bitwise_or.reduce(ct[m]))
         if m.sum() == 1 and ck[m][0] == 1 and int(cp[m][0]) in TIP:      # a free end of a track piece: the place is where its points stop
             PL[u] = TIP[int(cp[m][0])][int(ce[m][0])]
+    # X2: a place shared by two or more pieces that lies more than host_r from every member piece's points moves onto them: to the median
+    # of the member pieces' points within end_w of the member point nearest to it (doc 86 X2; 19 places on dev, at most 20 mm off)
+    n_x2 = 0
+    for u in range(npl):
+        mem = np.unique(cp[cpl == u])
+        if len(mem) < 2:
+            continue
+        rm = np.flatnonzero(np.isin(piece, mem))
+        if not len(rm):
+            continue
+        dm = np.linalg.norm(X[rm] - PL[u], axis=1); jn = int(np.argmin(dm))
+        if dm[jn] > V["host_r"]:
+            PL[u] = np.median(X[rm[np.linalg.norm(X[rm] - X[rm[jn]], axis=1) <= V["end_w"]]], axis=0); n_x2 += 1
+    d3only = np.zeros(npl, bool); d3par = {}
+    if nc:
+        isd3 = np.zeros(nc, bool); isd3[d3] = True; par = np.asarray(tab["inst_parent_inst"]).astype(np.int64)
+        for u in range(npl):
+            m = cpl == u
+            if isd3[m].all():
+                d3only[u] = True; d3par[u] = {int(par[Pk["inst"][int(c)]]) for c in cp[m]}
+    n_d3_chain = n_d3_skip = 0
     # ---- the implied graph
     ea, eb, ep = [], [], []; nv = 0; p0 = np.full(npc, -1, np.int64); p1 = np.full(npc, -1, np.int64); CL = {}
     for k in range(npc):
@@ -400,7 +467,14 @@ def build(ev, R, pt, kps, det):
             if 2.0 < np.linalg.norm(PL[u1] - C[-1]) <= 40.0:
                 C = np.vstack([C, PL[u1]])
             C = _resample(C); CL[k] = C; ac = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))]
-            d_, j = cKDTree(C).query(PL); mid = sorted((float(ac[j[u]]), int(u)) for u in np.flatnonzero(d_ <= V["pass_r"]).tolist() if u not in (u0, u1))
+            d_, j = cKDTree(C).query(PL); near_u = [u for u in np.flatnonzero(d_ <= V["pass_r"]).tolist() if u not in (u0, u1)]
+            for u in near_u:                              # a place of D3 candidates only joins the chain of its object's parent (D5: a crossing is not a vertex)
+                if d3only[u]:
+                    if Pk["inst"][k] in d3par[u]:
+                        n_d3_chain += 1
+                    else:
+                        n_d3_skip += 1
+            mid = sorted((float(ac[j[u]]), int(u)) for u in near_u if not d3only[u] or Pk["inst"][k] in d3par[u])
             chain = [u0] + [u for _, u in mid] + [u1]
             for a_, b_ in zip(chain[:-1], chain[1:]):
                 ea.append(a_); eb.append(b_); ep.append(k)
@@ -431,8 +505,9 @@ def build(ev, R, pt, kps, det):
                seg_a=np.array(ea, np.int64), seg_b=np.array(eb, np.int64), seg_piece=np.array(ep, np.int64))
     rb = np.bincount(rule[cnt], minlength=8)
     log = dict(n_c7_pieces=int(npc), n_c7_graph_pieces=int(np.sum(Pk["graph"])), n_c7_track_pieces=int(sum(1 for k in range(npc) if Pk["kind"][k] == OBJ["track"] and Pk["graph"][k])),
-               n_c7_places=int(npl), n_c7_segments=int(len(ea)), n_c7_stub_kept=int(len(stub_keep)), n_c7_stub_folded=int(len(stub_fold)), n_c7_unresolved=int(len(unres)), n_c7_buried=int(len(buried)),
+               n_c7_places=int(npl), n_c7_segments=int(len(ea)), n_c7_stub_kept=int(len(stub_keep)), n_c7_stub_folded=int(len(stub_fold)), n_c7_unresolved=int(len(unres_kept)), n_c7_buried=int(len(buried_kept)),
                n_c7_pts_folded_stub=int(rb[1]), n_c7_pts_stub_le=int(rb[2]), n_c7_pts_folded_track=int(rb[3]), n_c7_pts_hidden_end=int(rb[4]), n_c7_pts_buried=int(rb[5]),
                n_c7_pts_short_host=int(rb[6]), n_c7_pts_short_le=int(rb[7]), n_c7_pts_through=int(((flag & FL_THRU) > 0).sum()), n_c7_pts_zone=int(((flag & FL_ZONE) > 0).sum()),
-               n_c7_host_exact=int(n_exact), n_c7_host_near=int(n_near), n_c7_host_none=int(n_none), n_c7_hidden_no_shower=int(n_h_nohost))
+               n_c7_host_exact=int(n_exact), n_c7_host_near=int(n_near), n_c7_host_none=int(n_none), n_c7_hidden_no_shower=int(n_h_nohost),
+               n_c7_d3=int(n_d3), n_c7_d3_edge=int(n_d3_edge), n_c7_d3_none=int(n_d3_none), n_c7_d3_chain=int(n_d3_chain), n_c7_d3_skip=int(n_d3_skip), n_c7_x2=int(n_x2))
     return out, log

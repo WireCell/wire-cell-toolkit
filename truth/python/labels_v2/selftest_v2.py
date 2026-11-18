@@ -62,8 +62,9 @@ class Builder:
                 P = start + np.outer(s / max(L, 1e-9), end - start)
                 self.dep.append((tid, P, t_start + s / C, np.full(n, q_per_step), np.full(n, q_per_step / 2.4e4)))
 
-    def event(self, bad=None, every=3, extra=None):
-        """extra: [(xyz (n, 3), tid)], image points added beside the sampled deposits (points that lie off their deposits)"""
+    def event(self, bad=None, every=3, extra=None, drop=None):
+        """extra: [(xyz (n, 3), tid)], image points added beside the sampled deposits (points that lie off their deposits);
+        drop: [(xyz, r)], no image point within r of xyz (deposits there that the image does not show)"""
         pf = np.zeros((len(self.rows), len(TT.PF_COLUMNS))); c = TT.pf_col
         for i, r in enumerate(self.rows):
             pf[i, c("nu_row")] = -1; pf[i, c("trackid")] = r["tid"]; pf[i, c("parent_trackid")] = r["mother"]; pf[i, c("mother_trackid")] = r["mother"]
@@ -79,6 +80,8 @@ class Builder:
         I = np.column_stack([np.arange(n), np.zeros(n), np.zeros(n), np.full(n, -1)]).astype(np.int64)
         truth = dict(truth_pf=pf, sed_ids=np.column_stack([tids, tids]).astype(np.int32), sed_energy=e.astype(np.float32), gen_labels=["generator"], truth_nu=np.zeros((0, len(TT.NU_COLUMNS))), meta={})
         sel = np.arange(0, n, every)
+        for xc, rc in (drop or []):
+            sel = sel[np.linalg.norm(P3[sel] - np.asarray(xc, float), axis=1) > rc]
         pts = dict(X=P3[sel].copy(), tid=tids[sel], orig_tid=tids[sel])
         for xe, te in (extra or []):
             xe = np.asarray(xe, float).reshape(-1, 3); te = np.full(len(xe), te, tids.dtype)
@@ -422,6 +425,65 @@ def test_l():
         check(1308.0 <= far[2] <= 1314.5 and abs(near[2] - 1000.0) <= 4.0, f"an end sits where the piece's points stop: 8 to 14 mm past the last deposit at one end, at the first deposit at the other (got z {far[2]:.1f}, {near[2]:.1f})")
         PL = A["pl_xyz"].astype(float)
         check(len(PL) == 2 and float(np.linalg.norm(PL - far, axis=1).min()) < 0.5, f"two places, the free end's place at that tip (got {len(PL)})")
+    # D1 (Xin 2026-11-17, doc 86a D1, rule C): the free end on the centre line of the dots where they stop: a lone dot 12 mm past the
+    # overshoot is not the end (muon 1); a dot 10 mm beside the line just past the last deposit does not pull the end off the line (muon 2)
+    B = Builder(); B.particle(1, 13, 0, "primary", (-1500, 0, 1000), (-1500, 0, 1300), 2000.0); B.particle(2, 13, 0, "primary", (-1500, 400, 1000), (-1500, 400, 1300), 2000.0)
+    ev = B.event(extra=[(np.array([[-1500.0, 0.0, 1300.0 + d] for d in (8.0, 10.0, 12.0, 14.0, 26.0)]), 1), (np.array([[-1500.0, 410.0, 1303.0]]), 2)])
+    R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); PL = A["pl_xyz"].astype(float)
+    p1 = PL[np.argmin(np.linalg.norm(PL - np.array([-1500.0, 0.0, 1312.0]), axis=1))] if len(PL) else np.full(3, np.nan)
+    check(1308.0 <= p1[2] <= 1314.5 and abs(p1[1]) <= 3.0, f"D1: a lone dot 12 mm past the overshoot is not the end: the place where the dots stop, 8 to 14 mm past the last deposit (got z {p1[2]:.1f})")
+    p2 = PL[np.argmin(np.linalg.norm(PL - np.array([-1500.0, 400.0, 1300.0]), axis=1))] if len(PL) else np.full(3, np.nan)
+    check(float(np.hypot(p2[0] + 1500.0, p2[1] - 400.0)) <= 3.0 and abs(p2[2] - 1300.0) <= 6.0, f"D1: a dot 10 mm beside the line does not pull the free end off it (got {np.hypot(p2[0] + 1500.0, p2[1] - 400.0):.1f} mm across, z {p2[2]:.1f})")
+    # D2 (Xin 2026-11-17, doc 86a): an unresolved track is not folded: two parallel muons 4 mm apart (test (b)'s setup) each have a graph track piece
+    B = Builder(); B.particle(1, 13, 0, "primary", (-1600, 0, 1000), (-1400, 0, 1400), 2000.0); B.particle(2, 13, 0, "primary", (-1600, 4, 1000), (-1400, 4, 1400), 2000.0)
+    ev = B.event(); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); tk = (A["pc_type"] == OBJ["track"]) & A["pc_graph"]
+    got = [int((tk & (A["pc_inst"] == inst_of(R, t))).sum()) for t in (1, 2)]
+    check(all(R.table["inst_flags"][inst_of(R, t)] & rules.FL_UNRESOLVED for t in (1, 2)) and min(got) >= 1, f"D2: two unresolved parallel muons each keep a graph track piece (got {got})")
+    # D3 tie (doc 86, 2026-11-17): an electron whose deposit times tie in two runs (its unseen first 15 mm stored first, the rest far end first), no image point in its
+    # first 15 mm: its start place is within 1 step of its first point nearest its true start (the tie broken along the path)
+    B = Builder(); E0 = np.array([-1500.0, 500.0, 2000.0]); E1 = E0 + np.array([60.0, 0.0, 120.0]); B.particle(1, 11, 0, "primary", E0, E1, 250.0, deposits=False)
+    s_ = np.linspace(0.0, 1.0, 270); P_ = E0 + np.outer(s_, E1 - E0); T_ = np.where(s_ < 0.6, 0.0, 1.0e3); hid_ = s_ * np.linalg.norm(E1 - E0) < 15.0
+    o_ = np.r_[np.flatnonzero(hid_), np.flatnonzero(~hid_ & (s_ < 0.6))[::-1], np.flatnonzero(s_ >= 0.6)[::-1]]   # the unseen first 15 mm stored first, the rest of each run far end first
+    B.dep.append((1, P_[o_], T_[o_], np.full(len(o_), 3000.0), np.full(len(o_), 3000.0 / 2.4e4)))
+    ev = B.event(drop=[(E0, 15.0)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); X = np.asarray(ev.pts["X"], float)
+    i1 = inst_of(R, 1); ks = [k for k in range(len(A["pc_type"])) if A["pc_inst"][k] == i1 and A["pc_graph"][k] and A["pc_type"][k] != OBJ["track"]]
+    if len(ks) == 1:
+        u = A["pl_member_place"][A["pl_member_piece"] == ks[0]]; m = A["pt_c7_piece"] == ks[0]; near = X[m][np.argmin(np.linalg.norm(X[m] - E0, axis=1))]
+        dd_ = float(np.linalg.norm(A["pl_xyz"][u[0]].astype(float) - near)) if len(u) else np.inf
+        check(dd_ <= 6.0 and len(u) and (int(A["pl_tag"][u[0]]) & 16), f"D3 with tied times: the start place within 1 step of the electron's first point (got {dd_:.1f} mm)")
+    else:
+        check(False, f"D3 with tied times: one graph piece of the electron (got {ks})")
+    # edge (doc 86, 2026-11-17): a photon from outside the faces' y-z extent converting just inside, no image point in the electron's first 15 mm
+    B = Builder(); G0 = np.array([-1500.0, -1000.0, -400.0]); C0 = np.array([-1500.0, -1000.0, 40.0]); B.particle(1, 22, 0, "primary", G0, C0, 300.0, deposits=False)
+    B.particle(2, 11, 1, "conv", C0, C0 + np.array([0.0, 40.0, 100.0]), 250.0, t_start=10.0, q_per_step=3000.0)
+    ev = B.event(drop=[(C0, 15.0)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd")
+    i1 = inst_of(R, 1); ks = [k for k in range(len(A["pc_type"])) if A["pc_inst"][k] == i1 and A["pc_graph"][k]]
+    tg = [int(A["pl_tag"][u]) for k in ks for u in A["pl_member_place"][A["pl_member_piece"] == k]]
+    check(any((t_ & 16) and (t_ & 2) for t_ in tg), f"edge: a photon from outside the faces' y-z extent: its start place is tagged 16 and edge (got tags {tg})")
+    # X2 (doc 86, 2026-11-17): a place shared by two pieces sits on their dots: a proton and a pion from one vertex, no image point within 12 mm of it
+    B = Builder(); B.particle(1, 2212, 0, "primary", (-1600, 0, 1000), Vx, 800.0); B.particle(2, 211, 1, "hadElastic", Vx, Vx + 173.0 * d2, 300.0, t_start=300 / C)
+    ev = B.event(drop=[(Vx, 12.0)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); PL = A["pl_xyz"].astype(float); X = np.asarray(ev.pts["X"], float)
+    iv = int(np.argmin(np.linalg.norm(PL - Vx, axis=1))) if len(PL) else -1; mem = A["pl_member_piece"][A["pl_member_place"] == iv] if iv >= 0 else np.zeros(0, np.int64)
+    dmem = min((float(np.linalg.norm(X[A["pt_c7_piece"] == k] - PL[iv], axis=1).min()) for k in mem if (A["pt_c7_piece"] == k).any()), default=np.inf) if iv >= 0 else np.inf
+    check(len(mem) == 2 and dmem <= 6.0, f"X2: the shared vertex place of two pieces lies within 6 mm of their points (got {len(mem)} members, {dmem:.1f} mm)")
+    # D3 (Xin's ruling of 2026-11-17, doc 86a D3 (a)): a piece in the graph that has no key point gets a start place at its first visible deposit
+    B = Builder(); Cv = np.array([-1500.0, 500.0, 2000.0]); B.particle(1, 22, 0, "primary", (-1500, 500, 1900), Cv, 300.0, deposits=False)
+    B.particle(2, 11, 1, "conv", Cv, (-1450, 500, 2100), 250.0, t_start=100 / C, q_per_step=3000.0)
+    B.particle(3, 11, 0, "primary", (-1500, -1000, -30), (-1500, -1000, 120), 200.0, q_per_step=3000.0)        # enters through z = 0
+    ev = B.event(drop=[(Cv, 15.0)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); PL = A["pl_xyz"].astype(float); X = np.asarray(ev.pts["X"], float)
+    tid = ev.pts["orig_tid"]; i1, i3 = inst_of(R, 1), inst_of(R, 3); pc = A["pt_c7_piece"]
+    for ii, tt, nm in ((i1, 2, "the conversion electron with no image point in its first 15 mm"), (i3, 3, "the electron entering through z = 0")):
+        ks = np.unique(pc[(tid == tt) & (pc >= 0)]); ks = [k for k in ks.tolist() if A["pc_inst"][k] == ii and A["pc_graph"][k] and A["pc_type"][k] != OBJ["track"]]
+        ok = len(ks) == 1
+        if ok:
+            k = ks[0]; up = A["pl_member_place"][A["pl_member_piece"] == k]; ok = len(up) >= 1
+        if ok:
+            u = int(up[0]); fr = (tid == tt) & ((pt["overlap"].astype(int) & 1) == 0) & (pt["dep"] >= 0); first = X[fr][np.argmin(ev.T0[pt["dep"][fr]])]
+            tg = int(A["pl_tag"][u]); want = 16 | (2 if tt == 3 else 0)
+            check(float(np.linalg.norm(PL[u] - first)) <= 6.0 and (tg & want) == want and int((A["seg_piece"] == k).sum()) >= 1,
+                  f"D3: {nm}: a start place within 1 step of its first visible point (got {np.linalg.norm(PL[u] - first):.1f} mm), tag {want} (got {tg}), and a segment")
+        else:
+            check(False, f"D3: {nm}: one graph piece with a place (got pieces {ks})")
 
 
 def main():
