@@ -372,9 +372,10 @@ def build(ev, R, pt, kps, det):
         else:
             vt = T.S0[r].astype(np.float64) if r < nr else nan3
         cx.append(KX[j]); ck.append(kd); ct.append(0); cp.append(k); ce.append(0); cv.append(vt); cex.append(True)
-    # D3 (Xin 2026-11-17, doc 86a D3 (a)): a piece in the graph that is not a track and has no candidate gets one at its first visible
-    # own deposit: of its points of its own instance (no point moved in), told apart in a wire view, with a matched deposit, the deposit
-    # with the smallest Geant4 time; the median of its points.  Tag 16, and 2 when the instance's earliest deposit is not inside.
+    # D3 (Xin 2026-11-17, doc 86a D3 (a); C7L7: Xin's ruling after doc 86 round d3s): a piece in the graph that is not a track and has no
+    # candidate gets one at its first own deposit: of its points of its own instance (no point moved in), with a matched deposit, told
+    # apart in a wire view or not (C7L6 required told apart, which put the place past an overlapped first stretch), the deposit with the
+    # smallest Geant4 time, ties along the path; the median of its points.  Tag 16, and 2 when the instance's earliest deposit is not inside.
     KD3 = {OBJ["stub"]: 2, OBJ["shower"]: 3, OBJ["michel"]: 4, OBJ["delta"]: 5}; has_c = set(cp); n_d3 = n_d3_edge = n_d3_none = 0; d3 = []
     ri = np.asarray(R.inst).astype(np.int64); dsrt = np.argsort(ri, kind="stable"); ok_ = ri[dsrt] >= 0          # the deposits of every instance, by index
     ui_, fi_, ni_ = np.unique(ri[dsrt][ok_], return_index=True, return_counts=True); dsrt = dsrt[ok_]; deps_of = {int(u): (int(a_), int(a_ + c_)) for u, a_, c_ in zip(ui_, fi_, ni_)}
@@ -389,7 +390,7 @@ def build(ev, R, pt, kps, det):
     for k in range(npc):
         if not Pk["graph"][k] or Pk["kind"][k] not in KD3 or k in has_c:
             continue
-        i = int(Pk["inst"][k]); rows = np.flatnonzero((piece == k) & (inst == i) & free & (dep >= 0) & ~moved)
+        i = int(Pk["inst"][k]); rows = np.flatnonzero((piece == k) & (inst == i) & (dep >= 0) & ~moved)        # C7L7 (Xin 2026-11-17, doc 86 round d3s): told apart or not
         if not len(rows):
             n_d3_none += 1; continue
         dd = dep[rows]; a_, b_ = deps_of.get(i, (0, 0)); od = dsrt[a_:b_]                      # the instance's deposits in time, ties along the path (tie_order)

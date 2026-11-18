@@ -16,6 +16,8 @@
       where the points stop): a proton ending at a vertex with a pion leaving it and an 8 mm proton lying on the pion's first 8 mm (a
       hidden stub: folded into its host, no place); an isolated 10 mm proton (a visible stub: kept, a place at its start); a muon
       whose deposits miss 100 mm in the middle (two visible pieces, a place on each side of the gap)
+      (C7L7) a photon converting on a muon's line whose electron's first 40 mm are not told apart: its start place at its first own
+      point, and the muon not cut there
 Run: python3 selftest_v2.py [wires file]; exit 0 when every check passes, prints FAIL lines otherwise."""
 import os, sys
 import numpy as np
@@ -478,12 +480,35 @@ def test_l():
         if ok:
             k = ks[0]; up = A["pl_member_place"][A["pl_member_piece"] == k]; ok = len(up) >= 1
         if ok:
-            u = int(up[0]); fr = (tid == tt) & ((pt["overlap"].astype(int) & 1) == 0) & (pt["dep"] >= 0); first = X[fr][np.argmin(ev.T0[pt["dep"][fr]])]
+            u = int(up[0]); fr = (tid == tt) & (pc == k) & (pt["dep"] >= 0); first = X[fr][np.argmin(ev.T0[pt["dep"][fr]])]      # C7L7 (Xin 2026-11-17): its first own point, told apart or not (C7L6: told apart)
             tg = int(A["pl_tag"][u]); want = 16 | (2 if tt == 3 else 0)
             check(float(np.linalg.norm(PL[u] - first)) <= 6.0 and (tg & want) == want and int((A["seg_piece"] == k).sum()) >= 1,
-                  f"D3: {nm}: a start place within 1 step of its first visible point (got {np.linalg.norm(PL[u] - first):.1f} mm), tag {want} (got {tg}), and a segment")
+                  f"D3: {nm}: a start place within 1 step of its first own point, told apart or not (got {np.linalg.norm(PL[u] - first):.1f} mm), tag {want} (got {tg}), and a segment")
         else:
             check(False, f"D3: {nm}: one graph piece with a place (got pieces {ks})")
+
+    # D3 start told apart or not (C7L7, Xin 2026-11-17 after doc 86 round d3s): a photon converts on a muon's line; its electron runs 40 mm
+    # along the muon (those points are not told apart from the muon's in any view), then leaves it in drift and across; no image point within
+    # 12 mm of the conversion (so today's shower start gives no candidate).  The start place is at the electron's first own point, not 36 mm
+    # on at its first told-apart point; it sits on the muon's line, and the muon (not the photon's parent) is not cut there (D5).
+    B = Builder(); M0 = np.array([-1500.0, 0.0, 1000.0]); B.particle(1, 13, 0, "primary", M0, (-1500, 0, 1400), 2000.0)
+    Cv = np.array([-1500.0, 0.0, 1100.0]); B.particle(2, 22, 0, "primary", (-1500, -300, 1100), Cv, 300.0, deposits=False)
+    u1 = np.array([0.0, 0.0, 1.0]); u2 = np.array([0.6, 0.6, 0.53]) / np.linalg.norm([0.6, 0.6, 0.53]); s1 = np.arange(0.0, 40.0, 0.5); s2 = np.arange(0.5, 120.0, 0.5)
+    P_ = np.vstack([Cv + np.outer(s1, u1), Cv + 40.0 * u1 + np.outer(s2, u2)]); s_ = np.r_[s1, 40.0 + s2]
+    B.dep.append((3, P_, 400 / C + s_ / C, np.full(len(s_), 6000.0), np.full(len(s_), 6000.0 / 2.4e4)))
+    B.particle(3, 11, 2, "conv", Cv, Cv + 40.0 * u1 + 120.0 * u2, 250.0, t_start=400 / C, deposits=False)
+    ev = B.event(drop=[(Cv, 12.0)]); R, pt, kps, _ = run(ev, dict(c7=True)); A, log = c7.build(ev, R, pt, kps, "sbnd"); X = np.asarray(ev.pts["X"], float)
+    tid = ev.pts["orig_tid"]; ig = inst_of(R, 2); pc = A["pt_c7_piece"]; own = (tid == 3) & (pt["dep"] >= 0)
+    nf = int((own & ((pt["overlap"].astype(int) & 1) > 0)).sum())
+    ks = [k for k in np.unique(pc[own & (pc >= 0)]).tolist() if A["pc_inst"][k] == ig and A["pc_graph"][k] and A["pc_type"][k] != OBJ["track"]]
+    check(nf >= 10 and len(ks) == 1, f"setup: the electron's first stretch is not told apart ({nf} points) and the photon has one graph piece (got {ks})")
+    if len(ks) == 1:
+        k = ks[0]; up = A["pl_member_place"][A["pl_member_piece"] == k]; m = own & (pc == k); first = X[m][np.argmin(ev.T0[pt["dep"][m]])]
+        dd_ = float(np.linalg.norm(A["pl_xyz"][up[0]].astype(float) - first)) if len(up) else np.inf
+        check(dd_ <= 6.0 and len(up) and (int(A["pl_tag"][up[0]]) & 16), f"D3 told apart or not: the start place within 1 step of the electron's first own point (got {dd_:.1f} mm)")
+        km = [q for q in range(len(A["pc_type"])) if A["pc_inst"][q] == inst_of(R, 1) and A["pc_type"][q] == OBJ["track"] and A["pc_graph"][q]]
+        cut = [q for q in km for u in up.tolist() if u in A["seg_a"][A["seg_piece"] == q] or u in A["seg_b"][A["seg_piece"] == q]]
+        check(len(km) == 1 and not cut, f"D5: the muon (not the photon's parent) is one piece and its chain does not pass through the photon's start place (got {len(km)} pieces, cut {cut})")
 
 
 def main():
