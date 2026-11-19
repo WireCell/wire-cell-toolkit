@@ -203,7 +203,8 @@ set(WCT_OPTIONAL_PACKAGES
     "triton=GRPC,PROTOBUF,TRITON"
     "pytorch=LIBTORCH"
     "root=ROOTSYS"
-    "cuda=CUDA")
+    "cuda=CUDA"
+    "edep=EDEPSIM")
 foreach(_entry IN LISTS WCT_OPTIONAL_PACKAGES)
   string(REPLACE "=" ";" _pp "${_entry}")
   list(GET _pp 0 _pkg)

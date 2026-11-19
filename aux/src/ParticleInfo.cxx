@@ -2,8 +2,11 @@
 #include "WireCellUtil/Exceptions.h"
 #include "WireCellUtil/Units.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 using namespace WireCell;
 using namespace WireCell::Aux;
@@ -169,6 +172,47 @@ std::string ParticleInfo::pdg_to_name(int pdg_code) {
         return pdg_code < 0 ? "anti-" + it->second : it->second;
     }
     return "unknown";
+}
+
+int ParticleInfo::name_to_pdg(const std::string& name_in) {
+    std::string name = name_in;
+    std::transform(name.begin(), name.end(), name.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    // Common aliases and antiparticle spellings.
+    static const std::map<std::string, int> aliases = {
+        {"e-", 11},   {"e+", -11},  {"positron", -11}, {"antielectron", -11},
+        {"mu", 13},   {"mu-", 13},  {"mu+", -13},      {"antimuon", -13},
+        {"gamma", 22},{"g", 22},
+        {"pi+", 211}, {"pi-", -211},{"pion", 211},     {"antipion", -211},
+        {"p", 2212},  {"antiproton", -2212}, {"pbar", -2212},
+        {"n", 2112},  {"antineutron", -2112},
+    };
+    auto ait = aliases.find(name);
+    if (ait != aliases.end()) return ait->second;
+
+    // Strip a leading "anti-"/"anti_"/"anti" and negate.
+    int sign = 1;
+    for (const std::string& pre : {std::string("anti-"), std::string("anti_"), std::string("anti")}) {
+        if (name.rfind(pre, 0) == 0) {
+            sign = -1;
+            name = name.substr(pre.size());
+            break;
+        }
+    }
+
+    const auto& name_map = get_pdg_name_map();
+    for (const auto& [pdg, nm] : name_map) {
+        if (nm == name) return sign * pdg;
+    }
+
+    // Fall back to a numeric PDG string.
+    try {
+        return std::stoi(name_in);
+    }
+    catch (...) {
+    }
+    return 0;
 }
 
 double ParticleInfo::pdg_to_mass(int pdg_code) {
