@@ -63,7 +63,9 @@ def process_fodder_dense(
         output_rec0=None,
         output_rec1=None,
         output_rec2=None,
-        remap=None):
+        remap=None,
+        array_locs=(0,3,6),
+        ):
     """
     Process fodder npz file and create HDF5 files for all views concatted (NO MP INFO).
     
@@ -112,19 +114,19 @@ def process_fodder_dense(
             # Process U view (indices 0, 1, 2)
             if output_rec0 is not None:
                 if 0 in event_data:
-                    print(f"  Creating rec-0/{event_num_out}/frame_loose_lf0, shape={event_data[0].shape}")
+                    print(f"  Creating rec-0/{event_num_out}/frame_loose_lf0, shape={event_data[array_locs[0]].shape}")
                     h5_u.create_dataset(f"{event_num_out}/frame_loose_lf0", 
-                                    data=event_data[0], 
+                                    data=event_data[array_locs[0]], 
                                     compression='gzip')
                 if 1 in event_data:
-                    print(f"  Creating rec-1/{event_num_out}/frame_loose_lf0, shape={event_data[1].shape}")
+                    print(f"  Creating rec-1/{event_num_out}/frame_loose_lf0, shape={event_data[array_locs[1]].shape}")
                     h5_v.create_dataset(f"{event_num_out}/frame_loose_lf0", 
-                                    data=event_data[1], 
+                                    data=event_data[array_locs[1]], 
                                     compression='gzip')
                 if 2 in event_data:
-                    print(f"  Creating rec-2/{event_num_out}/frame_loose_lf0, shape={event_data[2].shape}")
+                    print(f"  Creating rec-2/{event_num_out}/frame_loose_lf0, shape={event_data[array_locs[2]].shape}")
                     h5_w.create_dataset(f"{event_num_out}/frame_loose_lf0", 
-                                    data=event_data[2], 
+                                    data=event_data[array_locs[2]], 
                                     compression='gzip')
     finally:
         if output_rec0 is not None:
