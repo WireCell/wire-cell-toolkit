@@ -267,6 +267,10 @@ void TrackFitting::set_parameter(const std::string& name, double value) {
         m_params.dqdx_clump_term = value;
     } else if (name == "traj_clump_claim") {            // pr_ml doc 79: > 0 = on
         m_params.traj_clump_claim = value;
+    } else if (name == "spd_solver") {                  // pr_ml doc 87b: > 0 = CG + IncompleteCholesky
+        m_params.spd_solver = value;
+    } else if (name == "spd_solver_tol") {              // pr_ml doc 87b
+        m_params.spd_solver_tol = value;
     } else if (name == "electron_lifetime") {           // icarus/docs/04, WCT time units
         m_params.electron_lifetime = value;
         if (value > 0) {
@@ -476,6 +480,10 @@ double TrackFitting::get_parameter(const std::string& name) const {
         return m_params.dqdx_clump_term;
     } else if (name == "traj_clump_claim") {            // pr_ml doc 79
         return m_params.traj_clump_claim;
+    } else if (name == "spd_solver") {                  // pr_ml doc 87b
+        return m_params.spd_solver;
+    } else if (name == "spd_solver_tol") {              // pr_ml doc 87b
+        return m_params.spd_solver_tol;
     } else if (name == "electron_lifetime") {           // icarus/docs/04
         return m_params.electron_lifetime;
     } else if (name == "electron_lifetime_allow_unmatched") {   // wcfm/docs/25
@@ -1881,6 +1889,34 @@ Eigen::VectorXd TrackFitting::masked_response_prediction(const Eigen::SparseMatr
         out(i) *= (i < nscale) ? row_scale[i] : 0.0;
     }
     return out;
+}
+
+// pr_ml doc 87b (Xin 2026-11-22, "Same, all four solves"): the normal equations of the
+// four solves are symmetric positive (semi-)definite; CG with an incomplete-Cholesky
+// preconditioner is the solver for that class (BiCGSTAB at machine-epsilon tolerance
+// ran to its cap on the slow FD-HD event and returned a wrong answer).
+bool TrackFitting::spd_cg_ic_solve(const Eigen::SparseMatrix<double>& A, const Eigen::VectorXd& b,
+                                   const Eigen::VectorXd& x0, double tol,
+                                   Eigen::VectorXd& x, long& iters, double& err)
+{
+    x = x0; iters = 0; err = 0;
+    if (A.rows() == 0 || A.rows() != A.cols() || A.rows() != b.size() || x0.size() != b.size()) return false;
+    // IncompleteCholesky reads the first stored entry of each lower column as its diagonal:
+    // store every diagonal explicitly (a zero where A has none; the values are unchanged).
+    Eigen::SparseMatrix<double> As = A;
+    for (Eigen::Index i = 0; i < As.rows(); ++i) As.coeffRef(i, i) += 0.0;
+    As.makeCompressed();
+    Eigen::ConjugateGradient<Eigen::SparseMatrix<double>, Eigen::Lower | Eigen::Upper,
+                             Eigen::IncompleteCholesky<double, Eigen::Lower, Eigen::AMDOrdering<int>>> cg;
+    cg.setTolerance(tol);
+    cg.compute(As);
+    if (cg.info() != Eigen::Success) return false;
+    Eigen::VectorXd xs = cg.solveWithGuess(b, x0);
+    iters = (long) cg.iterations();
+    err = cg.error();
+    if (!std::isfinite(err) || !xs.allFinite()) return false;
+    x = xs;   // converged, or stopped at the cap with a finite answer (CG's error() says which)
+    return true;
 }
 
 void TrackFitting::record_cluster_fitted_charge_2d()
@@ -5264,13 +5300,24 @@ WireCell::Point TrackFitting::fit_point(WireCell::Point& init_p, int i, std::sha
     Eigen::VectorXd b = RUT * data_u_2D + RVT * data_v_2D + RWT * data_w_2D;
     Eigen::SparseMatrix<double> A = RUT * RU + RVT * RV + RWT * RW;
 
-    solver.compute(A);
-    temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
+    // pr_ml doc 87b (spd_solver > 0): CG + IncompleteCholesky first; if it fails, the
+    // legacy BiCGSTAB solve below runs unchanged.  Off: spd_done stays false.
+    bool spd_done = false;
+    if (m_params.spd_solver > 0) {
+        Eigen::VectorXd xs; long si = 0; double se = 0;
+        if (spd_cg_ic_solve(A, b, temp_pos_3D_init, m_params.spd_solver_tol, xs, si, se)) {
+            temp_pos_3D = xs; spd_done = true;
+        }
+    }
+    if (!spd_done) {
+        solver.compute(A);
+        temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
+    }
     
     WireCell::Point final_p_raw, final_p;
     
     // Check if solver succeeded
-    if (std::isnan(solver.error())) {
+    if (!spd_done && std::isnan(solver.error())) {
         // Return initialization if solver failed
         final_p_raw = WireCell::Point(temp_pos_3D_init(0), temp_pos_3D_init(1), temp_pos_3D_init(2));
     } else {
@@ -6226,12 +6273,23 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         Eigen::SparseMatrix<double> A = RUT * RU + RVT * RV + RWT * RW;
 
         det_dump("traj_multi", A, b, temp_pos_3D_init);
-        solver.compute(A);
-        temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
+        // pr_ml doc 87b (spd_solver > 0): CG + IncompleteCholesky first; if it fails, the
+        // legacy BiCGSTAB solve below runs unchanged.  Off: spd_done stays false.
+        bool spd_done = false;
+        if (m_params.spd_solver > 0) {
+            Eigen::VectorXd xs; long si = 0; double se = 0;
+            if (spd_cg_ic_solve(A, b, temp_pos_3D_init, m_params.spd_solver_tol, xs, si, se)) {
+                temp_pos_3D = xs; spd_done = true;
+            }
+        }
+        if (!spd_done) {
+            solver.compute(A);
+            temp_pos_3D = solver.solveWithGuess(b, temp_pos_3D_init);
+        }
 
         // Store result or use initial position if solver failed
         // these are raw positions ...
-        if (std::isnan(solver.error())) {
+        if (!spd_done && std::isnan(solver.error())) {
             pos_3D(3 * i) = temp_pos_3D_init(0);
             pos_3D(3 * i + 1) = temp_pos_3D_init(1);
             pos_3D(3 * i + 2) = temp_pos_3D_init(2);
@@ -6244,7 +6302,7 @@ void TrackFitting::trajectory_fit(std::vector<std::pair<WireCell::Point, std::sh
         // doc pdvd/111: leave-one-plane-out solves of the same normal equations, on the side.
         if (assoc_dbg) {
             auto& ap = assoc_pts[i];
-            ap.nan = std::isnan(solver.error());
+            ap.nan = !spd_done && std::isnan(solver.error());   // pr_ml doc 87b: no BiCGSTAB ran when spd_done
             ap.quantity[0] = plane_data_u.quantity;
             ap.quantity[1] = plane_data_v.quantity;
             ap.quantity[2] = plane_data_w.quantity;
@@ -8969,18 +9027,35 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
     static const bool solve_census = std::getenv("WCT_DQDX_SOLVE_CENSUS") != nullptr;
     std::chrono::steady_clock::time_point solve_t0;
     if (solve_census) solve_t0 = std::chrono::steady_clock::now();
-    solver.compute(A);
-    pos_3D = solver.solveWithGuess(b, pos_3D_init);
-    if (det_dbg()) fprintf(stderr, "WCT_DET dqdx_multi_out x=%016lx iters=%ld err=%.17g\n",
-                           det_fnv(pos_3D.data(), pos_3D.size()), (long)solver.iterations(), solver.error());
+    // pr_ml doc 87b (spd_solver > 0): CG + IncompleteCholesky first; if it fails, the
+    // legacy BiCGSTAB solve below runs unchanged.  Off: spd_done stays false, and the
+    // census / dump lines read the same BiCGSTAB counters as before.
+    bool spd_done = false;
+    long solve_iters = 0; double solve_err = 0;
+    if (m_params.spd_solver > 0) {
+        Eigen::VectorXd xs; long si = 0; double se = 0;
+        if (spd_cg_ic_solve(A, b, pos_3D_init, m_params.spd_solver_tol, xs, si, se)) {
+            pos_3D = xs; spd_done = true; solve_iters = si; solve_err = se;
+            if (det_dbg()) fprintf(stderr, "WCT_DET dqdx_multi_out x=%016lx iters=%ld err=%.17g solver=cgic\n",
+                                   det_fnv(pos_3D.data(), pos_3D.size()), solve_iters, solve_err);
+        }
+    }
+    if (!spd_done) {
+        solver.compute(A);
+        pos_3D = solver.solveWithGuess(b, pos_3D_init);
+        if (det_dbg()) fprintf(stderr, "WCT_DET dqdx_multi_out x=%016lx iters=%ld err=%.17g\n",
+                               det_fnv(pos_3D.data(), pos_3D.size()), (long)solver.iterations(), solver.error());
 
-    if (std::isnan(solver.error())) {
-        pos_3D = solver.solve(b);
+        if (std::isnan(solver.error())) {
+            pos_3D = solver.solve(b);
+        }
+        solve_iters = (long)solver.iterations(); solve_err = solver.error();
     }
     if (solve_census) {
-        s_log->debug("DQDX_SOLVE multi n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}",
-                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), (long)solver.iterations(), solver.error(),
-                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count());
+        s_log->debug("DQDX_SOLVE multi n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}{}",
+                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), solve_iters, solve_err,
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count(),
+                     spd_done ? " solver=cgic" : (m_params.spd_solver > 0 ? " solver=cgic_failed_bicgstab" : ""));
     }
 
     // doc sbnd_xin/docs/pr/108 sec 9 -- dQ/dx SYSTEM dump (debug only, env WCT_DQDX_DUMP=<path>;
@@ -8992,7 +9067,7 @@ void TrackFitting::dQ_dx_multi_fit(double dis_end_point_ext, bool flag_dQ_dx_fit
         static FILE* s_dq = [](){ const char* p = getenv("WCT_DQDX_DUMP"); return p ? fopen(p, "a") : (FILE*)0; }();
         if (s_dq) {
             Eigen::VectorXd bu = RUT * MU * data_u_2D, bv = RVT * MV * data_v_2D, bw = RWT * MW * data_w_2D;
-            fprintf(s_dq, "%d dqdx call n3d=%d n2d=%d/%d/%d iters=%ld err=%.6g\n", m_traj_dump_call, (int)n_3D_pos, (int)n_2D_u, (int)n_2D_v, (int)n_2D_w, (long)solver.iterations(), (double)solver.error());
+            fprintf(s_dq, "%d dqdx call n3d=%d n2d=%d/%d/%d iters=%ld err=%.6g\n", m_traj_dump_call, (int)n_3D_pos, (int)n_2D_u, (int)n_2D_v, (int)n_2D_w, solve_iters, (double)solve_err);
             for (int k = 0; k < A.outerSize(); ++k)
                 for (Eigen::SparseMatrix<double>::InnerIterator it(A, k); it; ++it)
                     fprintf(s_dq, "%d A %ld %ld %.10g\n", m_traj_dump_call, (long)it.row(), (long)it.col(), it.value());
@@ -9949,16 +10024,30 @@ void WireCell::Clus::TrackFitting::dQ_dx_fit(double dis_end_point_ext, bool flag
     static const bool solve_census = std::getenv("WCT_DQDX_SOLVE_CENSUS") != nullptr;
     std::chrono::steady_clock::time_point solve_t0;
     if (solve_census) solve_t0 = std::chrono::steady_clock::now();
-    solver.compute(A);
-    pos_3D = solver.solveWithGuess(b, pos_3D_init);
+    // pr_ml doc 87b (spd_solver > 0): CG + IncompleteCholesky first; if it fails, the
+    // legacy BiCGSTAB solve below runs unchanged.  Off: spd_done stays false.
+    bool spd_done = false;
+    long solve_iters = 0; double solve_err = 0;
+    if (m_params.spd_solver > 0) {
+        Eigen::VectorXd xs; long si = 0; double se = 0;
+        if (spd_cg_ic_solve(A, b, pos_3D_init, m_params.spd_solver_tol, xs, si, se)) {
+            pos_3D = xs; spd_done = true; solve_iters = si; solve_err = se;
+        }
+    }
+    if (!spd_done) {
+        solver.compute(A);
+        pos_3D = solver.solveWithGuess(b, pos_3D_init);
 
-    if (std::isnan(solver.error())) {
-        pos_3D = solver.solve(b);
+        if (std::isnan(solver.error())) {
+            pos_3D = solver.solve(b);
+        }
+        solve_iters = (long)solver.iterations(); solve_err = solver.error();
     }
     if (solve_census) {
-        s_log->debug("DQDX_SOLVE single n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}",
-                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), (long)solver.iterations(), solver.error(),
-                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count());
+        s_log->debug("DQDX_SOLVE single n3d={} n2d={}/{}/{} nnzA={} iters={} err={:.3g} ms={:.1f}{}",
+                     n_3D_pos, n_2D_u, n_2D_v, n_2D_w, (long)A.nonZeros(), solve_iters, solve_err,
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - solve_t0).count(),
+                     spd_done ? " solver=cgic" : (m_params.spd_solver > 0 ? " solver=cgic_failed_bicgstab" : ""));
     }
 
     // Extract dQ values and apply corrections

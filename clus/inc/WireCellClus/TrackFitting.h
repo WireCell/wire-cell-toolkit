@@ -320,6 +320,20 @@ namespace WireCell::Clus {
             // acts only when the fit runs with flag_exclusion.  0 = OFF.
             double traj_clump_claim = 0;
 
+            // pr_ml doc 87b (2026-11-22) -- the solver of the four normal-equation
+            // solves (fit_point, trajectory_fit, dQ_dx_multi_fit, dQ_dx_fit).  Their
+            // matrices A = R^T M R (+ F^T F) are symmetric positive (semi-)definite,
+            // but they were solved by BiCGSTAB at Eigen's defaults (tolerance at
+            // machine epsilon, cap 2n), which on a dense, ill-conditioned dQ/dx
+            // system runs to its cap and returns a wrong answer.  When > 0 each
+            // solve uses Eigen's ConjugateGradient with an IncompleteCholesky (AMD)
+            // preconditioner at relative tolerance spd_solver_tol (see
+            // spd_cg_ic_solve); if that preconditioner fails or the answer is not
+            // finite, the legacy BiCGSTAB solve runs unchanged.  0 = OFF = no code
+            // path touched (legacy, byte-identical).  Eigen only; no new dependency.
+            double spd_solver = 0;
+            double spd_solver_tol = 1e-10;   // read only when spd_solver > 0
+
             // wcp-porting-img icarus/docs/04 -- electron-lifetime correction of
             // the FITTED charge.  0 = OFF = no code path touched (legacy,
             // byte-identical; SBND/uBooNE/PDHD/PDVD never set it).  When > 0 it
@@ -1186,6 +1200,19 @@ namespace WireCell::Clus {
                                                           const Eigen::VectorXd& pos,
                                                           const std::vector<char>& col_mask,
                                                           const std::vector<double>& row_scale);
+
+        /// pr_ml doc 87b: solve the symmetric positive (semi-)definite system
+        /// A x = b by Eigen's ConjugateGradient (Lower|Upper) with an
+        /// IncompleteCholesky (AMD ordering) preconditioner, from the guess x0,
+        /// at relative residual tolerance tol (Eigen's cap of 2n iterations).
+        /// A missing diagonal entry is stored as an explicit zero first (the
+        /// preconditioner reads every column's diagonal).  Returns false, with
+        /// x = x0, when the preconditioner fails; false also when the answer
+        /// or its error is not finite.  iters / err are CG's own counters.
+        /// Pure; see Parameters::spd_solver.
+        static bool spd_cg_ic_solve(const Eigen::SparseMatrix<double>& A, const Eigen::VectorXd& b,
+                                    const Eigen::VectorXd& x0, double tol,
+                                    Eigen::VectorXd& x, long& iters, double& err);
         std::vector<double> get_reduced_chi2() const { return reduced_chi2; }
 
         // Measured 2D charge data access
