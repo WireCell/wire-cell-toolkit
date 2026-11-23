@@ -399,6 +399,27 @@ const std::array<double, 6>& DynamicPointCloud::angle_trig(const WirePlaneId& wp
     return m_angle_trig.emplace(wpid_volume.ident(), t).first->second;
 }
 
+std::array<double, 2> DynamicPointCloud::project_2d(const geo_point_t &p, const int plane, const int face,
+                                                    const int apa) const
+{
+    // pr_ml doc 87b: the query get_closest_2d_dis below builds, nothing more
+    // (no tree is touched or created).
+    const WirePlaneId wpid_volume(kAllLayers, face, apa);
+    if (m_wpid_params.empty()) {
+        raise<RuntimeError>("DynamicPointCloud: empty wpid params for wpid %s", wpid_volume.name());
+    }
+    const auto& trig = angle_trig(wpid_volume);
+    return {p.x(), trig[2 * plane] * p.z() - trig[2 * plane + 1] * p.y()};
+}
+
+const DynamicPointCloud::nfkd_t *DynamicPointCloud::kd2d_find(const int plane, const int face, const int apa) const
+{
+    WirePlaneId wpid(iplane2layer[plane], face, apa);
+    auto iter = m_kd2d.find(wpid.ident());
+    if (iter == m_kd2d.end()) return nullptr;
+    return iter->second.get();
+}
+
 double DynamicPointCloud::get_closest_2d_dis(const geo_point_t &p, const int plane, const int face,
                                              const int apa) const
 {

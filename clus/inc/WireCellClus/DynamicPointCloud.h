@@ -149,6 +149,16 @@ namespace WireCell::Clus::Facade {
         /// empty-result sentinel.
         double get_closest_2d_dis(const geo_point_t &p, const int plane, const int face, const int apa) const;
 
+        /// pr_ml doc 87b (TrackFitting's exclusion index): the 2-D query point
+        /// get_closest_2d_dis builds for (plane, face, apa) -- the same params
+        /// check and raise, the same projection -- so an index over this
+        /// cloud's stored 2-D points can be searched with it.  Read-only.
+        std::array<double, 2> project_2d(const geo_point_t &p, const int plane, const int face, const int apa) const;
+
+        /// pr_ml doc 87b: the existing 2-D tree for (plane, face, apa), or
+        /// nullptr when there is none (kd2d() would create an empty one).
+        const nfkd_t *kd2d_find(const int plane, const int face, const int apa) const;
+
         /// @brief Like get_closest_2d_point_info but takes pre-projected (drift, wire_perp) coordinates
         /// directly from Grouping::convert_time_wire_2Dpoint(), bypassing the internal angle projection.
         /// Use this when the 2D coordinates are already in the wire-perpendicular space.

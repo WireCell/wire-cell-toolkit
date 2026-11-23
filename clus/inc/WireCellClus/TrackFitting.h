@@ -1357,6 +1357,23 @@ namespace WireCell::Clus {
                                   const WireCell::Point& test_point, const Coord2D& coord,
                                   int apa, int face, int plane, double min_dis_track);
 
+        // pr_ml doc 87b (exact competitor index; see TrackFitting.cxx,
+        // struct ExclusionIndex): a candidate filter for update_association's
+        // competitor scan.  Set by form_map_graph for its pass while
+        // flag_exclusion is on and the debug dump is off; nullptr => the full
+        // scan.  Decisions are identical either way: candidates are re-checked
+        // with the unchanged exclusion distance, and a segment the filter
+        // leaves out has no point within the own distance.
+        struct ExclusionIndex;
+        std::shared_ptr<ExclusionIndex> m_excl_index;
+        size_t m_excl_index_used{0};   // competitor scans answered through the index (test seam only)
+        void exclusion_index_begin(const std::vector<std::shared_ptr<PR::Segment>>& segments);
+        void exclusion_index_end();
+        bool exclusion_competitors_keep(const std::shared_ptr<PR::Segment>& segment,
+                                        const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                        const WireCell::Point& test_point,
+                                        int apa, int face, int plane, double min_dis_track);
+
         // doc pr/49 round 3 (fit_blob_coverage knob): clusters owning a
         // segment in the current fit -- the "fitting scope" whose members
         // never count as foreign in is_cell_covered_by_foreign_blobs.

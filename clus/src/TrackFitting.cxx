@@ -3704,11 +3704,224 @@ bool TrackFitting::exclusion_keep_dump(const std::shared_ptr<PR::Segment>& segme
     return keep;
 }
 
+// pr_ml doc 87b -- the exact competitor index (Xin's word 2026-11-23, "Exact
+// competitor index"; registered in doc 87b before the code).
+//
+// update_association's competitor scan asks every other segment of the cluster
+// for its 2-D distance to a cell (one k-d query each, early break at the first
+// segment as close or closer): cells x segments per pass.  On an FD-HD tuning
+// event with 414 segments in one cluster that scan was 79 % of the CPU (doc 87b
+// profile read).  The index answers "which segments could lie within r of the
+// cell" from a 2-D grid per (plane, face, apa) over every segment's exclusion
+// cloud ("fit", else "main": exclusion_closest_2d_dis' choice); each occupied
+// grid cell lists the segments with a stored 2-D point in it.  Only those
+// candidates are then asked, in all_segments order, with the unchanged
+// exclusion_closest_2d_dis and the unchanged '<=' and early break.  A segment
+// the grid leaves out has every stored point outside the enlarged radius, so
+// its distance exceeds r and it could not have dropped the cell: every decision
+// equals the full scan's, ties and the 1e9 sentinel included.
+//
+// The full scan still runs when the own distance is kRMax or more (the 1e9 "no
+// measurement" case among them), when the chosen clouds do not all carry the
+// same wpid_params (one projection must serve every segment), when
+// all_segments is not the vector the index was built on, and when a 2-D tree
+// is not in owned storage.  Clouds are replaced between segments within one
+// pass (set_fit_associate_vec after each segment's loop), so every
+// update_association call refreshes each segment's chosen cloud (object and
+// size), and a grid re-indexes exactly the segments that changed before it is
+// read.  The grid holds the clouds it indexed alive, so a freed cloud's address
+// cannot come back as a "same" cloud.
+static std::shared_ptr<const Facade::DynamicPointCloud> exclusion_cloud(const std::shared_ptr<PR::Segment>& seg)
+{
+    std::shared_ptr<const Facade::DynamicPointCloud> dpc = seg->dpcloud("fit");
+    if (!dpc || dpc->npoints() == 0) dpc = seg->dpcloud("main");
+    if (!dpc || dpc->npoints() == 0) return nullptr;
+    return dpc;
+}
+
+struct TrackFitting::ExclusionIndex {
+    static constexpr double kCell = 10.0;   // grid cell edge (WCT length units: mm)
+    static constexpr double kRMax = 200.0;  // own distances at or above this: the full scan
+
+    using dpc_ptr = std::shared_ptr<const Facade::DynamicPointCloud>;
+
+    const std::vector<std::shared_ptr<PR::Segment>>* segs{nullptr};
+    std::vector<dpc_ptr> cur;          // chosen cloud per segment (nullptr: none)
+    std::vector<size_t> cur_n;
+    dpc_ptr ref;                       // the projection reference
+    std::map<WirePlaneId, std::tuple<Facade::geo_point_t, double, double, double>> ref_params;
+    bool have_ref{false};
+    size_t n_mismatch{0};              // chosen clouds whose wpid_params differ from ref_params
+    std::vector<char> mismatch;
+    uint64_t gen{1};                   // bumps whenever a chosen cloud changes
+
+    struct Grid {
+        uint64_t gen{0};
+        bool ok{true};                 // false: a tree not in owned storage (full scan)
+        std::vector<dpc_ptr> built;    // per segment: the cloud indexed here
+        std::vector<size_t> built_n;
+        std::vector<std::vector<uint64_t>> cells;   // per segment: its occupied cells
+        std::unordered_map<uint64_t, std::vector<int>> grid;   // cell -> segments
+    };
+    std::unordered_map<int, Grid> grids;   // key: (apa * 8 + face) * 4 + plane
+
+    std::vector<uint32_t> mark;            // per segment: last query stamp
+    uint32_t stamp{0};
+    std::vector<int> cand;
+
+    explicit ExclusionIndex(const std::vector<std::shared_ptr<PR::Segment>>& s)
+      : segs(&s), cur(s.size()), cur_n(s.size(), 0), mismatch(s.size(), 0), mark(s.size(), 0) {}
+
+    static int64_t cell_of(double v) { return static_cast<int64_t>(std::floor(v / kCell)); }
+    static uint64_t cell_key(int64_t cx, int64_t cy)
+    {
+        return (static_cast<uint64_t>(cx) << 32) ^ static_cast<uint64_t>(static_cast<uint32_t>(cy));
+    }
+
+    bool valid() const { return have_ref && n_mismatch == 0 && !ref_params.empty(); }
+
+    // Bring every segment's chosen cloud up to date (once per update_association call).
+    void refresh()
+    {
+        const auto& S = *segs;
+        for (size_t i = 0; i < S.size(); ++i) {
+            dpc_ptr d = exclusion_cloud(S[i]);
+            const size_t n = d ? d->npoints() : 0;
+            if (d == cur[i] && n == cur_n[i]) continue;
+            cur[i] = d;
+            cur_n[i] = n;
+            ++gen;
+            if (d && !have_ref) {
+                ref = d;
+                ref_params = d->get_wpid_params();
+                have_ref = true;
+            }
+            const char mm = (d && !(d->get_wpid_params() == ref_params)) ? 1 : 0;
+            if (mm && !mismatch[i]) ++n_mismatch;
+            else if (!mm && mismatch[i]) --n_mismatch;
+            mismatch[i] = mm;
+        }
+    }
+
+    // Re-index the segments whose chosen cloud changed since this grid was read.
+    void update(Grid& g, int plane, int face, int apa)
+    {
+        const size_t n = segs->size();
+        if (g.built.size() != n) {
+            g.built.assign(n, nullptr);
+            g.built_n.assign(n, 0);
+            g.cells.assign(n, {});
+        }
+        for (size_t i = 0; i < n; ++i) {
+            if (g.built[i] == cur[i] && g.built_n[i] == cur_n[i]) continue;
+            for (const auto c : g.cells[i]) {
+                auto it = g.grid.find(c);
+                if (it == g.grid.end()) continue;
+                auto& v = it->second;
+                v.erase(std::remove(v.begin(), v.end(), static_cast<int>(i)), v.end());
+                if (v.empty()) g.grid.erase(it);
+            }
+            g.cells[i].clear();
+            g.built[i] = cur[i];
+            g.built_n[i] = cur_n[i];
+            if (!cur[i]) continue;
+            const auto* t = cur[i]->kd2d_find(plane, face, apa);
+            if (!t || t->npoints() == 0) continue;
+            const auto& cols = t->points();
+            const size_t np = t->npoints();
+            if (cols.size() != 2 || cols[0].size() != np || cols[1].size() != np) {
+                g.ok = false;
+                return;
+            }
+            auto& cl = g.cells[i];
+            cl.reserve(np);
+            for (size_t j = 0; j < np; ++j) cl.push_back(cell_key(cell_of(cols[0][j]), cell_of(cols[1][j])));
+            std::sort(cl.begin(), cl.end());
+            cl.erase(std::unique(cl.begin(), cl.end()), cl.end());
+            for (const auto c : cl) g.grid[c].push_back(static_cast<int>(i));
+        }
+    }
+
+    // The segments with a stored 2-D point within r (enlarged) of the cell, in
+    // all_segments order; nullptr when this grid cannot be used.
+    const std::vector<int>* query(int plane, int face, int apa, const WireCell::Point& p, double r)
+    {
+        Grid& g = grids[(apa * 8 + face) * 4 + plane];
+        if (g.gen != gen) {
+            update(g, plane, face, apa);
+            g.gen = gen;
+        }
+        if (!g.ok) return nullptr;
+        const auto q = ref->project_2d(p, plane, face, apa);
+        const double rr = r * (1.0 + 1e-9) + 1e-6;
+        const int64_t x0 = cell_of(q[0] - rr), x1 = cell_of(q[0] + rr);
+        const int64_t y0 = cell_of(q[1] - rr), y1 = cell_of(q[1] + rr);
+        if (++stamp == 0) {
+            std::fill(mark.begin(), mark.end(), 0);
+            stamp = 1;
+        }
+        cand.clear();
+        for (int64_t cx = x0; cx <= x1; ++cx) {
+            for (int64_t cy = y0; cy <= y1; ++cy) {
+                auto it = g.grid.find(cell_key(cx, cy));
+                if (it == g.grid.end()) continue;
+                for (const int s : it->second) {
+                    if (mark[s] != stamp) {
+                        mark[s] = stamp;
+                        cand.push_back(s);
+                    }
+                }
+            }
+        }
+        std::sort(cand.begin(), cand.end());
+        return &cand;
+    }
+};
+
+void TrackFitting::exclusion_index_begin(const std::vector<std::shared_ptr<PR::Segment>>& segments)
+{
+    m_excl_index = std::make_shared<ExclusionIndex>(segments);
+}
+
+void TrackFitting::exclusion_index_end() { m_excl_index.reset(); }
+
+bool TrackFitting::exclusion_competitors_keep(const std::shared_ptr<PR::Segment>& segment,
+                                              const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
+                                              const WireCell::Point& test_point,
+                                              int apa, int face, int plane, double min_dis_track)
+{
+    ExclusionIndex* ix = m_excl_index.get();
+    if (ix && ix->segs == &all_segments && ix->valid() && min_dis_track < ExclusionIndex::kRMax) {
+        const std::vector<int>* cand = ix->query(plane, face, apa, test_point, min_dis_track);
+        if (cand) {
+            ++m_excl_index_used;
+            for (const int i : *cand) {
+                const auto& other_seg = all_segments[i];
+                if (other_seg == segment) continue;
+                const double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, plane);
+                if (temp_dis <= min_dis_track) return false;
+            }
+            return true;
+        }
+    }
+    // The full scan (today's loop).
+    for (const auto& other_seg : all_segments) {
+        if (other_seg == segment) continue;
+        const double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, plane);
+        if (temp_dis <= min_dis_track) return false;
+    }
+    return true;
+}
+
 void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
                                       const std::vector<std::shared_ptr<PR::Segment>>& all_segments,
                                       PlaneData& temp_2dut, PlaneData& temp_2dvt, PlaneData& temp_2dwt,
                                       ExclusionDecisionCache* decision_cache){
     if (!m_graph || !segment) return;
+
+    // pr_ml doc 87b: bring the exclusion index's view of every segment's cloud
+    // up to date (clouds are replaced between segments within one pass).
+    if (m_excl_index && !m_excl_dump && m_excl_index->segs == &all_segments) m_excl_index->refresh();
 
     // doc pr/98: the former `cluster`/`transform` locals here were dead (never
     // read below; the prototype's update_association takes no transform either,
@@ -3785,11 +3998,9 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
             keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 0, min_dis_track);
         }
         else if (min_dis_track >= 0.3 * units::cm) {
-            for (const auto& other_seg : all_segments) {
-                if (other_seg == segment) continue;
-                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 0);
-                if (temp_dis <= min_dis_track) { keep = false; break; }
-            }
+            // pr_ml doc 87b: the same scan through the exact competitor index
+            // (candidates only, re-checked with exclusion_closest_2d_dis).
+            keep = exclusion_competitors_keep(segment, all_segments, test_point, apa, face, 0, min_dis_track);
         }
 
         if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
@@ -3837,11 +4048,9 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
             keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 1, min_dis_track);
         }
         else if (min_dis_track >= 0.3 * units::cm) {
-            for (const auto& other_seg : all_segments) {
-                if (other_seg == segment) continue;
-                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 1);
-                if (temp_dis <= min_dis_track) { keep = false; break; }
-            }
+            // pr_ml doc 87b: the same scan through the exact competitor index
+            // (candidates only, re-checked with exclusion_closest_2d_dis).
+            keep = exclusion_competitors_keep(segment, all_segments, test_point, apa, face, 1, min_dis_track);
         }
 
         if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
@@ -3891,11 +4100,9 @@ void TrackFitting::update_association(std::shared_ptr<PR::Segment> segment,
             keep = exclusion_keep_dump(segment, all_segments, test_point, coord, apa, face, 2, min_dis_track);
         }
         else if (min_dis_track >= 0.3 * units::cm) {
-            for (const auto& other_seg : all_segments) {
-                if (other_seg == segment) continue;
-                double temp_dis = exclusion_closest_2d_dis(other_seg, test_point, apa, face, 2);
-                if (temp_dis <= min_dis_track) { keep = false; break; }
-            }
+            // pr_ml doc 87b: the same scan through the exact competitor index
+            // (candidates only, re-checked with exclusion_closest_2d_dis).
+            keep = exclusion_competitors_keep(segment, all_segments, test_point, apa, face, 2, min_dis_track);
         }
 
         if (decision_cache) (*decision_cache)[exclusion_cache_key(coord)] = keep;
@@ -4645,6 +4852,17 @@ void TrackFitting::form_map_graph(bool flag_exclusion, double end_point_factor, 
                 segments.push_back(cs);
             }
         }
+    }
+
+    // pr_ml doc 87b: the exact competitor index for this pass (see
+    // ExclusionIndex), over the final segment list; ended on every exit.
+    struct ExclIndexScope {
+        TrackFitting* tf{nullptr};
+        ~ExclIndexScope() { if (tf) tf->exclusion_index_end(); }
+    } excl_index_scope;
+    if (flag_exclusion && !m_excl_dump) {
+        exclusion_index_begin(segments);
+        excl_index_scope.tf = this;
     }
 
     int count = 0;

@@ -44,6 +44,10 @@
 
 #include <cmath>
 #include <memory>
+#include <algorithm>
+#include <random>
+#include <set>
+#include <vector>
 
 using namespace WireCell;
 using namespace WireCell::Clus;
@@ -73,6 +77,13 @@ namespace WireCell::Clus {
             tf.m_excl_x_shift[WirePlaneId(kAllLayers, face, apa).ident()] = shift_x;
         }
         static void clear_excl_x_shift(TrackFitting& tf) { tf.m_excl_x_shift.clear(); }
+        // pr_ml doc 87b: the exact competitor index, as form_map_graph scopes it.
+        static void excl_index_begin(TrackFitting& tf, const std::vector<std::shared_ptr<PR::Segment>>& segs)
+        {
+            tf.exclusion_index_begin(segs);
+        }
+        static void excl_index_end(TrackFitting& tf) { tf.exclusion_index_end(); }
+        static size_t excl_index_used(const TrackFitting& tf) { return tf.m_excl_index_used; }
     };
 
 }  // namespace WireCell::Clus
@@ -257,4 +268,180 @@ TEST_CASE("pdvd45 update_association drift-frame shift restores proximity arbitr
     TrackFittingTestHarness::clear_excl_x_shift(rig.tf);
     CHECK_FALSE(kept(fitted, {fitted, near_competitor}, 0));
     CHECK(kept(fitted, {fitted, far_competitor}, 0));
+}
+
+
+// ---------------------------------------------------------------------------
+// pr_ml doc 87b -- the exact competitor index (TrackFitting::ExclusionIndex).
+// update_association must take the same keep/drop decision on every cell with
+// the index as with the full competitor scan.  The index only filters which
+// competitors are asked; each candidate is still asked with the unchanged
+// exclusion distance and the unchanged '<=' rule.
+
+namespace {
+
+    std::vector<Point> random_points(std::mt19937& rng, int n, double cx, double cy, double cz, double spread)
+    {
+        std::uniform_real_distribution<double> u(-1.0, 1.0);
+        std::vector<Point> pts;
+        for (int i = 0; i < n; ++i) {
+            pts.emplace_back(cx + spread * u(rng), cy + spread * u(rng), cz + spread * u(rng));
+        }
+        return pts;
+    }
+
+    // U / V cells: wire w <-> transverse w cm; W cells: wire w <-> z = w cm;
+    // time t <-> drift x = t cm (the Rig's synthetic geometry).
+    void fill_cells(TrackFitting::PlaneData& ut, TrackFitting::PlaneData& vt, TrackFitting::PlaneData& wt)
+    {
+        for (int face = 0; face < 2; ++face) {
+            for (int t = 0; t <= 20; t += 2) {
+                for (int w = -10; w <= 10; w += 2) {
+                    ut.associated_2d_points.insert(TrackFitting::Coord2D(0, face, t, w, 0, kUlayer));
+                    vt.associated_2d_points.insert(TrackFitting::Coord2D(0, face, t, w, 0, kVlayer));
+                }
+                for (int w = 0; w <= 20; w += 2) {
+                    wt.associated_2d_points.insert(TrackFitting::Coord2D(0, face, t, w, 0, kWlayer));
+                }
+            }
+        }
+    }
+
+    struct Kept {
+        std::set<TrackFitting::Coord2D> u, v, w;
+        // Coord2D defines only operator<: equal sets = same size and pairwise equivalent.
+        static bool same(const std::set<TrackFitting::Coord2D>& a, const std::set<TrackFitting::Coord2D>& b)
+        {
+            return a.size() == b.size() &&
+                   std::equal(a.begin(), a.end(), b.begin(), [](const TrackFitting::Coord2D& x, const TrackFitting::Coord2D& y) {
+                       return !(x < y) && !(y < x);
+                   });
+        }
+        bool operator==(const Kept& o) const { return same(u, o.u) && same(v, o.v) && same(w, o.w); }
+        size_t size() const { return u.size() + v.size() + w.size(); }
+    };
+
+    Kept run(Rig& rig, std::shared_ptr<PR::Segment> seg, const std::vector<std::shared_ptr<PR::Segment>>& all,
+             bool with_index)
+    {
+        TrackFitting::PlaneData ut, vt, wt;
+        fill_cells(ut, vt, wt);
+        if (with_index) TrackFittingTestHarness::excl_index_begin(rig.tf, all);
+        rig.tf.update_association(seg, all, ut, vt, wt);
+        if (with_index) TrackFittingTestHarness::excl_index_end(rig.tf);
+        return Kept{ut.associated_2d_points, vt.associated_2d_points, wt.associated_2d_points};
+    }
+
+}  // namespace
+
+TEST_CASE("pr_ml 87b exclusion index: same decisions as the full scan on random segments")
+{
+    Rig rig;
+    std::mt19937 rng(8787);
+    std::uniform_real_distribution<double> ux(0.0, 20.0), uy(-10.0, 10.0), uz(0.0, 20.0), us(0.2, 3.0);
+    std::uniform_int_distribution<int> un(1, 30);
+
+    std::vector<std::shared_ptr<PR::Segment>> all;
+    for (int k = 0; k < 40; ++k) {
+        const int kind = k % 10;
+        const auto pts = random_points(rng, un(rng), ux(rng) * units::cm, uy(rng) * units::cm,
+                                       uz(rng) * units::cm, us(rng) * units::cm);
+        if (kind <= 6) {
+            all.push_back(rig.segment_on_face(0, pts));             // a "fit" cloud on face 0
+        }
+        else if (kind == 7) {
+            auto seg = rig.segment_on_face(0, {});                  // empty "fit" ...
+            seg->dpcloud("main", make_face_cloud(0, pts));          // ... falls back to "main"
+            all.push_back(seg);
+        }
+        else if (kind == 8) {
+            all.push_back(rig.segment_on_face(1, pts));             // face 1 only
+        }
+        else {
+            auto v1 = PR::make_vertex(*rig.graph);
+            auto v2 = PR::make_vertex(*rig.graph);
+            all.push_back(PR::make_segment(*rig.graph, v1, v2));    // no cloud at all
+        }
+    }
+
+    size_t kept_total = 0, cells_total = 0;
+    for (const auto& seg : all) {
+        const Kept full = run(rig, seg, all, false);
+        const Kept indexed = run(rig, seg, all, true);
+        CHECK(full == indexed);
+        kept_total += full.size();
+        cells_total += 3 * 2 * 11 * 11;
+    }
+    // The index answered scans (not only the fallbacks), and the cases are
+    // not degenerate (some cells kept, some dropped).
+    CHECK(TrackFittingTestHarness::excl_index_used(rig.tf) > 0);
+    CHECK(kept_total > 0);
+    CHECK(kept_total < cells_total);
+}
+
+TEST_CASE("pr_ml 87b exclusion index: an exact tie still drops the cell")
+{
+    Rig rig;
+    // The U cell (time 0, wire 2) sits at transverse 2 cm.  The fitted segment
+    // is at 1 cm and the competitor at 3 cm: equal distances, and the keep rule
+    // drops on '<='.
+    auto fitted = rig.segment_on_face(0, {Point(0, -1.0 * units::cm, 0)});
+    auto twin = rig.segment_on_face(0, {Point(0, -3.0 * units::cm, 0)});
+    std::vector<std::shared_ptr<PR::Segment>> all{fitted, twin};
+
+    auto kept = [&](bool with_index) {
+        TrackFitting::PlaneData ut, vt, wt;
+        ut.associated_2d_points.insert(TrackFitting::Coord2D(0, 0, 0, 2, 0, kUlayer));
+        if (with_index) TrackFittingTestHarness::excl_index_begin(rig.tf, all);
+        rig.tf.update_association(fitted, all, ut, vt, wt);
+        if (with_index) TrackFittingTestHarness::excl_index_end(rig.tf);
+        return ut.associated_2d_points.size() == 1;
+    };
+    const size_t used0 = TrackFittingTestHarness::excl_index_used(rig.tf);
+    CHECK_FALSE(kept(false));
+    CHECK_FALSE(kept(true));
+    CHECK(TrackFittingTestHarness::excl_index_used(rig.tf) == used0 + 1);
+}
+
+TEST_CASE("pr_ml 87b exclusion index: clouds with different wpid_params fall back to the full scan")
+{
+    Rig rig;
+    std::mt19937 rng(87);
+    std::vector<std::shared_ptr<PR::Segment>> all;
+    for (int k = 0; k < 6; ++k) {
+        all.push_back(rig.segment_on_face(0, random_points(rng, 10, 5.0 * units::cm, 0.0, 10.0 * units::cm,
+                                                           3.0 * units::cm)));
+    }
+    // One competitor whose cloud carries face-0 params only: one projection no
+    // longer serves every segment, so the index must step aside.
+    std::map<WirePlaneId, std::tuple<Facade::geo_point_t, double, double, double>> face0;
+    face0[WirePlaneId(kAllLayers, 0, 0)] = std::make_tuple(Facade::geo_point_t(0, 0, 0), kAngleU, kAngleV, kAngleW);
+    auto odd = std::make_shared<DynamicPointCloud>(face0);
+    all.push_back(rig.segment_on_face(0, {Point(5.0 * units::cm, 0, 10.0 * units::cm)}));
+    all.back()->dpcloud("fit", odd);
+    all.back()->dpcloud("main", make_face_cloud(0, {Point(5.0 * units::cm, 0, 10.0 * units::cm)}));
+
+    const size_t used0 = TrackFittingTestHarness::excl_index_used(rig.tf);
+    for (const auto& seg : all) {
+        CHECK(run(rig, seg, all, false) == run(rig, seg, all, true));
+    }
+    // The odd segment's "fit" cloud is empty, so its chosen cloud is "main"
+    // (both_face_params) and the params agree: the index stays usable.  Give it
+    // a non-empty odd cloud instead and the index must not be used.
+    DPCBatch b;
+    b.add_point(5.0 * units::cm, 0, 10.0 * units::cm, WirePlaneId(kAllLayers, 0, 0).ident(), nullptr, nullptr, {0, 0, 0},
+                {0.0, 0.0, 0.0});
+    const double angles[3] = {kAngleU, kAngleV, kAngleW};
+    const WirePlaneLayer_t layers[3] = {kUlayer, kVlayer, kWlayer};
+    for (int plane = 0; plane < 3; ++plane) {
+        b.add_proj(5.0 * units::cm, cos(angles[plane]) * 10.0 * units::cm, WirePlaneId(layers[plane], 0, 0).ident());
+        b.end_plane();
+    }
+    odd->add_points(std::move(b));
+    const size_t used1 = TrackFittingTestHarness::excl_index_used(rig.tf);
+    for (const auto& seg : all) {
+        CHECK(run(rig, seg, all, false) == run(rig, seg, all, true));
+    }
+    CHECK(TrackFittingTestHarness::excl_index_used(rig.tf) == used1);
+    CHECK(used1 >= used0);
 }
