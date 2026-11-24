@@ -190,7 +190,7 @@ TEST_CASE("configuration various")
         }
         kp("... std::hash'ed object");
         for (int count=0; count<ntimes; ++count) {
-            shash(Persist::dumps(cfg));
+            (void) shash(Persist::dumps(cfg));
         }
         kp("... std::hash'ed json text");
 

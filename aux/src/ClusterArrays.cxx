@@ -606,8 +606,8 @@ cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
 
         for (size_t ind=0; ind<nedges; ++ind) {
             // ignore old edge ordering (desc_col).
-            const auto& tind = earr[ind][tail_col];
-            const auto& hind = earr[ind][head_col];
+            const auto tind = earr[ind][tail_col];
+            const auto hind = earr[ind][head_col];
             cluster_vertex_t tvtx = tarr[tind][desc_col];
             cluster_vertex_t hvtx = harr[hind][desc_col];
 

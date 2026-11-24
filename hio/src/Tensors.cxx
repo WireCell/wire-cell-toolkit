@@ -42,7 +42,7 @@ namespace WireCell::Hio {
         }
 
         // Map dtype string to HDF5 DataType enum
-        DataType dtype;
+        DataType dtype = DataType::float32;  // always set below or raise<>() throws
         if (dtype_str == "i2") {
             dtype = DataType::int16;
         } else if (dtype_str == "i4") {
