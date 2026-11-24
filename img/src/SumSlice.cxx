@@ -5,9 +5,6 @@
 
 #include "WireCellAux/FrameTools.h"
 
-// Test to see if we can make slice time absolute
-#undef SLICE_START_TIME_IS_RELATIVE
-
 WIRECELL_FACTORY(SumSlicer, WireCell::Img::SumSlicer,
                  WireCell::INamed,
                  WireCell::IFrameSlicer, WireCell::IConfigurable)
@@ -83,12 +80,8 @@ void Img::SumSliceBase::slice(const IFrame::pointer& inframe, slice_map_t& svcma
             size_t slicebin = (tbin + qind) / m_tick_span;
             auto s = svcmap[slicebin];
             if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                const double start = slicebin * span;  // thus relative to slice frame's time.
-#else
-                // Slice start time is absolute with frame time as origin
-                const double start = inframe->time() + slicebin * span;  
-#endif
+                // ISlice::start() is relative to the frame's time.
+                const double start = slicebin * span;
                 svcmap[slicebin] = s = new Img::Data::Slice(inframe, slicebin, start, span);
             }
             s->sum(ich, q);

@@ -19,6 +19,11 @@ using WireCell::String::startswith;
 using WireCell::Aux::SimpleTrace;
 using WireCell::Aux::SimpleFrame;
 
+// Note on time: ISlice::start() is relative to the slice frame's time,
+// and the output frame takes that frame's time as its own.  Clusters read
+// from file lack the original frame time.  See the header and
+// docs/components/BlobSetReframer.md.
+
 Img::BlobSetReframer::BlobSetReframer()
     : Aux::Logger("BlobSetReframer", "img")
 {
@@ -30,7 +35,7 @@ struct FromBlob {
     double tick;
     bool use_error{false};
 
-    ITrace::vector operator()(const IBlob::pointer& iblob, double time0) {
+    ITrace::vector operator()(const IBlob::pointer& iblob) {
         ITrace::vector traces;  // our return value
 
         // Get value to use as frame "charge"
@@ -43,7 +48,9 @@ struct FromBlob {
         const auto& blob = iblob->shape();
         const auto iface = iblob->face();
         const int ticks_in_slice = round(span/tick);
-        const int tbin = round((start - time0)/tick);
+        // Slice start is relative to the slice frame's time, which is
+        // also the output frame's time.
+        const int tbin = round(start/tick);
 
         // check each layer of the blob
         for (const auto& strip : blob.strips()) {
@@ -104,7 +111,7 @@ struct FromActivity {
         return it->second;
     }
 
-    ITrace::vector operator()(const IBlob::pointer& iblob, double time0)
+    ITrace::vector operator()(const IBlob::pointer& iblob)
     {
         ITrace::vector traces;  // our return value
 
@@ -115,7 +122,9 @@ struct FromActivity {
         const auto& blob = iblob->shape();
         const auto iface = iblob->face();
         const int ticks_in_slice = round(span/tick);
-        const int tbin = round((start - time0)/tick);
+        // Slice start is relative to the slice frame's time, which is
+        // also the output frame's time.
+        const int tbin = round(start/tick);
 
         // we do not have easy way to go from wire->chid->ich so go
         // from ich->chid and wire->chid.
@@ -212,11 +221,31 @@ bool Img::BlobSetReframer::operator()(const input_pointer& in, output_pointer& o
     const int ident = in->ident();
     const auto blobs = in->blobs();
 
-    // Find earliest time of all blobs
+    // ISlice::start() is relative to the time of the slice's frame.  Use
+    // that frame time as the output frame time so the output lines up
+    // with the frame the blobs were imaged from.  Note: clusters loaded
+    // from file do not (yet) carry the original frame time, and their
+    // frames have time 0.  See docs/components/BlobSetReframer.md.
     double time0 = 0;
-    for (size_t ind=0; ind<blobs.size(); ++ind) {
-        if (ind) time0 = std::min(time0, blobs[ind]->slice()->start());
-        else time0 = blobs[ind]->slice()->start();
+    bool have_time0 = false;
+    for (const auto& iblob : blobs) {
+        auto islice = iblob->slice();
+        auto iframe = islice ? islice->frame() : nullptr;
+        if (!iframe) {
+            continue;
+        }
+        if (!have_time0) {
+            time0 = iframe->time();
+            have_time0 = true;
+            continue;
+        }
+        if (iframe->time() != time0) {
+            raise<ValueError>("blob set %d has blobs from frames with different times: %f and %f",
+                              ident, time0, iframe->time());
+        }
+    }
+    if (!have_time0 && !blobs.empty()) {
+        log->warn("call={} blob set {} has no slice frame, using output frame time 0", m_count, ident);
     }
 
     for (auto iblob : blobs) {
@@ -224,7 +253,7 @@ bool Img::BlobSetReframer::operator()(const input_pointer& in, output_pointer& o
         auto face = iblob->face();
         const int aid = face->anode();
 
-        auto blob_traces = m_trace_maker(iblob, time0);
+        auto blob_traces = m_trace_maker(iblob);
         // log->debug("call={} aid={} bset={} iblob={} ntraces={}",
         //            m_count, aid, ident, iblob->ident(), blob_traces.size());
         for (auto trace : blob_traces) {

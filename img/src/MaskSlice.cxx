@@ -7,9 +7,6 @@
 
 #include <unordered_set>
 
-// Test to see if we can make slice time absolute
-#undef SLICE_START_TIME_IS_RELATIVE
-
 WIRECELL_FACTORY(MaskSlicer, WireCell::Img::MaskSlicer,
                  WireCell::INamed,
                  WireCell::IFrameSlicer, WireCell::IConfigurable)
@@ -344,12 +341,8 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
             size_t slicebin = (tbin + qind) / m_tick_span;
             auto s = svcmap[slicebin];
             if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                const double start = slicebin * span;  // thus relative to slice frame's time.
-#else
-                // Slice start time is absolute with frame time as origin
-                const double start = in->time() + slicebin * span;  
-#endif
+                // ISlice::start() is relative to the frame's time.
+                const double start = slicebin * span;
                 s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
                 svcmap[slicebin] = s;
             }
@@ -370,12 +363,8 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
             for (size_t slicebin = min_slicebin; slicebin < max_slicebin; ++slicebin) {
                 auto s = svcmap[slicebin];
                 if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                    const double start = slicebin * span;  // thus relative to slice frame's time.
-#else
-                    // Slice start time is absolute with frame time as origin
-                    const double start = in->time() + slicebin * span;  
-#endif
+                    // ISlice::start() is relative to the frame's time.
+                    const double start = slicebin * span;
                     s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
                     svcmap[slicebin] = s;
                 }
@@ -447,11 +436,8 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
                 const size_t slicebin = min_slicebin + i;
                 auto s = svcmap[slicebin];
                 if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                    const double start = slicebin * span;  // thus relative to slice frame's time.
-#else
-                    const double start = in->time() + slicebin * span;
-#endif
+                    // ISlice::start() is relative to the frame's time.
+                    const double start = slicebin * span;
                     s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
                     svcmap[slicebin] = s;
                 }
@@ -489,12 +475,8 @@ void Img::MaskSliceBase::slice(const IFrame::pointer& in, slice_map_t& svcmap)
                 if (slicebin * m_tick_span > (size_t)tbin.second || (slicebin + 1) * m_tick_span <= (size_t)tbin.first) continue;
                 auto s = svcmap[slicebin];
                 if (!s) {
-#ifdef SLICE_START_TIME_IS_RELATIVE
-                    const double start = slicebin * span;  // thus relative to slice frame's time.
-#else
-                    // Slice start time is absolute with frame time as origin
-                    const double start = in->time() + slicebin * span;  
-#endif
+                    // ISlice::start() is relative to the frame's time.
+                    const double start = slicebin * span;
                     s = new Img::Data::Slice(tlframe_ptr, slicebin, start, span);
                     svcmap[slicebin] = s;
                 }
