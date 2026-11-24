@@ -419,7 +419,7 @@ namespace WireCell::Clus::PR {
         bool operator()(const ShowerPtr& a, const ShowerPtr& b) const {
             const int ia = a->get_shower_id();
             const int ib = b->get_shower_id();
-            if (ia == kUnassignedShowerId || ib == kUnassignedShowerId) [[unlikely]] {
+            if (ia == kUnassignedShowerId || ib == kUnassignedShowerId) {
                 static std::atomic<bool> warned{false};
                 if (!warned.exchange(true)) warn_unindexed("PR::Shower");
             }
