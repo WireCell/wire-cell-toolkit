@@ -2045,7 +2045,10 @@ private:
         int n_role1 = 0, n_sel2_only = 0, n_unfit_cells = 0, n_role0 = 0;
         int n_rewired = 0;   // doc pdhd/28
         for (int plane = 0; plane < 3; ++plane) {
-            for (const auto& [key, meas] : *maps[plane]) {
+            // not a structured binding: lambdas below capture `key`, which C++17 (clang) rejects
+            for (const auto& key_meas : *maps[plane]) {
+                const auto& key = key_meas.first;
+                const auto& meas = key_meas.second;
                 auto wit = pa.m_map_apa_ch_plane_wires.find({key.apa, key.channel});
                 if (wit == pa.m_map_apa_ch_plane_wires.end()) continue;
                 // every (face, wire) the readout channel maps to in this plane

@@ -119,7 +119,10 @@ static double kine_charge_from_maps(
 
     for (int plane_id = 0; plane_id < 3; ++plane_id) {
         int plane_sample = 0;  // print first 3 hits per plane for diagnosis
-        for (const auto& [coord_key, charge_data] : *maps[plane_id]) {
+        for (const auto& coord_charge : *maps[plane_id]) {
+            // not a structured binding: C++17 (clang) cannot capture one in a lambda
+            const auto& coord_key = coord_charge.first;
+            const auto& charge_data = coord_charge.second;
             int time_slice = coord_key.time;
             int channel    = coord_key.channel;
             int apa        = coord_key.apa;
@@ -510,7 +513,10 @@ static void kine_charge_owned_scan(
     const ChargeMap* maps[3] = {&charge_2d_u, &charge_2d_v, &charge_2d_w};
 
     for (int plane_id = 0; plane_id < 3; ++plane_id) {
-        for (const auto& [coord_key, charge_data] : *maps[plane_id]) {
+        for (const auto& coord_charge : *maps[plane_id]) {
+            // not a structured binding: C++17 (clang) cannot capture one in a lambda
+            const auto& coord_key = coord_charge.first;
+            const auto& charge_data = coord_charge.second;
             int time_slice = coord_key.time;
             int channel    = coord_key.channel;
             int apa        = coord_key.apa;
