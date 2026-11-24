@@ -723,17 +723,18 @@ cluster_graph_t ClusterArrays::to_cluster(const node_array_set_t& nas,
             const double start = srow[++col];
             const double span = srow[++col];
             
+            // The arrays do not store the frame time (or tick).  Slice
+            // start is relative to the frame time, so the frame time is
+            // unknown here and is set to 0.  Do not derive it from slice
+            // starts.  See docs/components/BlobSetReframer.md.
             std::shared_ptr<SimpleFrame> sframe;
             auto fit = made_frames.find(frame_ident);
             if (fit == made_frames.end()) {
-                sframe = std::make_shared<SimpleFrame>(frame_ident, start /*, tick?*/);
+                sframe = std::make_shared<SimpleFrame>(frame_ident, 0.0 /*, tick?*/);
                 made_frames[frame_ident] = sframe;
             }
             else {
                 sframe = fit->second;
-                if (sframe->time() > start) {
-                    sframe->set_time(start); // the best we can do
-                }
             }
 
             const auto& activities = slice_activities.at(ind);

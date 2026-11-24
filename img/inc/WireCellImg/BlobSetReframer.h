@@ -2,6 +2,15 @@
  *
  * The projection in each view of a blob will produce a trace with
  * total charge equal to the blob's charge value (or uncertainty).
+ *
+ * Time: ISlice::start() is relative to the time of the slice's frame.
+ * The output frame takes its time from the slices' frame and a trace
+ * starts at tbin = round(slice start / tick).  This is correct when the
+ * blobs come straight from a slicer in the same job.  Clusters read
+ * from file do not yet carry the original frame time (their slice
+ * frames have time 0), so the output frame time is then 0.  See
+ * docs/components/BlobSetReframer.md for the problem and suggested
+ * remedies.
  */
 
 #ifndef WIRECELLIMG_BLOBSETREFRAMER
@@ -50,7 +59,7 @@ namespace WireCell::Img {
         /// Config: "measure" - string to determine what kind of value to use as "charge".
         ///
         /// May be one of: "value" or "error".  Default if unset is "value".
-        using trace_maker_f = std::function<ITrace::vector(const IBlob::pointer& iblob, double time0)>;
+        using trace_maker_f = std::function<ITrace::vector(const IBlob::pointer& iblob)>;
         trace_maker_f m_trace_maker;
 
         size_t m_count{0};
