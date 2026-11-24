@@ -355,7 +355,7 @@ namespace WireCell::Clus::PR {
         bool operator()(const VertexPtr& a, const VertexPtr& b) const {
             const size_t ia = a->get_graph_index();
             const size_t ib = b->get_graph_index();
-            if (ia == kUnindexed || ib == kUnindexed) [[unlikely]] {
+            if (ia == kUnindexed || ib == kUnindexed) {
                 // Function-local so the atomic is shared across every
                 // instantiation and the check stays thread-safe; wire-cell runs
                 // these comparators from several worker threads.
@@ -369,7 +369,7 @@ namespace WireCell::Clus::PR {
         bool operator()(const SegmentPtr& a, const SegmentPtr& b) const {
             const size_t ia = a->get_graph_index();
             const size_t ib = b->get_graph_index();
-            if (ia == kUnindexed || ib == kUnindexed) [[unlikely]] {
+            if (ia == kUnindexed || ib == kUnindexed) {
                 static std::atomic<bool> warned{false};
                 if (!warned.exchange(true)) warn_unindexed("PR::Segment");
             }

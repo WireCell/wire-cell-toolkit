@@ -43,19 +43,19 @@ TEST_CASE("wpid params: resolve_wpid_params never throws and prefers the exact k
     const WirePlaneId fb(kAllLayers, 0, 0);
 
     SUBCASE("exact key") {
-        const auto& t = Facade::resolve_wpid_params(p, WirePlaneId(kUlayer, 0, 3), fb);
+        const auto t = Facade::resolve_wpid_params(p, WirePlaneId(kUlayer, 0, 3), fb);
         CHECK(std::get<1>(t) == doctest::Approx(0.13));
     }
     SUBCASE("same (apa, face) under kAllLayers when contained_by answers another layer") {
-        const auto& t = Facade::resolve_wpid_params(p, WirePlaneId(kWlayer, 1, 0), fb);
+        const auto t = Facade::resolve_wpid_params(p, WirePlaneId(kWlayer, 1, 0), fb);
         CHECK(std::get<1>(t) == doctest::Approx(0.11));
     }
     SUBCASE("foreign volume falls back to the caller's key") {
-        const auto& t = Facade::resolve_wpid_params(p, WirePlaneId(kUlayer, 1, 5), fb);
+        const auto t = Facade::resolve_wpid_params(p, WirePlaneId(kUlayer, 1, 5), fb);
         CHECK(std::get<1>(t) == doctest::Approx(0.10));
     }
     SUBCASE("unknown apa/face falls back too") {
-        const auto& t = Facade::resolve_wpid_params(p, WirePlaneId(kUnknownLayer, -1, -1), fb);
+        const auto t = Facade::resolve_wpid_params(p, WirePlaneId(kUnknownLayer, -1, -1), fb);
         CHECK(std::get<1>(t) == doctest::Approx(0.10));
     }
 }
