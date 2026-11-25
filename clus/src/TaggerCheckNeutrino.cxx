@@ -290,6 +290,10 @@ void TaggerCheckNeutrino::configure(const WireCell::Configuration& config)
     m_pr_fit_only              = get(config, "pr_fit_only",              m_pr_fit_only);
     m_pr_external_graph        = get(config, "pr_external_graph",        m_pr_external_graph);
     m_pr_external_max_med_dist = get(config, "pr_external_max_med_dist", m_pr_external_max_med_dist);   // mm
+    // pr_ml doc 92 (O13 / O9 / O18): default false = legacy; act only with pr_fit_only = "external"
+    m_pr_external_all_clusters     = get(config, "pr_external_all_clusters",     m_pr_external_all_clusters);
+    m_pr_external_seg_ids          = get(config, "pr_external_seg_ids",          m_pr_external_seg_ids);
+    m_pr_external_clustering_points = get(config, "pr_external_clustering_points", m_pr_external_clustering_points);
     if (!(m_pr_fit_only.empty() || m_pr_fit_only == "trad" || m_pr_fit_only == "external")) {
         raise<ValueError>("TaggerCheckNeutrino: pr_fit_only must be \"\", \"trad\" or \"external\", not \"%s\"", m_pr_fit_only);
     }
@@ -989,6 +993,9 @@ Configuration TaggerCheckNeutrino::default_configuration() const
     cfg["pr_fit_only"]              = m_pr_fit_only;               // pr_ml doc 79: "" = legacy (full PR chain)
     cfg["pr_external_graph"]        = m_pr_external_graph;         // pr_ml doc 79: graph file for pr_fit_only = "external"
     cfg["pr_external_max_med_dist"] = m_pr_external_max_med_dist;  // pr_ml doc 79: mm
+    cfg["pr_external_all_clusters"] = m_pr_external_all_clusters;  // pr_ml doc 92 O13: false = legacy (main cluster only)
+    cfg["pr_external_seg_ids"]      = m_pr_external_seg_ids;       // pr_ml doc 92 O9: false = legacy
+    cfg["pr_external_clustering_points"] = m_pr_external_clustering_points;  // pr_ml doc 92 O18: false = legacy
     cfg["graph_endpoint_tol"]       = m_graph_endpoint_tol;        // cm
     cfg["oov_prototype_parity"]     = m_oov_prototype_parity;      // false = legacy (today's three polarities)
     cfg["first_seg_local_pca"]      = m_first_seg_local_pca;       // true  = legacy (the refinement runs)
@@ -3728,6 +3735,102 @@ void TaggerCheckNeutrino::visit(Ensemble& ensemble) const
                 if (const auto* qc = track_fitter->get_clump_charges(main_cluster)) {
                     for (size_t k = 0; k < qc->size(); ++k) {
                         SPDLOG_LOGGER_INFO(log, "EXTCLUMP cluster {} clump {} charge {:.6g}", main_cluster->get_cluster_id(), k, qc->at(k));
+                    }
+                }
+                // pr_ml doc 92 (O9 / O13 / O18): every block below is off by default; the main's graph, fit and lines
+                // above are unchanged whichever knob is on (the main is built and fitted first, as the traditional chain
+                // fits the main before the other clusters, TCN "Loop over other (non-main) beam-flash clusters").
+                if (m_pr_external_all_clusters || m_pr_external_seg_ids || m_pr_external_clustering_points) {
+                    const auto tx0 = Clock::now();
+                    std::vector<Facade::Cluster*> allc{main_cluster};
+                    for (auto* c : grouping.children()) if (c != main_cluster) allc.push_back(c);   // tree order
+                    std::vector<const Facade::Cluster*> allcc(allc.begin(), allc.end());
+                    std::vector<Facade::Cluster*> fitted;
+                    if (st.seg_used > 0) fitted.push_back(main_cluster);
+                    PR::ExternalAssignment as;
+                    const bool need_as = m_pr_external_all_clusters || m_pr_external_seg_ids;
+                    if (need_as) as = PR::assign_external_graph(eg, allcc, m_pr_external_max_med_dist * units::mm);
+                    std::map<int, std::pair<int, PR::SegmentPtr>> made;   // file segment index -> (cluster index, segment)
+                    std::map<int, size_t> id2idx;
+                    for (size_t i = 0; i < eg.segments.size(); ++i) id2idx[eg.segments[i].id] = i;
+                    if (need_as) {
+                        int a_main = 0, a_other = 0, a_none = 0, a_none_nearmain = 0;
+                        for (size_t i = 0; i < as.seg_cluster.size(); ++i) {
+                            if (as.seg_cluster[i] == 0) ++a_main;
+                            else if (as.seg_cluster[i] > 0) ++a_other;
+                            else { ++a_none; if (as.seg_nearest[i] == 0) ++a_none_nearmain; }
+                        }
+                        // check: the assignment's main set = the items build_external_graph took for the main
+                        const bool main_equal = (a_main == st.seg_used + st.seg_refused);
+                        SPDLOG_LOGGER_INFO(log, "EXTASSIGN cluster {} clusters {} segments main {} other {} none {} (nearest main {}) "
+                                           "main_set_equal {}",
+                                           main_cluster->get_cluster_id(), allc.size(), a_main, a_other, a_none, a_none_nearmain,
+                                           main_equal ? 1 : 0);
+                        for (const auto& [sid, seg] : st.used) made[static_cast<int>(id2idx.at(sid))] = {0, seg};
+                    }
+                    if (m_pr_external_all_clusters) {
+                        int n_with = 0, n_fit = 0, segs_used = 0, clumps_used = 0;
+                        for (size_t k = 1; k < allc.size(); ++k) {
+                            auto* c = allc[k];
+                            const bool any = std::find(as.seg_cluster.begin(), as.seg_cluster.end(), (int) k) != as.seg_cluster.end() ||
+                                             std::find(as.clump_cluster.begin(), as.clump_cluster.end(), (int) k) != as.clump_cluster.end();
+                            if (!any) continue;
+                            ++n_with;
+                            auto sto = PR::build_external_graph_assigned(pattern_algos, *pr_graph, *c, *track_fitter, m_dv, eg, as, (int) k);
+                            if (sto.seg_used > 0) {
+                                track_fitter->do_multi_tracking(true, true, false, m_fit_exclusion, false, c);
+                                fitted.push_back(c);
+                                ++n_fit;
+                            }
+                            segs_used += sto.seg_used;
+                            clumps_used += sto.clump_used;
+                            for (const auto& [sid, seg] : sto.used) made[static_cast<int>(id2idx.at(sid))] = {(int) k, seg};
+                            int sn = 0, pn = 0, pt = 0;
+                            for (const auto& [sid, seg] : sto.used) {
+                                int nbad = 0;
+                                for (const auto& f : seg->fits()) { ++pt; if (f.dQ < 0) ++nbad; }
+                                pn += nbad;
+                                if (nbad) ++sn;
+                            }
+                            std::vector<double> mo = sto.seg_med_dist;
+                            std::sort(mo.begin(), mo.end());
+                            SPDLOG_LOGGER_INFO(log, "EXTOTHER cluster {} length_cm {:.2f} segments used {} refused {} clumps used {} "
+                                               "med_dist_mm median {:.3f} max {:.3f} fit_points {} nocharge_points {} nocharge_segments {}",
+                                               c->get_cluster_id(), c->get_length() / units::cm, sto.seg_used, sto.seg_refused, sto.clump_used,
+                                               mo.empty() ? -1.0 : mo[mo.size() / 2] / units::mm, mo.empty() ? -1.0 : mo.back() / units::mm,
+                                               pt, pn, sn);
+                            if (const auto* qc = track_fitter->get_clump_charges(c)) {
+                                for (size_t q = 0; q < qc->size(); ++q) {
+                                    SPDLOG_LOGGER_INFO(log, "EXTOCLUMP cluster {} clump {} charge {:.6g}", c->get_cluster_id(), q, qc->at(q));
+                                }
+                            }
+                        }
+                        SPDLOG_LOGGER_INFO(log, "EXTALL main {} clusters {} with_items {} fitted {} segments_used {} clumps_used {} wall_ms {:.0f}",
+                                           main_cluster->get_cluster_id(), allc.size() - 1, n_with, n_fit, segs_used, clumps_used,
+                                           MS(Clock::now() - tx0).count());
+                    }
+                    if (m_pr_external_seg_ids) {
+                        for (size_t i = 0; i < eg.segments.size(); ++i) {
+                            auto it = made.find(static_cast<int>(i));
+                            const int ci = as.seg_cluster[i], ni = as.seg_nearest[i];
+                            std::string why;
+                            int gidx = -1;
+                            if (it != made.end()) {
+                                it->second.second->set_ext_id(eg.segments[i].id);
+                                why = "used";
+                                gidx = (int) it->second.second->get_graph_index();
+                            }
+                            else if (ci >= 0) why = (ci == 0 || m_pr_external_all_clusters) ? "refused" : "other_cluster_not_fitted";
+                            else why = (ni < 0) ? "no_cluster" : "far";
+                            const int cid = (ci >= 0) ? allc[ci]->get_cluster_id() : (ni >= 0 ? allc[ni]->get_cluster_id() : -1);
+                            SPDLOG_LOGGER_INFO(log, "EXTSEG id {} status {} cluster {} main {} graph_index {} med_dist_mm {:.3f}",
+                                               eg.segments[i].id, why, cid, (ci == 0 || (ci < 0 && ni == 0)) ? 1 : 0, gidx,
+                                               std::isfinite(as.seg_md[i]) ? as.seg_md[i] / units::mm : -1.0);
+                        }
+                    }
+                    if (m_pr_external_clustering_points) {
+                        for (auto* c : fitted) pattern_algos.clustering_points(*pr_graph, *c, m_dv);
+                        SPDLOG_LOGGER_INFO(log, "EXTCLPTS clusters {}", fitted.size());
                     }
                 }
             }

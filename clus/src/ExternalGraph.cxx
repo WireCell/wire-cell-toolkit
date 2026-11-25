@@ -14,6 +14,7 @@
 #include "WireCellUtil/String.h"
 
 #include <algorithm>
+#include <limits>
 #include <map>
 
 using namespace WireCell;
@@ -132,6 +133,7 @@ PR::ExternalGraphStats PR::build_external_graph(PatternAlgorithms& pa, Graph& gr
         tf.add_segment(seg);
         ++st.seg_used;
         st.seg_med_dist.push_back(md);
+        st.used.emplace_back(s.id, seg);   // pr_ml doc 92 (O9): bookkeeping only
     }
     std::vector<std::vector<WireCell::Point>> clumps;
     for (const auto& c : eg.clumps) {
@@ -141,6 +143,86 @@ PR::ExternalGraphStats PR::build_external_graph(PatternAlgorithms& pa, Graph& gr
         if (v == 2) ++st.clump_other_nearer;
         if (v != 0) continue;
         clumps.push_back(c.pts);
+        ++st.clump_used;
+    }
+    tf.set_charge_clumps(&cluster, std::move(clumps));
+    return st;
+}
+
+// pr_ml doc 92 (O9 / O13): see ExternalGraph.h.
+PR::ExternalAssignment PR::assign_external_graph(const ExternalGraph& eg, const std::vector<const Facade::Cluster*>& clusters,
+                                                 double max_med_dist)
+{
+    auto nearest = [&](const std::vector<WireCell::Point>& pts, int& ib, double& mb) {
+        ib = -1;
+        mb = std::numeric_limits<double>::infinity();
+        for (size_t k = 0; k < clusters.size(); ++k) {
+            const auto* c = clusters[k];
+            if (!c) continue;
+            if (k > 0 && c->npoints() == 0) continue;
+            const double md = median_distance(*c, pts);
+            if (ib < 0 || md < mb) { ib = static_cast<int>(k); mb = md; }   // strict: ties stay with the earlier cluster
+        }
+    };
+    ExternalAssignment as;
+    for (const auto& s : eg.segments) {
+        int ib; double mb;
+        nearest(s.pts, ib, mb);
+        as.seg_nearest.push_back(ib);
+        as.seg_md.push_back(mb);
+        as.seg_cluster.push_back((ib >= 0 && mb <= max_med_dist) ? ib : -1);
+    }
+    for (const auto& c : eg.clumps) {
+        int ib; double mb;
+        nearest(c.pts, ib, mb);
+        as.clump_nearest.push_back(ib);
+        as.clump_md.push_back(mb);
+        as.clump_cluster.push_back((ib >= 0 && mb <= max_med_dist) ? ib : -1);
+    }
+    return as;
+}
+
+PR::ExternalGraphStats PR::build_external_graph_assigned(PatternAlgorithms& pa, Graph& graph, Facade::Cluster& cluster, TrackFitting& tf,
+                                                         IDetectorVolumes::pointer dv, const ExternalGraph& eg,
+                                                         const ExternalAssignment& as, int index)
+{
+    ExternalGraphStats st;
+    std::map<int, const ExternalGraph::Vtx*> vin;
+    for (const auto& v : eg.vertices) vin[v.id] = &v;
+    std::map<int, VertexPtr> vmade;
+    auto vertex = [&](int id) {
+        auto it = vmade.find(id);
+        if (it != vmade.end()) return it->second;
+        VertexPtr v = make_vertex(graph);
+        v->wcpt().point = vin.at(id)->p;
+        v->cluster(&cluster);
+        vmade[id] = v;
+        return v;
+    };
+    for (size_t i = 0; i < eg.segments.size(); ++i) {
+        const auto& s = eg.segments[i];
+        ++st.seg_read;
+        if (as.seg_cluster[i] != index) {
+            if (as.seg_nearest[i] == index) ++st.seg_skipped;
+            else ++st.seg_other_nearer;
+            continue;
+        }
+        auto seg = pa.create_segment_for_cluster(cluster, dv, s.pts);
+        if (!seg) { ++st.seg_refused; continue; }
+        add_segment(graph, seg, vertex(s.v0), vertex(s.v1));
+        tf.add_segment(seg);
+        ++st.seg_used;
+        st.seg_med_dist.push_back(as.seg_md[i]);
+        st.used.emplace_back(s.id, seg);
+    }
+    std::vector<std::vector<WireCell::Point>> clumps;
+    for (size_t i = 0; i < eg.clumps.size(); ++i) {
+        ++st.clump_read;
+        if (as.clump_cluster[i] != index) {
+            if (as.clump_nearest[i] != index) ++st.clump_other_nearer;
+            continue;
+        }
+        clumps.push_back(eg.clumps[i].pts);
         ++st.clump_used;
     }
     tf.set_charge_clumps(&cluster, std::move(clumps));

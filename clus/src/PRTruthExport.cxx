@@ -91,6 +91,7 @@ namespace {
 
     struct Rows {
         std::vector<int> seg_id, seg_gidx, nu_index, n_fit, n_cloud, n_index, n_exact;
+        std::vector<int> seg_ext_id;   // pr_ml doc 92 (O9)
         std::vector<int> p_seg_id, p_nu_index, p_index, p_src;
         std::vector<double> p_d_join, p_x_raw, p_y_raw, p_z_raw;
     };
@@ -106,6 +107,9 @@ public:
         m_assoc_cloud = get<std::string>(config, "assoc_cloud", m_assoc_cloud);
         m_out_segments = get<std::string>(config, "out_segments", m_out_segments);
         m_out_points = get<std::string>(config, "out_points", m_out_points);
+        // pr_ml doc 92 (O9): false = legacy (no column); true adds pr_segments column seg_ext_id (Segment::ext_id, -1 when
+        // the segment did not come from an external graph file or TaggerCheckNeutrino's pr_external_seg_ids was off).
+        m_seg_ext_id = get<bool>(config, "seg_ext_id", m_seg_ext_id);
     }
 
     WireCell::Configuration default_configuration() const {
@@ -114,6 +118,7 @@ public:
         cfg["assoc_cloud"] = m_assoc_cloud;
         cfg["out_segments"] = m_out_segments;
         cfg["out_points"] = m_out_points;
+        cfg["seg_ext_id"] = m_seg_ext_id;   // pr_ml doc 92 (O9): false = legacy
         return cfg;
     }
 
@@ -216,6 +221,7 @@ public:
                 r.n_cloud.push_back(ncloud);
                 r.n_index.push_back(gind.size());
                 r.n_exact.push_back(nexact);
+                r.seg_ext_id.push_back(seg->ext_id());
             }
         }
 
@@ -233,6 +239,7 @@ public:
             segs.add("n_cloud", PointCloud::Array(r.n_cloud));
             segs.add("n_index", PointCloud::Array(r.n_index));
             segs.add("n_exact", PointCloud::Array(r.n_exact));
+            if (m_seg_ext_id) segs.add("seg_ext_id", PointCloud::Array(r.seg_ext_id));   // pr_ml doc 92 (O9), default off
             lpcs.erase(m_out_segments);
             lpcs.emplace(m_out_segments, std::move(segs));
             lpcs.erase(m_out_points);
@@ -260,6 +267,7 @@ public:
 private:
     std::string m_grouping{"live"};
     std::string m_assoc_cloud{"associate_points"};
+    bool m_seg_ext_id{false};   // pr_ml doc 92 (O9)
     std::string m_out_segments{"pr_segments"};
     std::string m_out_points{"pr_seg_points"};
 };

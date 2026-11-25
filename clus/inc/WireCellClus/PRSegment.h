@@ -178,12 +178,19 @@ namespace WireCell::Clus::PR {
         int id() const { return m_id; }
         void set_id(int id) { m_id = id; }
 
+        /// pr_ml doc 92 (O9): the segment's id in an external graph file (ExternalGraph.h), -1 when none.  Set only by
+        /// TaggerCheckNeutrino's pr_external_seg_ids knob (default off); read only by PRTruthExport's seg_ext_id knob.
+        /// Separate from id(): id() feeds the display / Bee ids and set_id is not neutral.
+        int ext_id() const { return m_ext_id; }
+        void set_ext_id(int id) { m_ext_id = id; }
+
         size_t get_graph_index() const { return m_graph_index; }
         void set_graph_index(size_t idx) { m_graph_index = idx; }
 
     private:
         // Add to PRSegment.h private section:
         int m_id{-1};
+        int m_ext_id{-1};   // pr_ml doc 92 (O9)
         size_t m_graph_index{std::numeric_limits<size_t>::max()};
 
         std::vector<WCPoint> m_wcpts;

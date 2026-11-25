@@ -287,6 +287,17 @@ public:
         std::string m_pr_fit_only{};
         std::string m_pr_external_graph{};
         double m_pr_external_max_med_dist{6.0};   // mm: a segment / clump farther from the main cluster is skipped
+        // pr_ml doc 92 (Xin O13 / O9 / O18, 2026-11-25), all default off and acting only with pr_fit_only = "external":
+        //  all_clusters: after the main (unchanged), every other cluster of the grouping (tree order) gets the file's
+        //    segments / clumps assigned to it (assign_external_graph: nearest cluster, ties to the main) and its own
+        //    do_multi_tracking; a line "EXTOTHER ..." per cluster with any item, "EXTOCLUMP ..." per used clump, one "EXTALL".
+        //  seg_ids: Segment::set_ext_id on every used segment, one "EXTSEG ..." line per file segment (where it went and
+        //    why), and an "EXTASSIGN" line; PRTruthExport's seg_ext_id knob writes the column.
+        //  clustering_points: PatternAlgorithms::clustering_points on every fitted cluster after all fits (fills the
+        //    segments' associate_points, which PRTruthExport's pr_seg_points reads).
+        bool m_pr_external_all_clusters{false};
+        bool m_pr_external_seg_ids{false};
+        bool m_pr_external_clustering_points{false};
         double m_graph_endpoint_tol{0.3};          // cm
         bool   m_oov_prototype_parity{false};      // F2 (all three sites)
         bool   m_first_seg_local_pca{true};        // P2
