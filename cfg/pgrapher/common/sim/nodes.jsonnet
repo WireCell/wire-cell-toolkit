@@ -87,6 +87,29 @@ function(params, tools)
         },
     }, nin=1, nout=1, uses=[anode, tools.random, tools.dft] + pirs),
 
+    // As make_depotransform, but each plane's depo charge is scaled by an
+    // IYZMap (yzmap: its config object) at the depo (y, z).  yzmap_key is the
+    // anode key in the map; empty means the anode type:name.
+    make_depotransform_yz :: function(name, anode, pirs, yzmap, yzmap_key="") g.pnode({
+        type:'DepoTransformYZ',
+        name:name,
+        data: {
+            rng: wc.tn(tools.random),
+            dft: wc.tn(tools.dft),
+            anode: wc.tn(anode),
+            pirs: std.map(function(pir) wc.tn(pir), pirs),
+            fluctuate: params.sim.fluctuate,
+            drift_speed: params.lar.drift_speed,
+            first_frame_number: params.daq.first_frame_number,
+            readout_time: params.sim.ductor.readout_time,
+            start_time: params.sim.ductor.start_time,
+            tick: params.daq.tick,
+            nsigma: 3,
+            yzmap: wc.tn(yzmap),
+            yzmap_key: yzmap_key,
+        },
+    }, nin=1, nout=1, uses=[anode, tools.random, tools.dft, yzmap] + pirs),
+
     make_depotransform_withplane :: function(name, anode, plane, pirs) g.pnode({
         type:'DepoTransform',
         name:name,

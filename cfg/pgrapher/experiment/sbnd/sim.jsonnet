@@ -5,7 +5,11 @@ local sim_maker = import "pgrapher/common/sim/nodes.jsonnet";
 
 
 // return some nodes, includes base sim nodes.
-function(params, tools) {
+//
+// yzmap: optional IYZMap config object.  When given, the depo-to-signal
+// transforms are DepoTransformYZ, which scale each plane's depo charge by the
+// map at the depo (y, z); the map keys are the anode type:names.
+function(params, tools, yzmap=null) {
     local sim = sim_maker(params, tools),
 
     local nanodes = std.length(tools.anodes),
@@ -16,8 +20,11 @@ function(params, tools) {
 
     local zippers = [sim.make_depozipper("depozipper-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0])
                      for n in std.range(0, nanodes-1)],
-    local transforms = [sim.make_depotransform("depotransform-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0])
-                        for n in std.range(0, nanodes-1)],
+    local transforms = [
+        if yzmap == null
+        then sim.make_depotransform("depotransform-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0])
+        else sim.make_depotransform_yz("depotransformyz-"+tools.anodes[n].name, tools.anodes[n], tools.pirs[0], yzmap)
+        for n in std.range(0, nanodes-1)],
     local depos2traces = transforms,
     //local depos2traces = zippers,
 
