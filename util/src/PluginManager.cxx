@@ -29,6 +29,7 @@ PluginManager& WireCell::PluginManager::instance()
 
 WireCell::Plugin* WireCell::PluginManager::add(const std::string& plugin_name, const std::string& libname)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     Plugin* plugin = get(plugin_name);
     if (plugin) {
         l->debug("already have plugin {}", plugin_name);
@@ -70,6 +71,7 @@ WireCell::Plugin* WireCell::PluginManager::add(const std::string& plugin_name, c
 
 WireCell::Plugin* WireCell::PluginManager::get(const std::string& plugin_name)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     auto pit = m_plugins.find(plugin_name);
     if (pit == m_plugins.end()) {
         return nullptr;
@@ -79,6 +81,7 @@ WireCell::Plugin* WireCell::PluginManager::get(const std::string& plugin_name)
 
 WireCell::Plugin* WireCell::PluginManager::find(const std::string& symbol_name)
 {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
     for (auto pit : m_plugins) {
         Plugin* maybe = pit.second;
         if (maybe->contains(symbol_name)) {

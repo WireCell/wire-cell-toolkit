@@ -88,8 +88,61 @@ namespace WireCell {
         void set_loglevel(const std::string& log, const std::string& level = "");
 
         /// Call once after all setup has been done and before
-        /// running.
+        /// running.  Same as init_preconfig() followed by
+        /// init_configure().
         void initialize();
+
+        /// Initialization in two parts, for a host framework that
+        /// must do most of it at construction but can provide some
+        /// component data only later (e.g. a geometry that arrives as
+        /// a framework data product).
+        ///
+        /// init_preconfig() does everything but configuring the
+        /// components: the init_*() steps below, in their order.  It
+        /// is the only part that evaluates the top-level Jsonnet
+        /// configuration, loads plugin libraries and creates factory
+        /// instances, so a host should call it serially, e.g. on its
+        /// main thread.
+        ///
+        /// init_configure() applies the configuration to every
+        /// IConfigurable and then releases the bulk configuration
+        /// data.  It may run on any thread.
+        ///
+        /// Both are serialized across all Main instances in the
+        /// process by one mutex, so several Mains may call them
+        /// concurrently.  (The individual init_*() steps below are
+        /// not locked.)
+        ///
+        /// Components are process-wide singletons per type:name.  If
+        /// a component is in the configuration of more than one live
+        /// Main, the first to configure it owns it: the others skip
+        /// it if their configuration is identical and throw if it
+        /// differs, and only the owner finalizes it.  This keeps one
+        /// Main from reconfiguring a component another may be running.
+        ///
+        /// Each must be called exactly once, in this order.
+        void init_preconfig();
+        void init_configure();
+
+        /// The individual steps of init_preconfig(), in order.  Public
+        /// for hosts that need finer control; most should not.
+
+        /// Set the log patterns and make the "main" logger.
+        void init_logging();
+        /// Evaluate the added configuration files into the
+        /// configuration sequence (the Jsonnet step).
+        void init_load_config();
+        /// Remove the special "wire-cell" entry from the configuration
+        /// sequence and take its plugins and apps.  Throws if there
+        /// are then no apps.
+        void init_main_config();
+        /// Load the plugin libraries.
+        void init_plugins();
+        /// Create every configured component and every app.
+        void init_instantiate();
+        /// Give INamed components their names, then apply the log
+        /// configuration (INamed may have made loggers).
+        void init_names();
 
         /// Run any and all application components once.
         void operator()();

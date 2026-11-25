@@ -94,6 +94,7 @@ namespace WireCell {
         /// Return existing instance of given name or nullptr if not found.
         Interface::pointer find(const std::string& name)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             auto it = m_objects.find(name);
             if (it == m_objects.end()) {
                 return nullptr;
@@ -105,6 +106,10 @@ namespace WireCell {
         Interface::pointer create() { return create(""); }
         Interface::pointer create(const std::string& name)
         {
+            // The lock is held while constructing so that exactly one
+            // instance is made per name.  Recursive in case a
+            // constructor looks up another instance of its own class.
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             auto it = m_objects.find(name);
             if (it == m_objects.end()) {
                 pointer_type p(new Type);
@@ -120,6 +125,10 @@ namespace WireCell {
        private:
         std::unordered_map<std::string, pointer_type> m_objects;
         std::string m_classname;
+        // Guards m_objects: components may be found or created from
+        // several threads (e.g. configure() of different WireCell::Main
+        // instances embedded in a multi-threaded framework).
+        mutable std::recursive_mutex m_mutex;
     };
 
     /** A registry of factories that produce instances which implement
@@ -163,14 +172,20 @@ namespace WireCell {
         }
         size_t hello(const std::string& classname)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_known_types.insert(classname);
             return m_known_types.size();
         }
-        known_type_set known_types() const { return m_known_types; }
+        known_type_set known_types() const
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            return m_known_types;
+        }
 
         /// Register an existing factory by the "class" name of the instance it can create.
         bool associate(const std::string& classname, factory_ptr factory)
         {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_lookup[classname] = factory;
             return true;
         }
@@ -183,6 +198,7 @@ namespace WireCell {
                 return nullptr;
             }
 
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             auto it = m_lookup.find(classname);
             if (it != m_lookup.end()) {
                 return it->second;
@@ -276,6 +292,7 @@ namespace WireCell {
         std::vector<std::string> known_classes()
         {
             std::vector<std::string> ret;
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
             for (auto it : m_lookup) {
                 ret.push_back(it.first);
             }
@@ -285,6 +302,9 @@ namespace WireCell {
        private:
         factory_lookup m_lookup;
         known_type_set m_known_types;
+        // Guards m_lookup and m_known_types.  Not held while a factory
+        // creates an instance (each NamedFactory has its own lock).
+        mutable std::recursive_mutex m_mutex;
     };
 
     /// Singleton interface

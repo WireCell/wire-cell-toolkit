@@ -49,6 +49,7 @@ namespace WireCell {
             double m_drift_speed;
             double m_nsigma;
             int m_frame_count;
+            std::string m_frame_ident{"count"};
             size_t m_count{0};
 
 	    std::vector<int> m_process_planes {0,1,2};
