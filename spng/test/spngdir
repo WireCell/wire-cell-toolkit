@@ -47,6 +47,17 @@ for k,v in dict(
         planes = [0,1,2],
         # Optional, override the default jsonnet.
         wire_cell_config = workflow.basedir + "/spngdir.jsonnet",
+        # Depo "probe": "line" (default) uses ideal line-track depos; "muon"
+        # tracks a MIP muon through edep-sim starting at the same point and in
+        # the same global direction as the line track.
+        probe = "line",
+        # For probe=muon: the edep-sim detector GDML.  Required for probe=muon.
+        # Its active LAr volume must be tagged as a sensitive detector (see
+        # edep-sim inputs/example.gdml) and positioned to contain the tracks in
+        # the same global coordinates the depos use.
+        edep_gdml = "",
+        # For probe=muon: the muon kinetic energy in MeV.
+        muon_energy = "1000",
 ).items():
     config.setdefault(k,v)
 
@@ -67,6 +78,8 @@ known_tiers = ["depos", "signals", "metrics", "mplots", "plots"]
 sig_kinds = ["splat", "osp", "spng"]
 # The config for wire-cell
 wire_cell_config = config['wire_cell_config']
+# The wire-cell config for the edep-sim muon probe (probe=muon).
+muon_jsonnet = workflow.basedir + "/spngdir-muon.jsonnet"
 
 def debug(*args, **kwds):
     return # MAKE QUIET
@@ -152,8 +165,13 @@ rule tracking:
         depos=fname(tier='depos'),
         meta=fname(tier='depos', ext='json'),
     params:
-        offset=tracking_params
+        offset=tracking_params,
+        probe=config['probe'],
+        gdml=config['edep_gdml'],
+        energy=config['muon_energy'],
+        muon_cfg=muon_jsonnet,
     shell: '''
+    # Always produce the truth meta (and the ideal line depos) with detlinegen.
     wcpy gen detlinegen \
     {params.offset} \
     --detector={wildcards.detector} \
@@ -163,6 +181,23 @@ rule tracking:
     --theta_y="{wildcards.ty}*deg" \
     --output_depos {output.depos} \
     --output_meta {output.meta}
+
+    # For the muon probe, replace the line depos with edep-sim depos from a MIP
+    # muon started at the line's p0 in its global direction (dir_glb).
+    if [ "{params.probe}" = "muon" ]; then
+        if [ -z "{params.gdml}" ]; then
+            echo "spngdir: probe=muon requires --config edep_gdml=/path/to/edepsim.gdml" >&2
+            exit 1
+        fi
+        POSDIR=$(python3 -c "import json; m=json.load(open('{output.meta}')); p=m['p0']; d=m['dir_glb']; print(f'{{p[0]}},{{p[1]}},{{p[2]}} {{d[0]}},{{d[1]}},{{d[2]}}')")
+        POS=${{POSDIR%% *}}
+        DIR=${{POSDIR##* }}
+        wire-cell -c {params.muon_cfg} \
+            -A output={output.depos} \
+            -A gdml="{params.gdml}" \
+            -A pos=$POS -A dir=$DIR \
+            -A energy="{params.energy}"
+    fi
     '''
 
 rule all_depos:
