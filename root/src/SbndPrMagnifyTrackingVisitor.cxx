@@ -1282,8 +1282,15 @@ void Root::SbndPrMagnifyTrackingVisitor::write_t_rec_data(TFile* output_tf, Clus
         (void)cluster;
         std::sort(vds.begin(), vds.end(), [&](vertex_desc a, vertex_desc b) {
             auto va = (*graph)[a].vertex, vb = (*graph)[b].vertex;
-            if (!va || !vb) return va < vb;
-            return point_key(va->fit()) < point_key(vb->fit());
+            if (!va || !vb) return va < vb;   // not reached: only vertices with a cluster are collected above
+            const auto ka = point_key(va->fit()), kb = point_key(vb->fit());
+            if (ka != kb) return ka < kb;
+            // An exact tie -- two vertices fitted to one point -- is broken on the graph index (PR::add_vertex
+            // assigns it in insertion order), not left to the input order, which is the setS descriptor
+            // (pointer) order and changes from run to run.  pr_ml doc 87b (2026-11-25 17:50 EST): FD-VD
+            // nue_b11018_e6, two vertices joined by a 2.5 mm segment fitted to one point, swapped their
+            // T_rec_charge rows between runs of one binary.
+            return va->get_graph_index() < vb->get_graph_index();
         });
     }
     for (auto& [cluster, eds] : cluster_edges) {
